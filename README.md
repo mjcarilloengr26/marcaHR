@@ -108,6 +108,45 @@ Any other SMTP provider works the same way — just set `SMTP_HOST`/`SMTP_PORT` 
 "HR/admin" recipients are looked up dynamically from every `users` row with role `admin` or `hr`
 (the accounts created via the Users page), so no extra config is needed for that part.
 
+## Deploying (Vercel + Render)
+
+The frontend is a static build, but the backend keeps its data in a local SQLite file —
+that needs a host with a persistent, always-running process, not a serverless platform
+like Vercel functions (their filesystem is wiped between invocations). The split that works:
+
+- **Frontend → Vercel** (static hosting)
+- **Backend → Render** (or Railway/Fly.io — anywhere with a long-running Node process)
+
+### Backend on Render
+
+1. Sign in at https://render.com and connect this GitHub repo.
+2. Create a new **Web Service**, or use **Blueprint** and point it at this repo's
+   `render.yaml` (already included at the repo root) to have Render configure it automatically.
+3. If configuring manually: root directory `backend`, build command `npm install`,
+   start command `npm start`.
+4. Set environment variables in the Render dashboard: `JWT_SECRET` (a long random string),
+   and optionally `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM` for email notifications.
+5. After it deploys, run the seed script once from Render's **Shell** tab: `npm run seed`.
+6. Copy the service's URL (e.g. `https://marca-hr-backend.onrender.com`).
+
+**Free-tier caveat**: Render's free web services don't include a persistent disk — the
+SQLite file survives while the service stays up, but resets on redeploy, and free
+services spin down after 15 minutes of inactivity and lose data on the next wake-up.
+Fine for testing; for anything real, add Render's paid persistent disk add-on or move
+to a hosted database.
+
+### Frontend on Vercel
+
+1. In the Vercel project's settings, add an environment variable `VITE_API_URL` set to
+   the Render backend URL from above (no trailing slash).
+2. Redeploy — Vite bakes env vars in at build time, so a redeploy is required after
+   changing `VITE_API_URL`.
+
+The frontend already includes a `vercel.json` rewrite so client-side routes (e.g.
+`/employees`) don't 404 on refresh, and `frontend/src/api/client.js` reads `VITE_API_URL`
+to know where to send API requests (falling back to same-origin, for local dev where
+Vite's proxy handles it instead).
+
 ## Roles
 
 - **admin** — full access, including managing user login accounts and roles

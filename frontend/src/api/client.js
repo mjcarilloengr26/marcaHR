@@ -1,4 +1,7 @@
 const TOKEN_KEY = "hr_app_token";
+// In local dev this is empty and Vite's proxy (vite.config.js) forwards /api to the backend.
+// In production (e.g. Vercel), set VITE_API_URL to the deployed backend's origin.
+const API_BASE = import.meta.env.VITE_API_URL || "";
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
@@ -11,7 +14,7 @@ export function setToken(token) {
 
 async function request(path, { method = "GET", body, headers } = {}) {
   const token = getToken();
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE}/api${path}`, {
     method,
     headers: {
       "Content-Type": "application/json",
