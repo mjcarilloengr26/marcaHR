@@ -47,7 +47,7 @@ router.get(
 );
 
 router.post("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
-  const { employee_id, period_month, period_year, base_salary, bonuses, deductions, notes } = req.body || {};
+  const { employee_id, period_month, period_year, base_salary, bonuses, overtime_pay, deductions, notes } = req.body || {};
   if (!employee_id || !period_month || !period_year) {
     return res.status(400).json({ error: "employee_id, period_month and period_year are required" });
   }
@@ -56,16 +56,18 @@ router.post("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
 
   const base = base_salary ?? employee.base_salary;
   const bonus = bonuses || 0;
+  const overtime = overtime_pay || 0;
   const deduction = deductions || 0;
-  const net = base + bonus - deduction;
+  const net = base + bonus + overtime - deduction;
 
   db.prepare(
-    `INSERT INTO payroll_records (employee_id, period_month, period_year, base_salary, bonuses, deductions, net_pay, status, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?)
+    `INSERT INTO payroll_records (employee_id, period_month, period_year, base_salary, bonuses, overtime_pay, deductions, net_pay, status, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?)
        ON CONFLICT(employee_id, period_month, period_year)
        DO UPDATE SET base_salary = excluded.base_salary, bonuses = excluded.bonuses,
-         deductions = excluded.deductions, net_pay = excluded.net_pay, notes = excluded.notes`
-  ).run(employee_id, period_month, period_year, base, bonus, deduction, net, notes || null);
+         overtime_pay = excluded.overtime_pay, deductions = excluded.deductions,
+         net_pay = excluded.net_pay, notes = excluded.notes`
+  ).run(employee_id, period_month, period_year, base, bonus, overtime, deduction, net, notes || null);
 
   // lastInsertRowid is unreliable on the UPDATE path of an upsert, so look the row up by its natural key.
   const record = db
@@ -96,8 +98,8 @@ router.post("/generate", requireAuth, requireRole("admin", "hr"), (req, res) => 
   }
   const employees = db.prepare("SELECT * FROM employees WHERE status = 'active'").all();
   const insert = db.prepare(
-    `INSERT INTO payroll_records (employee_id, period_month, period_year, base_salary, bonuses, deductions, net_pay, status)
-     VALUES (?, ?, ?, ?, 0, 0, ?, 'draft')
+    `INSERT INTO payroll_records (employee_id, period_month, period_year, base_salary, bonuses, overtime_pay, deductions, net_pay, status)
+     VALUES (?, ?, ?, ?, 0, 0, 0, ?, 'draft')
      ON CONFLICT(employee_id, period_month, period_year) DO NOTHING`
   );
   const generated = [];

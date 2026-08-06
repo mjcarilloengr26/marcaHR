@@ -47,10 +47,20 @@ const insertExpenseItem = db.prepare(`
   INSERT INTO expense_items (report_id, expense_date, category, description, amount, receipt_ref)
   VALUES (?, ?, ?, ?, ?, ?)
 `);
+const insertDeal = db.prepare(`
+  INSERT INTO deals (title, customer_name, value, stage, owner_id, expected_close_date, notes)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
+const insertOrder = db.prepare(`
+  INSERT INTO orders (order_number, customer_name, amount, status, owner_id, order_date, notes)
+  VALUES (?, ?, ?, ?, ?, ?, ?)
+`);
 
 const seed = db.transaction(() => {
   // Wipe existing data
   for (const table of [
+    "deals",
+    "orders",
     "expense_items",
     "expense_reports",
     "board_cards",
@@ -282,6 +292,26 @@ const seed = db.transaction(() => {
     null
   ).lastInsertRowid;
   insertExpenseItem.run(draftReportId, `${year}-08-01`, "Registration", "Conference ticket", 4500, "OR-1102");
+
+  // Sales pipeline
+  insertDeal.run("Enterprise rollout - Alta Corp", "Alta Corp", 45000, "lead", staffIds[3], `${year}-09-15`, null);
+  insertDeal.run("Website revamp - Bright Foods", "Bright Foods", 18000, "lead", staffIds[4], `${year}-09-01`, null);
+  insertDeal.run("Support contract - Nomad Logistics", "Nomad Logistics", 12000, "qualified", staffIds[3], `${year}-08-25`, "Budget confirmed");
+  insertDeal.run("Platform license - Verdant Farms", "Verdant Farms", 30000, "qualified", staffIds[4], `${year}-09-05`, null);
+  insertDeal.run("Onboarding package - Solstice Retail", "Solstice Retail", 9500, "proposal", staffIds[3], `${year}-08-20`, "Proposal sent, awaiting feedback");
+  insertDeal.run("Annual renewal - Cobalt Media", "Cobalt Media", 22000, "negotiation", staffIds[4], `${year}-08-18`, "Negotiating discount tier");
+  insertDeal.run("Pilot program - Ironwood Bank", "Ironwood Bank", 60000, "won", staffIds[3], `${year}-07-30`, "Closed — kickoff scheduled");
+  insertDeal.run("Trial upgrade - Marbleton Co", "Marbleton Co", 8000, "lost", staffIds[4], `${year}-07-22`, "Went with a competitor");
+
+  // Orders
+  insertOrder.run("ORD-1001", "Alta Corp", 4500, "placed", staffIds[3], `${year}-08-01`, null);
+  insertOrder.run("ORD-1002", "Bright Foods", 2200, "placed", staffIds[4], `${year}-08-02`, null);
+  insertOrder.run("ORD-1003", "Nomad Logistics", 3100, "processing", staffIds[3], `${year}-07-28`, null);
+  insertOrder.run("ORD-1004", "Verdant Farms", 5600, "processing", staffIds[4], `${year}-07-27`, null);
+  insertOrder.run("ORD-1005", "Solstice Retail", 1800, "shipped", staffIds[3], `${year}-07-20`, "Tracking sent to customer");
+  insertOrder.run("ORD-1006", "Cobalt Media", 7200, "delivered", staffIds[4], `${year}-07-10`, null);
+  insertOrder.run("ORD-1007", "Ironwood Bank", 9800, "delivered", staffIds[3], `${year}-07-05`, null);
+  insertOrder.run("ORD-1008", "Marbleton Co", 1200, "cancelled", staffIds[4], `${year}-07-15`, "Customer changed requirements");
 
   console.log("Seed complete.");
   console.log("Login with:");

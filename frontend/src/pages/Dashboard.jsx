@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
-import ExpenseFunnel from "../components/ExpenseFunnel";
+import Funnel from "../components/Funnel";
 
 export default function Dashboard() {
   const { user, employee } = useAuth();
@@ -83,7 +83,14 @@ export default function Dashboard() {
             </table>
           </div>
 
-          <ExpenseFunnel funnel={stats.expenseFunnel} />
+          <Funnel
+            title="Expense report funnel"
+            subtitle="How liquidation/expense reports move from creation to reimbursement"
+            stages={stats.expenseFunnel?.stages}
+            branchLabel="Rejected"
+            branchCount={stats.expenseFunnel?.rejected}
+            branchUnit="report"
+          />
         </>
       )}
     </div>

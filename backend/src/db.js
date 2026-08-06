@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS payroll_records (
   period_year INTEGER NOT NULL,
   base_salary REAL NOT NULL DEFAULT 0,
   bonuses REAL NOT NULL DEFAULT 0,
+  overtime_pay REAL NOT NULL DEFAULT 0,
   deductions REAL NOT NULL DEFAULT 0,
   net_pay REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','finalized','paid')),
@@ -178,6 +179,30 @@ CREATE TABLE IF NOT EXISTS expense_items (
   amount REAL NOT NULL DEFAULT 0,
   receipt_ref TEXT
 );
+
+CREATE TABLE IF NOT EXISTS deals (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  customer_name TEXT NOT NULL,
+  value REAL NOT NULL DEFAULT 0,
+  stage TEXT NOT NULL DEFAULT 'lead' CHECK(stage IN ('lead','qualified','proposal','negotiation','won','lost')),
+  owner_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  expected_close_date TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  order_number TEXT NOT NULL UNIQUE,
+  customer_name TEXT NOT NULL,
+  amount REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'placed' CHECK(status IN ('placed','processing','shipped','delivered','cancelled')),
+  owner_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  order_date TEXT NOT NULL DEFAULT (date('now')),
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
 // node:sqlite's DatabaseSync has no built-in transaction helper (unlike better-sqlite3),
@@ -217,6 +242,11 @@ for (const col of [
 const employeeColumns = db.prepare("PRAGMA table_info(employees)").all().map((c) => c.name);
 if (!employeeColumns.includes("location_id")) {
   db.exec("ALTER TABLE employees ADD COLUMN location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL");
+}
+
+const payrollColumns = db.prepare("PRAGMA table_info(payroll_records)").all().map((c) => c.name);
+if (!payrollColumns.includes("overtime_pay")) {
+  db.exec("ALTER TABLE payroll_records ADD COLUMN overtime_pay REAL NOT NULL DEFAULT 0");
 }
 
 module.exports = db;

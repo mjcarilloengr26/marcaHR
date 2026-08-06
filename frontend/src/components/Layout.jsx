@@ -13,6 +13,10 @@ const NAV_ITEMS = [
   { to: "/performance", label: "Performance", roles: ["admin", "hr", "employee"] },
   { to: "/board", label: "Task Board", roles: ["admin", "hr", "employee"] },
   { to: "/expenses", label: "Expenses", roles: ["admin", "hr", "employee"] },
+  { section: "Sales", roles: ["admin", "hr"] },
+  { to: "/sales", label: "Sales Dashboard", roles: ["admin", "hr"] },
+  { to: "/deals", label: "Deals", roles: ["admin", "hr"] },
+  { to: "/orders", label: "Orders", roles: ["admin", "hr"] },
   { to: "/users", label: "Users", roles: ["admin"] },
 ];
 
@@ -31,17 +35,23 @@ export default function Layout({ children }) {
       <aside className={menuOpen ? "sidebar open" : "sidebar"}>
         <div className="brand">MARCA GROUP</div>
         <nav>
-          {NAV_ITEMS.filter((item) => item.roles.includes(user?.role)).map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              end={item.to === "/"}
-              className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
-              onClick={() => setMenuOpen(false)}
-            >
-              {item.label}
-            </NavLink>
-          ))}
+          {NAV_ITEMS.filter((item) => item.roles.includes(user?.role)).map((item) =>
+            item.section ? (
+              <div className="nav-section" key={`section-${item.section}`}>
+                {item.section}
+              </div>
+            ) : (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.to === "/"}
+                className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+                onClick={() => setMenuOpen(false)}
+              >
+                {item.label}
+              </NavLink>
+            )
+          )}
         </nav>
       </aside>
       {menuOpen && <div className="sidebar-backdrop" onClick={() => setMenuOpen(false)} />}
