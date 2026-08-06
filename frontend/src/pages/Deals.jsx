@@ -9,6 +9,7 @@ export default function Deals() {
   const [deals, setDeals] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
@@ -48,7 +49,8 @@ export default function Deals() {
     try {
       const payload = { ...form, value: Number(form.value) || 0, owner_id: form.owner_id || null };
       if (editingId) {
-        await api.put(`/deals/${editingId}`, payload);
+        const updated = await api.put(`/deals/${editingId}`, payload);
+        announceAutoOrder(updated);
       } else {
         await api.post("/deals", payload);
       }
@@ -61,9 +63,17 @@ export default function Deals() {
     }
   };
 
+  const announceAutoOrder = (updated) => {
+    if (updated.autoCreatedOrder) {
+      setNotice(`Won! Order ${updated.autoCreatedOrder.order_number} was created automatically and is now in fulfillment.`);
+    }
+  };
+
   const quickSetStage = async (id, stage) => {
+    setNotice("");
     try {
-      await api.put(`/deals/${id}`, { stage });
+      const updated = await api.put(`/deals/${id}`, { stage });
+      announceAutoOrder(updated);
       load();
     } catch (err) {
       setError(err.message);
@@ -71,7 +81,7 @@ export default function Deals() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this deal?")) return;
+    if (!confirm("Delete this opportunity?")) return;
     try {
       await api.del(`/deals/${id}`);
       load();
@@ -84,13 +94,18 @@ export default function Deals() {
     <div>
       <div className="page-header">
         <div>
-          <h1>Deals</h1>
-          <p className="subtitle">Sales pipeline — track opportunities from lead to close</p>
+          <h1>Sales Opportunities</h1>
+          <p className="subtitle">Pipeline — track opportunities from lead to close. Winning one auto-creates an order.</p>
         </div>
-        <button className="btn" onClick={openAdd}>+ Add deal</button>
+        <button className="btn" onClick={openAdd}>+ Add opportunity</button>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+      {notice && (
+        <div className="card" style={{ marginBottom: 16, borderColor: "var(--success)", color: "var(--success)" }}>
+          ✓ {notice}
+        </div>
+      )}
 
       <div className="card">
         <table>
@@ -101,6 +116,7 @@ export default function Deals() {
               <th>Value</th>
               <th>Owner</th>
               <th>Expected close</th>
+              <th>Order</th>
               <th>Stage</th>
               <th></th>
             </tr>
@@ -113,6 +129,7 @@ export default function Deals() {
                 <td>{money(d.value)}</td>
                 <td>{d.owner_name || "—"}</td>
                 <td>{d.expected_close_date || "—"}</td>
+                <td>{d.linked_order_number || "—"}</td>
                 <td>
                   <select value={d.stage} onChange={(e) => quickSetStage(d.id, e.target.value)} style={{ width: "auto" }}>
                     {STAGES.map((s) => (
@@ -128,13 +145,13 @@ export default function Deals() {
             ))}
           </tbody>
         </table>
-        {deals.length === 0 && <div className="empty-state">No deals yet.</div>}
+        {deals.length === 0 && <div className="empty-state">No sales opportunities yet.</div>}
       </div>
 
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
-            <h2>{editingId ? "Edit deal" : "Add deal"}</h2>
+            <h2>{editingId ? "Edit opportunity" : "Add opportunity"}</h2>
             <div className="form-row">
               <label>Title</label>
               <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
@@ -176,7 +193,7 @@ export default function Deals() {
             </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-              <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : editingId ? "Save changes" : "Create deal"}</button>
+              <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : editingId ? "Save changes" : "Create opportunity"}</button>
             </div>
           </form>
         </div>

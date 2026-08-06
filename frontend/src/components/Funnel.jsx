@@ -5,7 +5,7 @@ const RAMPS = {
   5: ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"],
 };
 
-export default function Funnel({ title, subtitle, stages, branchLabel, branchCount, branchUnit = "item" }) {
+export default function Funnel({ title, subtitle, stages, branchLabel, branchCount, branchUnit = "item", branchUnitPlural }) {
   if (!stages) return null;
   const colors = RAMPS[stages.length] || RAMPS[4];
   const maxCount = stages[0]?.count || 0;
@@ -40,8 +40,7 @@ export default function Funnel({ title, subtitle, stages, branchLabel, branchCou
         <div className="funnel-rejected">
           <span className="badge badge-rejected">⚠ {branchLabel}</span>
           <span>
-            {branchCount} {branchUnit}
-            {branchCount === 1 ? "" : "s"} {branchLabel.toLowerCase()}
+            {branchCount} {branchCount === 1 ? branchUnit : branchUnitPlural || `${branchUnit}s`} {branchLabel.toLowerCase()}
           </span>
         </div>
       )}

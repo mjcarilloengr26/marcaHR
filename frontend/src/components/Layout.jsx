@@ -15,7 +15,7 @@ const NAV_ITEMS = [
   { to: "/expenses", label: "Expenses", roles: ["admin", "hr", "employee"] },
   { section: "Sales", roles: ["admin", "hr", "employee"] },
   { to: "/sales", label: "Sales Dashboard", roles: ["admin", "hr"] },
-  { to: "/deals", label: "Deals", roles: ["admin", "hr"] },
+  { to: "/deals", label: "Sales Opportunities", roles: ["admin", "hr"] },
   { to: "/orders", label: "Orders", roles: ["admin", "hr"] },
   { to: "/work-orders", label: "Work Orders", roles: ["admin", "hr", "employee"] },
   { to: "/billing", label: "Billing", roles: ["admin", "hr"] },

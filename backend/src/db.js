@@ -222,6 +222,7 @@ CREATE TABLE IF NOT EXISTS orders (
   amount REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'placed' CHECK(status IN ('placed','processing','shipped','delivered','cancelled')),
   owner_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  deal_id INTEGER UNIQUE REFERENCES deals(id) ON DELETE SET NULL,
   order_date TEXT NOT NULL DEFAULT (date('now')),
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -332,6 +333,15 @@ if (!payrollColumns.includes("overtime_pay")) {
 const expenseReportColumns = db.prepare("PRAGMA table_info(expense_reports)").all().map((c) => c.name);
 if (!expenseReportColumns.includes("cost_center")) {
   db.exec("ALTER TABLE expense_reports ADD COLUMN cost_center TEXT");
+}
+
+// SQLite's ALTER TABLE ADD COLUMN can't carry a UNIQUE constraint, so add the column
+// plain and enforce uniqueness via a separate index (fresh installs get UNIQUE inline
+// in the CREATE TABLE above; this only runs for databases that predate this column).
+const orderColumns = db.prepare("PRAGMA table_info(orders)").all().map((c) => c.name);
+if (!orderColumns.includes("deal_id")) {
+  db.exec("ALTER TABLE orders ADD COLUMN deal_id INTEGER REFERENCES deals(id) ON DELETE SET NULL");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_deal_id ON orders(deal_id) WHERE deal_id IS NOT NULL");
 }
 
 module.exports = db;

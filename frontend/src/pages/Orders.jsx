@@ -100,6 +100,7 @@ export default function Orders() {
               <th>Customer</th>
               <th>Amount</th>
               <th>Owner</th>
+              <th>From opportunity</th>
               <th>Order date</th>
               <th>Status</th>
               <th></th>
@@ -112,6 +113,7 @@ export default function Orders() {
                 <td>{o.customer_name}</td>
                 <td>{money(o.amount)}</td>
                 <td>{o.owner_name || "—"}</td>
+                <td>{o.deal_title || "—"}</td>
                 <td>{o.order_date}</td>
                 <td>
                   <select value={o.status} onChange={(e) => quickSetStatus(o.id, e.target.value)} style={{ width: "auto" }}>

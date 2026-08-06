@@ -6,8 +6,8 @@ const router = express.Router();
 
 router.get("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
   const { status, owner_id } = req.query;
-  let sql = `SELECT o.*, (e.first_name || ' ' || e.last_name) AS owner_name
-             FROM orders o LEFT JOIN employees e ON e.id = o.owner_id WHERE 1=1`;
+  let sql = `SELECT o.*, (e.first_name || ' ' || e.last_name) AS owner_name, d.title AS deal_title
+             FROM orders o LEFT JOIN employees e ON e.id = o.owner_id LEFT JOIN deals d ON d.id = o.deal_id WHERE 1=1`;
   const params = [];
   if (status) {
     sql += " AND o.status = ?";

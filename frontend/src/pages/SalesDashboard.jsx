@@ -95,7 +95,7 @@ export default function SalesDashboard() {
         </div>
         <div className="stat-card">
           <div className="stat-value">{stats.kpis.openDeals}</div>
-          <div className="stat-label">Open deals</div>
+          <div className="stat-label">Open opportunities</div>
         </div>
         <div className="stat-card">
           <div className="stat-value">{money(stats.kpis.ordersRevenue)}</div>
@@ -106,11 +106,12 @@ export default function SalesDashboard() {
       <div className="grid grid-2" style={{ marginBottom: 16 }}>
         <Funnel
           title="Sales pipeline"
-          subtitle="Deals by stage reached"
+          subtitle="Opportunities by stage reached"
           stages={stats.dealFunnel.stages}
           branchLabel="Lost"
           branchCount={stats.dealFunnel.lost}
-          branchUnit="deal"
+          branchUnit="opportunity"
+          branchUnitPlural="opportunities"
         />
         <Funnel
           title="Order fulfillment"
@@ -127,7 +128,7 @@ export default function SalesDashboard() {
           <div>
             <h2>Sales targets</h2>
             <p className="subtitle" style={{ margin: 0 }}>
-              Won deal value + order revenue vs. each rep's target
+              Won opportunity value + order revenue vs. each rep's target
             </p>
           </div>
           <div className="form-inline">
