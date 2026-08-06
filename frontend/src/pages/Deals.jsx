@@ -52,7 +52,8 @@ export default function Deals() {
         const updated = await api.put(`/deals/${editingId}`, payload);
         announceAutoOrder(updated);
       } else {
-        await api.post("/deals", payload);
+        const created = await api.post("/deals", payload);
+        announceAutoOrder(created);
       }
       setShowForm(false);
       load();

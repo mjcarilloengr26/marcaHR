@@ -52,7 +52,15 @@ router.post("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     .run(title, customer_name, value || 0, stage || "lead", owner_id || null, expected_close_date || null, notes || null);
-  res.status(201).json(db.prepare("SELECT * FROM deals WHERE id = ?").get(info.lastInsertRowid));
+
+  const created = db.prepare("SELECT * FROM deals WHERE id = ?").get(info.lastInsertRowid);
+  // An opportunity can be entered as already-won (e.g. logging a deal closed
+  // outside the system) — the win-to-order automation must cover this path too,
+  // not just the stage-transition-via-edit path, or "created as won" silently
+  // skips fulfillment and the dashboards look stale/inconsistent.
+  const autoCreatedOrder = created.stage === "won" ? autoCreateOrderForWonDeal(created) : null;
+
+  res.status(201).json({ ...created, autoCreatedOrder });
 });
 
 router.put("/:id", requireAuth, requireRole("admin", "hr"), (req, res) => {
