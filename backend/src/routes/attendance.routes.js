@@ -4,6 +4,16 @@ const { requireAuth, requireRole, requireSelfOrRole } = require("../middleware/a
 
 const router = express.Router();
 
+// TEMPORARY: one-off cleanup for databases seeded before the "don't seed today"
+// fix, which left every employee with a pre-filled (unusable) clock-in/out for
+// today. Safe to remove after running once against an affected deployment.
+router.post("/maintenance/clear-today", requireAuth, requireRole("admin"), (req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const before = db.prepare("SELECT COUNT(*) AS c FROM attendance WHERE date = ?").get(today).c;
+  db.prepare("DELETE FROM attendance WHERE date = ?").run(today);
+  res.json({ date: today, removed: before });
+});
+
 // Distance in meters between two lat/lng points (haversine).
 function distanceMeters(lat1, lng1, lat2, lng2) {
   const R = 6371000;

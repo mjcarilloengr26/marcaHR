@@ -173,9 +173,11 @@ const seed = db.transaction(() => {
     year
   );
 
-  // Sample attendance for the last 5 days
+  // Sample attendance for the past 5 days. Deliberately starts at i=1 (yesterday), not
+  // today (i=0) — leaving today's record unseeded so the Clock in/out buttons work
+  // immediately for anyone trying the app, instead of showing "already punched" on day one.
   const today = new Date();
-  for (let i = 0; i < 5; i++) {
+  for (let i = 1; i <= 5; i++) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
     const dateStr = d.toISOString().slice(0, 10);
