@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
@@ -17,6 +18,7 @@ const NAV_ITEMS = [
 export default function Layout({ children }) {
   const { user, employee, logout } = useAuth();
   const navigate = useNavigate();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -25,22 +27,35 @@ export default function Layout({ children }) {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <aside className={menuOpen ? "sidebar open" : "sidebar"}>
         <div className="brand">MARCA Group HR</div>
         <nav>
           {NAV_ITEMS.filter((item) => item.roles.includes(user?.role)).map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.to === "/"} className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.to === "/"}
+              className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}
+              onClick={() => setMenuOpen(false)}
+            >
               {item.label}
             </NavLink>
           ))}
         </nav>
       </aside>
+      {menuOpen && <div className="sidebar-backdrop" onClick={() => setMenuOpen(false)} />}
       <div className="main-col">
         <header className="topbar">
-          <div />
+          <button
+            className="menu-toggle"
+            aria-label="Toggle navigation menu"
+            onClick={() => setMenuOpen((open) => !open)}
+          >
+            ☰
+          </button>
           <div className="user-info">
             <span>
-              {employee ? `${employee.first_name} ${employee.last_name}` : user?.email}
+              <span className="user-name">{employee ? `${employee.first_name} ${employee.last_name}` : user?.email}</span>
               <span className="role-badge">{user?.role}</span>
             </span>
             <button className="btn btn-secondary" onClick={handleLogout}>

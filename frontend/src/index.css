@@ -41,6 +41,18 @@ button, input, select, textarea {
   flex-shrink: 0;
 }
 
+.menu-toggle {
+  display: none;
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: var(--text);
+  padding: 4px 8px;
+}
+
+.sidebar-backdrop { display: none; }
+
 .brand {
   font-weight: 700;
   font-size: 18px;
@@ -82,6 +94,7 @@ button, input, select, textarea {
   align-items: center;
   gap: 12px;
   font-size: 14px;
+  margin-left: auto;
 }
 
 .role-badge {
@@ -404,4 +417,52 @@ tbody tr:hover { background: #fafbfc; }
   color: var(--primary);
   border-bottom-color: var(--primary);
   font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+  }
+  .sidebar.open { transform: translateX(0); }
+
+  .sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 18, 25, 0.45);
+    z-index: 99;
+  }
+
+  .menu-toggle { display: block; }
+
+  .topbar { padding: 0 12px; }
+  .user-name { display: none; }
+
+  .content { padding: 14px; }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .grid-4, .grid-2 { grid-template-columns: 1fr; }
+
+  .card { overflow-x: auto; }
+  .card table { min-width: 560px; }
+
+  .form-inline { flex-direction: column; align-items: stretch; }
+  .form-inline .form-row { min-width: 0; }
+
+  .modal { padding: 16px; overflow-x: auto; }
+
+  .login-card { width: 100%; max-width: 340px; margin: 0 16px; }
+
+  .board-column { width: 230px; }
 }
