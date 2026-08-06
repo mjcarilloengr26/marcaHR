@@ -76,24 +76,74 @@ router.get("/", requireAuth, (req, res) => {
              FROM attendance a JOIN employees e ON e.id = a.employee_id WHERE 1=1`;
   const params = [];
 
+  let employeeIdFilter = null;
   if (req.user.role === "employee") {
-    sql += " AND a.employee_id = ?";
-    params.push(req.user.employee_id);
+    employeeIdFilter = req.user.employee_id;
   } else if (req.query.employee_id) {
-    sql += " AND a.employee_id = ?";
-    params.push(req.query.employee_id);
+    employeeIdFilter = req.query.employee_id;
   }
+  if (employeeIdFilter) {
+    sql += " AND a.employee_id = ?";
+    params.push(employeeIdFilter);
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  // A newly-added employee has no attendance row until they clock in (or HR
+  // records one), so the records-only query above would silently omit them —
+  // only surface that gap for "today", since backfilling absent placeholders
+  // across all of history would misrepresent days before the employee existed.
+  let includeTodayPlaceholders = false;
 
   if (req.query.date) {
     sql += " AND a.date = ?";
     params.push(req.query.date);
+    if (req.query.date === today) includeTodayPlaceholders = true;
   } else if (req.query.from && req.query.to) {
     sql += " AND a.date BETWEEN ? AND ?";
     params.push(req.query.from, req.query.to);
+    if (req.query.from <= today && today <= req.query.to) includeTodayPlaceholders = true;
+  } else {
+    includeTodayPlaceholders = true;
   }
 
   sql += " ORDER BY a.date DESC";
-  res.json(db.prepare(sql).all(...params));
+  const records = db.prepare(sql).all(...params);
+
+  if (includeTodayPlaceholders) {
+    let placeholderSql = `SELECT e.id AS employee_id, (e.first_name || ' ' || e.last_name) AS employee_name
+                           FROM employees e
+                           WHERE e.status = 'active'
+                             AND (e.hire_date IS NULL OR e.hire_date <= ?)
+                             AND NOT EXISTS (SELECT 1 FROM attendance a WHERE a.employee_id = e.id AND a.date = ?)`;
+    const placeholderParams = [today, today];
+    if (employeeIdFilter) {
+      placeholderSql += " AND e.id = ?";
+      placeholderParams.push(employeeIdFilter);
+    }
+    const missing = db.prepare(placeholderSql).all(...placeholderParams);
+    for (const m of missing) {
+      records.unshift({
+        id: `placeholder-${m.employee_id}-${today}`,
+        employee_id: m.employee_id,
+        employee_name: m.employee_name,
+        date: today,
+        status: "absent",
+        clock_in: null,
+        clock_in_lat: null,
+        clock_in_lng: null,
+        clock_in_accuracy: null,
+        clock_in_distance_m: null,
+        clock_out: null,
+        clock_out_lat: null,
+        clock_out_lng: null,
+        clock_out_accuracy: null,
+        clock_out_distance_m: null,
+        note: null,
+      });
+    }
+  }
+
+  res.json(records);
 });
 
 // Employee self clock-in/out for today

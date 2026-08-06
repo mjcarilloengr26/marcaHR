@@ -46,6 +46,8 @@ export default function Attendance() {
   const [records, setRecords] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [search, setSearch] = useState("");
+  const [nameSort, setNameSort] = useState(null); // null = default order, "asc" | "desc"
 
   const load = () => api.get("/attendance").then(setRecords).catch((err) => setError(err.message));
 
@@ -55,6 +57,20 @@ export default function Attendance() {
 
   const today = new Date().toISOString().slice(0, 10);
   const todayRecord = records.find((r) => r.date === today && r.employee_id === user.employee_id);
+
+  let displayed = records;
+  if (isHr && search.trim()) {
+    const q = search.trim().toLowerCase();
+    displayed = displayed.filter((r) => (r.employee_name || "").toLowerCase().includes(q));
+  }
+  if (isHr && nameSort) {
+    displayed = [...displayed].sort((a, b) => {
+      const cmp = (a.employee_name || "").localeCompare(b.employee_name || "");
+      return nameSort === "asc" ? cmp : -cmp;
+    });
+  }
+
+  const toggleNameSort = () => setNameSort((prev) => (prev === "asc" ? "desc" : "asc"));
 
   const punch = async (endpoint) => {
     setBusy(true);
@@ -103,6 +119,23 @@ export default function Attendance() {
 
       {error && <div className="error-banner">{error}</div>}
 
+      {isHr && (
+        <div className="card form-inline" style={{ marginBottom: 16 }}>
+          <div className="form-row">
+            <label>Filter by employee</label>
+            <input
+              type="text"
+              placeholder="Search by name…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={toggleNameSort}>
+            Sort by name {nameSort === "asc" ? "▲" : nameSort === "desc" ? "▼" : ""}
+          </button>
+        </div>
+      )}
+
       <div className="card">
         <table>
           <thead>
@@ -117,7 +150,7 @@ export default function Attendance() {
             </tr>
           </thead>
           <tbody>
-            {records.map((r) => (
+            {displayed.map((r) => (
               <tr key={r.id}>
                 {isHr && <td>{r.employee_name}</td>}
                 <td>{r.date}</td>
@@ -131,6 +164,7 @@ export default function Attendance() {
           </tbody>
         </table>
         {records.length === 0 && <div className="empty-state">No attendance records yet.</div>}
+        {records.length > 0 && displayed.length === 0 && <div className="empty-state">No employees match your search.</div>}
       </div>
     </div>
   );

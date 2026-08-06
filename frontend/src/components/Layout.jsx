@@ -4,23 +4,35 @@ import { useAuth } from "../context/AuthContext";
 
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", roles: ["admin", "hr", "employee"] },
+
+  { section: "Workforce", roles: ["admin", "hr"] },
   { to: "/employees", label: "Employees", roles: ["admin", "hr"] },
   { to: "/departments", label: "Departments", roles: ["admin", "hr"] },
   { to: "/locations", label: "Locations", roles: ["admin", "hr"] },
+
+  { section: "HR Operations", roles: ["admin", "hr", "employee"] },
   { to: "/leave", label: "Leave", roles: ["admin", "hr", "employee"] },
   { to: "/attendance", label: "Attendance", roles: ["admin", "hr", "employee"] },
   { to: "/payroll", label: "Payroll", roles: ["admin", "hr", "employee"] },
   { to: "/performance", label: "Performance", roles: ["admin", "hr", "employee"] },
+
+  { section: "Collaboration", roles: ["admin", "hr", "employee"] },
   { to: "/board", label: "Task Board", roles: ["admin", "hr", "employee"] },
   { to: "/expenses", label: "Expenses", roles: ["admin", "hr", "employee"] },
-  { section: "Sales", roles: ["admin", "hr", "employee"] },
+
+  { section: "Sales", roles: ["admin", "hr"] },
   { to: "/sales", label: "Sales Dashboard", roles: ["admin", "hr"] },
   { to: "/deals", label: "Sales Opportunities", roles: ["admin", "hr"] },
   { to: "/orders", label: "Orders", roles: ["admin", "hr"] },
-  { to: "/work-orders", label: "Work Orders", roles: ["admin", "hr", "employee"] },
   { to: "/billing", label: "Billing", roles: ["admin", "hr"] },
+
+  { section: "Fulfillment", roles: ["admin", "hr", "employee"] },
+  { to: "/work-orders", label: "Work Orders", roles: ["admin", "hr", "employee"] },
+
   { section: "Procurement", roles: ["admin", "hr"] },
   { to: "/purchase-orders", label: "Purchase Orders", roles: ["admin", "hr"] },
+
+  { section: "Administration", roles: ["admin"] },
   { to: "/users", label: "Users", roles: ["admin"] },
 ];
 
