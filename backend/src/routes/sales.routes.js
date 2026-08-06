@@ -98,12 +98,18 @@ router.get("/targets", requireAuth, requireRole("admin", "hr"), (req, res) => {
   const { period_type, period_year, period_index } = parsePeriod(req.query);
   const { start, end } = periodDateRange(period_type, period_year, period_index);
 
+  // Include anyone who already owns a deal/order or has a target for this period (as
+  // before), plus every active employee in the Sales department — so a newly hired
+  // sales rep shows up (ready to get a target set) even before they own anything yet.
   const employeeIds = db
     .prepare(
       `SELECT DISTINCT owner_id AS id FROM deals WHERE owner_id IS NOT NULL
        UNION SELECT DISTINCT owner_id AS id FROM orders WHERE owner_id IS NOT NULL
        UNION SELECT employee_id AS id FROM sales_targets
-         WHERE period_type = ? AND period_year = ? AND period_index = ?`
+         WHERE period_type = ? AND period_year = ? AND period_index = ?
+       UNION SELECT e.id AS id FROM employees e
+         JOIN departments d ON d.id = e.department_id
+         WHERE LOWER(d.name) = 'sales' AND e.status = 'active'`
     )
     .all(period_type, period_year, period_index)
     .map((r) => r.id);
