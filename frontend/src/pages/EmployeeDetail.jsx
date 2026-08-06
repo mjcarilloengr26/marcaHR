@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { api } from "../api/client";
 
 export default function EmployeeDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const routerLocation = useLocation();
   const [employee, setEmployee] = useState(null);
   const [departments, setDepartments] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [error, setError] = useState("");
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(Boolean(routerLocation.state?.edit));
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
 
@@ -21,7 +23,9 @@ export default function EmployeeDetail() {
 
   useEffect(() => {
     load();
+    setEditing(Boolean(routerLocation.state?.edit));
     api.get("/departments").then(setDepartments).catch(() => {});
+    api.get("/locations").then(setLocations).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -35,6 +39,7 @@ export default function EmployeeDetail() {
       const updated = await api.put(`/employees/${id}`, {
         ...form,
         department_id: form.department_id || null,
+        location_id: form.location_id || null,
         base_salary: form.base_salary ? Number(form.base_salary) : 0,
       });
       setEmployee(updated);
@@ -87,6 +92,7 @@ export default function EmployeeDetail() {
             <div><strong>Email</strong><div>{employee.email}</div></div>
             <div><strong>Phone</strong><div>{employee.phone || "—"}</div></div>
             <div><strong>Department</strong><div>{employee.department_name || "—"}</div></div>
+            <div><strong>Location (GPS attendance)</strong><div>{employee.location_name || "—"}</div></div>
             <div><strong>Manager</strong><div>{employee.manager_name || "—"}</div></div>
             <div><strong>Hire date</strong><div>{employee.hire_date || "—"}</div></div>
             <div><strong>Status</strong><div><span className={`badge badge-${employee.status}`}>{employee.status}</span></div></div>
@@ -123,6 +129,15 @@ export default function EmployeeDetail() {
                 <option value="">—</option>
                 {departments.map((d) => (
                   <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="form-row">
+              <label>Location (for GPS attendance)</label>
+              <select value={form.location_id || ""} onChange={handleChange("location_id")}>
+                <option value="">—</option>
+                {locations.map((loc) => (
+                  <option key={loc.id} value={loc.id}>{loc.name}</option>
                 ))}
               </select>
             </div>

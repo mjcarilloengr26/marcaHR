@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { to: "/", label: "Dashboard", roles: ["admin", "hr", "employee"] },
   { to: "/employees", label: "Employees", roles: ["admin", "hr"] },
   { to: "/departments", label: "Departments", roles: ["admin", "hr"] },
+  { to: "/locations", label: "Locations", roles: ["admin", "hr"] },
   { to: "/leave", label: "Leave", roles: ["admin", "hr", "employee"] },
   { to: "/attendance", label: "Attendance", roles: ["admin", "hr", "employee"] },
   { to: "/payroll", label: "Payroll", roles: ["admin", "hr", "employee"] },

@@ -83,11 +83,18 @@ When an employee clocks in or out, the app asks the browser for their location
 and GPS accuracy with the attendance record. HR/admin see a 📍 map link per punch
 on the Attendance page.
 
-- If the employee denies or lacks GPS, they can still clock in — the punch is
-  recorded without a location (shown as "—").
-- Optionally set `OFFICE_LAT` / `OFFICE_LNG` in `backend/.env` to your office
-  coordinates: each punch then also records the distance from the office, shown
-  next to the map pin (e.g. "📍 565 m").
+**Locations** (admin/hr, under the "Locations" nav item) are named office sites —
+each with coordinates and a radius — that employees get assigned to from their
+profile page. When an employee has an assigned location, clock-in/out is
+**enforced**, not just recorded: the request is rejected with a clear error if
+they're outside that site's radius, or if location access wasn't granted at all.
+Employees with no assigned location aren't geofenced — their punch is just
+recorded with coordinates (if available) and no restriction.
+
+- A single fallback office can also be set globally via `OFFICE_LAT` / `OFFICE_LNG`
+  (and optional `OFFICE_RADIUS_METERS`, default 1000) in `backend/.env` — used only
+  for employees who don't have a specific location assigned. Useful for a
+  single-site company that doesn't need the Locations page at all.
 - Browser geolocation requires HTTPS (or localhost), so this works on the
   deployed site and in local dev, but not over plain http on a LAN IP.
 

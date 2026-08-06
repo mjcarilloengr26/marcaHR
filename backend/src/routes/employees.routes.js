@@ -10,6 +10,7 @@ const EMPLOYEE_FIELDS = [
   "email",
   "phone",
   "department_id",
+  "location_id",
   "position",
   "manager_id",
   "hire_date",
@@ -20,10 +21,11 @@ const EMPLOYEE_FIELDS = [
 
 router.get("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
   const { department_id, status, q } = req.query;
-  let sql = `SELECT e.*, d.name AS department_name,
+  let sql = `SELECT e.*, d.name AS department_name, l.name AS location_name,
              (m.first_name || ' ' || m.last_name) AS manager_name
              FROM employees e
              LEFT JOIN departments d ON d.id = e.department_id
+             LEFT JOIN locations l ON l.id = e.location_id
              LEFT JOIN employees m ON m.id = e.manager_id
              WHERE 1=1`;
   const params = [];
@@ -46,10 +48,11 @@ router.get("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
 router.get("/:id", requireAuth, requireSelfOrRole((req) => req.params.id, "admin", "hr"), (req, res) => {
   const employee = db
     .prepare(
-      `SELECT e.*, d.name AS department_name,
+      `SELECT e.*, d.name AS department_name, l.name AS location_name,
        (m.first_name || ' ' || m.last_name) AS manager_name
        FROM employees e
        LEFT JOIN departments d ON d.id = e.department_id
+       LEFT JOIN locations l ON l.id = e.location_id
        LEFT JOIN employees m ON m.id = e.manager_id
        WHERE e.id = ?`
     )

@@ -16,23 +16,59 @@ function distanceMeters(lat1, lng1, lat2, lng2) {
   return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
+// The geofence target for an employee: their assigned location (locations table)
+// takes priority; falls back to a single global office via OFFICE_LAT/OFFICE_LNG
+// env vars when the employee has no assigned location. Null means "no geofence" —
+// location is then purely informational, not enforced.
+function resolveTargetLocation(employeeId) {
+  const assigned = db
+    .prepare(
+      `SELECT l.name, l.lat, l.lng, l.radius_meters AS radius
+       FROM employees e JOIN locations l ON l.id = e.location_id
+       WHERE e.id = ?`
+    )
+    .get(employeeId);
+  if (assigned) return assigned;
+
+  const lat = Number(process.env.OFFICE_LAT);
+  const lng = Number(process.env.OFFICE_LNG);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const radius = Number(process.env.OFFICE_RADIUS_METERS);
+  return { name: "the office", lat, lng, radius: Number.isFinite(radius) && radius > 0 ? radius : 1000 };
+}
+
 // Returns {lat, lng, accuracy, distance_m} from the request body, or nulls when
-// the client couldn't provide a location. distance_m is only computed when
-// OFFICE_LAT/OFFICE_LNG are configured.
-function parseLocation(body) {
+// the client couldn't provide a location. distance_m is only computed when a
+// target location (assigned or global) is configured for this employee.
+function parseLocation(body, employeeId) {
   const lat = Number(body?.lat);
   const lng = Number(body?.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return { lat: null, lng: null, accuracy: null, distance_m: null };
   }
   const accuracy = Number.isFinite(Number(body?.accuracy)) ? Number(body.accuracy) : null;
-  const officeLat = Number(process.env.OFFICE_LAT);
-  const officeLng = Number(process.env.OFFICE_LNG);
-  const distance_m =
-    Number.isFinite(officeLat) && Number.isFinite(officeLng)
-      ? distanceMeters(lat, lng, officeLat, officeLng)
-      : null;
+  const target = resolveTargetLocation(employeeId);
+  const distance_m = target ? distanceMeters(lat, lng, target.lat, target.lng) : null;
   return { lat, lng, accuracy, distance_m };
+}
+
+function formatDistance(m) {
+  return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+}
+
+// Enforces the geofence for a self clock-in/out. Only active when the employee has
+// an assigned location or a global office is configured — otherwise there's
+// nothing to check against, so location stays optional/informational.
+function checkGeofence(loc, employeeId) {
+  const target = resolveTargetLocation(employeeId);
+  if (!target) return null;
+  if (loc.lat === null) {
+    return "Location is required to clock in/out. Please allow location access and try again.";
+  }
+  if (loc.distance_m > target.radius) {
+    return `You're ${formatDistance(loc.distance_m)} from ${target.name} — you must be within ${formatDistance(target.radius)} to clock in/out.`;
+  }
+  return null;
 }
 
 router.get("/", requireAuth, (req, res) => {
@@ -65,7 +101,9 @@ router.post("/clock-in", requireAuth, (req, res) => {
   if (!req.user.employee_id) return res.status(400).json({ error: "No employee profile linked to this user" });
   const today = new Date().toISOString().slice(0, 10);
   const now = new Date().toISOString().slice(11, 19);
-  const loc = parseLocation(req.body);
+  const loc = parseLocation(req.body, req.user.employee_id);
+  const geofenceError = checkGeofence(loc, req.user.employee_id);
+  if (geofenceError) return res.status(403).json({ error: geofenceError });
   db.prepare(
     `INSERT INTO attendance (employee_id, date, status, clock_in, clock_in_lat, clock_in_lng, clock_in_accuracy, clock_in_distance_m)
      VALUES (?, ?, 'present', ?, ?, ?, ?, ?)
@@ -83,7 +121,9 @@ router.post("/clock-out", requireAuth, (req, res) => {
   const now = new Date().toISOString().slice(11, 19);
   const record = db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND date = ?").get(req.user.employee_id, today);
   if (!record) return res.status(400).json({ error: "You have not clocked in today" });
-  const loc = parseLocation(req.body);
+  const loc = parseLocation(req.body, req.user.employee_id);
+  const geofenceError = checkGeofence(loc, req.user.employee_id);
+  if (geofenceError) return res.status(403).json({ error: geofenceError });
   db.prepare(
     `UPDATE attendance SET clock_out = ?, clock_out_lat = ?, clock_out_lng = ?,
      clock_out_accuracy = ?, clock_out_distance_m = ? WHERE id = ?`

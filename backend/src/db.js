@@ -16,6 +16,15 @@ CREATE TABLE IF NOT EXISTS departments (
   description TEXT
 );
 
+CREATE TABLE IF NOT EXISTS locations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  lat REAL NOT NULL,
+  lng REAL NOT NULL,
+  radius_meters REAL NOT NULL DEFAULT 1000,
+  address TEXT
+);
+
 CREATE TABLE IF NOT EXISTS employees (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   first_name TEXT NOT NULL,
@@ -23,6 +32,7 @@ CREATE TABLE IF NOT EXISTS employees (
   email TEXT NOT NULL UNIQUE,
   phone TEXT,
   department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+  location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
   position TEXT,
   manager_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   hire_date TEXT,
@@ -202,6 +212,11 @@ for (const col of [
   if (!attendanceColumns.includes(col)) {
     db.exec(`ALTER TABLE attendance ADD COLUMN ${col} REAL`);
   }
+}
+
+const employeeColumns = db.prepare("PRAGMA table_info(employees)").all().map((c) => c.name);
+if (!employeeColumns.includes("location_id")) {
+  db.exec("ALTER TABLE employees ADD COLUMN location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL");
 }
 
 module.exports = db;

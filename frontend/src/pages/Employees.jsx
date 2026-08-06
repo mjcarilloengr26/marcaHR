@@ -8,6 +8,7 @@ const emptyForm = {
   email: "",
   phone: "",
   department_id: "",
+  location_id: "",
   position: "",
   manager_id: "",
   hire_date: "",
@@ -18,6 +19,7 @@ const emptyForm = {
 export default function Employees() {
   const [employees, setEmployees] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [locations, setLocations] = useState([]);
   const [q, setQ] = useState("");
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -31,6 +33,7 @@ export default function Employees() {
 
   useEffect(() => {
     api.get("/departments").then(setDepartments).catch(() => {});
+    api.get("/locations").then(setLocations).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -48,6 +51,7 @@ export default function Employees() {
       await api.post("/employees", {
         ...form,
         department_id: form.department_id || null,
+        location_id: form.location_id || null,
         manager_id: form.manager_id || null,
         base_salary: form.base_salary ? Number(form.base_salary) : 0,
       });
@@ -105,7 +109,10 @@ export default function Employees() {
                 <td>
                   <span className={`badge badge-${e.status}`}>{e.status}</span>
                 </td>
-                <td>
+                <td style={{ display: "flex", gap: 12 }}>
+                  <Link to={`/employees/${e.id}`} state={{ edit: true }} className="link-btn">
+                    Edit
+                  </Link>
                   <Link to={`/employees/${e.id}`} className="link-btn">
                     View →
                   </Link>
@@ -170,6 +177,17 @@ export default function Employees() {
               </div>
             </div>
             <div className="grid grid-2">
+              <div className="form-row">
+                <label>Location (for GPS attendance)</label>
+                <select value={form.location_id} onChange={handleChange("location_id")}>
+                  <option value="">—</option>
+                  {locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="form-row">
                 <label>Hire date</label>
                 <input type="date" value={form.hire_date} onChange={handleChange("hire_date")} />

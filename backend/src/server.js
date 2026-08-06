@@ -16,6 +16,7 @@ const dashboardRoutes = require("./routes/dashboard.routes");
 const usersRoutes = require("./routes/users.routes");
 const boardRoutes = require("./routes/board.routes");
 const expensesRoutes = require("./routes/expenses.routes");
+const locationsRoutes = require("./routes/locations.routes");
 
 const app = express();
 app.use(cors());
@@ -32,6 +33,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/board", boardRoutes);
 app.use("/api/expenses", expensesRoutes);
+app.use("/api/locations", locationsRoutes);
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 

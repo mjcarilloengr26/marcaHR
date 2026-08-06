@@ -6,9 +6,10 @@ function hash(pw) {
 }
 
 const insertDept = db.prepare("INSERT INTO departments (name, description) VALUES (?, ?)");
+const insertLocation = db.prepare("INSERT INTO locations (name, lat, lng, radius_meters, address) VALUES (?, ?, ?, ?, ?)");
 const insertEmployee = db.prepare(`
-  INSERT INTO employees (first_name, last_name, email, phone, department_id, position, manager_id, hire_date, status, base_salary, address)
-  VALUES (@first_name, @last_name, @email, @phone, @department_id, @position, @manager_id, @hire_date, @status, @base_salary, @address)
+  INSERT INTO employees (first_name, last_name, email, phone, department_id, location_id, position, manager_id, hire_date, status, base_salary, address)
+  VALUES (@first_name, @last_name, @email, @phone, @department_id, @location_id, @position, @manager_id, @hire_date, @status, @base_salary, @address)
 `);
 const insertUser = db.prepare(
   "INSERT INTO users (email, password_hash, role, employee_id) VALUES (?, ?, ?, ?)"
@@ -64,6 +65,7 @@ const seed = db.transaction(() => {
     "users",
     "employees",
     "departments",
+    "locations",
   ]) {
     db.prepare(`DELETE FROM ${table}`).run();
   }
@@ -79,6 +81,15 @@ const seed = db.transaction(() => {
     deptIds[name] = info.lastInsertRowid;
   }
 
+  const locationIds = {};
+  for (const [name, lat, lng, radius, address] of [
+    ["Manila HQ", 14.5995, 120.9842, 500, "Ermita, Manila"],
+    ["Cebu Branch", 10.3157, 123.8854, 500, "Cebu City"],
+  ]) {
+    const info = insertLocation.run(name, lat, lng, radius, address);
+    locationIds[name] = info.lastInsertRowid;
+  }
+
   function addEmployee(e) {
     const info = insertEmployee.run({
       manager_id: null,
@@ -86,6 +97,7 @@ const seed = db.transaction(() => {
       base_salary: 0,
       phone: null,
       address: null,
+      location_id: null,
       ...e,
     });
     return info.lastInsertRowid;
@@ -96,6 +108,7 @@ const seed = db.transaction(() => {
     last_name: "Reyes",
     email: "avery.reyes@example.com",
     department_id: deptIds["Human Resources"],
+    location_id: locationIds["Manila HQ"],
     position: "CEO",
     hire_date: "2019-01-15",
     base_salary: 15000,
@@ -107,6 +120,7 @@ const seed = db.transaction(() => {
     last_name: "Natarajan",
     email: "priya.natarajan@example.com",
     department_id: deptIds["Human Resources"],
+    location_id: locationIds["Manila HQ"],
     position: "HR Manager",
     manager_id: ceoId,
     hire_date: "2020-03-01",
@@ -119,6 +133,7 @@ const seed = db.transaction(() => {
     last_name: "Martinez",
     email: "diego.martinez@example.com",
     department_id: deptIds["Engineering"],
+    location_id: locationIds["Manila HQ"],
     position: "Engineering Manager",
     manager_id: ceoId,
     hire_date: "2020-06-15",
@@ -133,13 +148,13 @@ const seed = db.transaction(() => {
   };
 
   const staff = [
-    { first_name: "Jamie", last_name: "Chen", email: "jamie.chen@example.com", department_id: deptIds["Engineering"], position: "Senior Software Engineer", manager_id: engManagerId, hire_date: "2021-02-10", base_salary: 7200, phone: "555-0103" },
-    { first_name: "Morgan", last_name: "Lee", email: "morgan.lee@example.com", department_id: deptIds["Engineering"], position: "Software Engineer", manager_id: engManagerId, hire_date: "2022-05-20", base_salary: 6100, phone: "555-0104" },
-    { first_name: "Sam", last_name: "Okafor", email: "sam.okafor@example.com", department_id: deptIds["Engineering"], position: "QA Engineer", manager_id: engManagerId, hire_date: "2023-01-09", base_salary: 5400, phone: "555-0105" },
-    { first_name: "Taylor", last_name: "Kim", email: "taylor.kim@example.com", department_id: deptIds["Sales"], position: "Sales Lead", manager_id: ceoId, hire_date: "2021-09-01", base_salary: 6800, phone: "555-0106" },
-    { first_name: "Riley", last_name: "Brooks", email: "riley.brooks@example.com", department_id: deptIds["Sales"], position: "Account Executive", manager_id: ceoId, hire_date: "2022-11-14", base_salary: 5200, phone: "555-0107" },
-    { first_name: "Casey", last_name: "Nguyen", email: "casey.nguyen@example.com", department_id: deptIds["Finance"], position: "Financial Analyst", manager_id: hrManagerId, hire_date: "2022-04-04", base_salary: 5900, phone: "555-0108" },
-    { first_name: "Jordan", last_name: "Patel", email: "jordan.patel@example.com", department_id: deptIds["Human Resources"], position: "HR Generalist", manager_id: hrManagerId, hire_date: "2023-07-18", base_salary: 4800, phone: "555-0109" },
+    { first_name: "Jamie", last_name: "Chen", email: "jamie.chen@example.com", department_id: deptIds["Engineering"], location_id: locationIds["Manila HQ"], position: "Senior Software Engineer", manager_id: engManagerId, hire_date: "2021-02-10", base_salary: 7200, phone: "555-0103" },
+    { first_name: "Morgan", last_name: "Lee", email: "morgan.lee@example.com", department_id: deptIds["Engineering"], location_id: locationIds["Manila HQ"], position: "Software Engineer", manager_id: engManagerId, hire_date: "2022-05-20", base_salary: 6100, phone: "555-0104" },
+    { first_name: "Sam", last_name: "Okafor", email: "sam.okafor@example.com", department_id: deptIds["Engineering"], location_id: locationIds["Manila HQ"], position: "QA Engineer", manager_id: engManagerId, hire_date: "2023-01-09", base_salary: 5400, phone: "555-0105" },
+    { first_name: "Taylor", last_name: "Kim", email: "taylor.kim@example.com", department_id: deptIds["Sales"], location_id: locationIds["Cebu Branch"], position: "Sales Lead", manager_id: ceoId, hire_date: "2021-09-01", base_salary: 6800, phone: "555-0106" },
+    { first_name: "Riley", last_name: "Brooks", email: "riley.brooks@example.com", department_id: deptIds["Sales"], location_id: locationIds["Cebu Branch"], position: "Account Executive", manager_id: ceoId, hire_date: "2022-11-14", base_salary: 5200, phone: "555-0107" },
+    { first_name: "Casey", last_name: "Nguyen", email: "casey.nguyen@example.com", department_id: deptIds["Finance"], location_id: locationIds["Manila HQ"], position: "Financial Analyst", manager_id: hrManagerId, hire_date: "2022-04-04", base_salary: 5900, phone: "555-0108" },
+    { first_name: "Jordan", last_name: "Patel", email: "jordan.patel@example.com", department_id: deptIds["Human Resources"], location_id: locationIds["Manila HQ"], position: "HR Generalist", manager_id: hrManagerId, hire_date: "2023-07-18", base_salary: 4800, phone: "555-0109" },
   ];
 
   const staffIds = staff.map(addEmployee);

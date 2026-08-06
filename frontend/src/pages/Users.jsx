@@ -1,13 +1,16 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 
+const emptyForm = { email: "", password: "", role: "employee", employee_id: "" };
+
 export default function Users() {
   const [users, setUsers] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ email: "", password: "", role: "employee", employee_id: "" });
+  const [form, setForm] = useState(emptyForm);
 
   const load = () => api.get("/users").then(setUsers).catch((err) => setError(err.message));
 
@@ -16,14 +19,33 @@ export default function Users() {
     api.get("/employees").then(setEmployees).catch(() => {});
   }, []);
 
+  const openAdd = () => {
+    setEditingId(null);
+    setForm(emptyForm);
+    setShowForm(true);
+  };
+
+  const openEdit = (user) => {
+    setEditingId(user.id);
+    setForm({ email: user.email, password: "", role: user.role, employee_id: user.employee_id || "" });
+    setShowForm(true);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     try {
-      await api.post("/users", { ...form, employee_id: form.employee_id || null });
+      const payload = { ...form, employee_id: form.employee_id || null };
+      if (editingId) {
+        if (!payload.password) delete payload.password;
+        await api.put(`/users/${editingId}`, payload);
+      } else {
+        await api.post("/users", payload);
+      }
       setShowForm(false);
-      setForm({ email: "", password: "", role: "employee", employee_id: "" });
+      setForm(emptyForm);
+      setEditingId(null);
       load();
     } catch (err) {
       setError(err.message);
@@ -49,7 +71,7 @@ export default function Users() {
           <h1>Users</h1>
           <p className="subtitle">Manage login accounts and roles</p>
         </div>
-        <button className="btn" onClick={() => setShowForm(true)}>+ Add user</button>
+        <button className="btn" onClick={openAdd}>+ Add user</button>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
@@ -70,7 +92,8 @@ export default function Users() {
                 <td>{u.email}</td>
                 <td><span className="badge badge-draft">{u.role}</span></td>
                 <td>{u.employee_name || "—"}</td>
-                <td>
+                <td style={{ display: "flex", gap: 6 }}>
+                  <button className="btn btn-sm btn-secondary" onClick={() => openEdit(u)}>Edit</button>
                   <button className="btn btn-sm btn-danger" onClick={() => handleDelete(u.id)}>Delete</button>
                 </td>
               </tr>
@@ -83,14 +106,19 @@ export default function Users() {
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
-            <h2>Add user</h2>
+            <h2>{editingId ? "Edit user" : "Add user"}</h2>
             <div className="form-row">
               <label>Email</label>
               <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required />
             </div>
             <div className="form-row">
-              <label>Password</label>
-              <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
+              <label>Password{editingId ? " (leave blank to keep unchanged)" : ""}</label>
+              <input
+                type="password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                required={!editingId}
+              />
             </div>
             <div className="form-row">
               <label>Role</label>
@@ -111,7 +139,9 @@ export default function Users() {
             </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-              <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : "Create user"}</button>
+              <button type="submit" className="btn" disabled={saving}>
+                {saving ? "Saving…" : editingId ? "Save changes" : "Create user"}
+              </button>
             </div>
           </form>
         </div>

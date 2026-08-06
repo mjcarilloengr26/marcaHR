@@ -6,6 +6,7 @@ import Dashboard from "./pages/Dashboard";
 import Employees from "./pages/Employees";
 import EmployeeDetail from "./pages/EmployeeDetail";
 import Departments from "./pages/Departments";
+import Locations from "./pages/Locations";
 import Leave from "./pages/Leave";
 import Attendance from "./pages/Attendance";
 import Payroll from "./pages/Payroll";
@@ -30,6 +31,7 @@ export default function App() {
       <Route path="/employees" element={<Protected roles={["admin", "hr"]}><Employees /></Protected>} />
       <Route path="/employees/:id" element={<Protected roles={["admin", "hr"]}><EmployeeDetail /></Protected>} />
       <Route path="/departments" element={<Protected roles={["admin", "hr"]}><Departments /></Protected>} />
+      <Route path="/locations" element={<Protected roles={["admin", "hr"]}><Locations /></Protected>} />
       <Route path="/leave" element={<Protected><Leave /></Protected>} />
       <Route path="/attendance" element={<Protected><Attendance /></Protected>} />
       <Route path="/payroll" element={<Protected><Payroll /></Protected>} />
