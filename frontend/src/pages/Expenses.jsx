@@ -1,0 +1,359 @@
+import { useEffect, useState } from "react";
+import { api } from "../api/client";
+import { useAuth } from "../context/AuthContext";
+
+const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+export default function Expenses() {
+  const { user } = useAuth();
+  const isHr = user.role === "admin" || user.role === "hr";
+  const [reports, setReports] = useState([]);
+  const [error, setError] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState({ title: "", cash_advance_amount: "", notes: "" });
+  const [saving, setSaving] = useState(false);
+  const [openId, setOpenId] = useState(null);
+
+  const load = () => api.get("/expenses").then(setReports).catch((err) => setError(err.message));
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const handleCreate = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const report = await api.post("/expenses", {
+        ...form,
+        cash_advance_amount: form.cash_advance_amount ? Number(form.cash_advance_amount) : 0,
+      });
+      setShowForm(false);
+      setForm({ title: "", cash_advance_amount: "", notes: "" });
+      await load();
+      setOpenId(report.id);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <h1>Liquidation &amp; Expense Reports</h1>
+          <p className="subtitle">{isHr ? "Review cash advance liquidations and expense claims" : "Liquidate cash advances and submit expense claims"}</p>
+        </div>
+        <button className="btn" onClick={() => setShowForm(true)}>
+          + New report
+        </button>
+      </div>
+
+      {error && <div className="error-banner">{error}</div>}
+
+      <div className="card">
+        <table>
+          <thead>
+            <tr>
+              {isHr && <th>Employee</th>}
+              <th>Title</th>
+              <th>Cash advance</th>
+              <th>Expenses</th>
+              <th>Balance</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {reports.map((r) => (
+              <tr key={r.id}>
+                {isHr && <td>{r.employee_name}</td>}
+                <td>{r.title}</td>
+                <td>{money(r.cash_advance_amount)}</td>
+                <td>{money(r.total_expenses)}</td>
+                <td>
+                  {r.balance > 0 ? `${money(r.balance)} due to company` : r.balance < 0 ? `${money(-r.balance)} due to employee` : money(0)}
+                </td>
+                <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
+                <td>
+                  <button className="link-btn" onClick={() => setOpenId(r.id)}>
+                    Open →
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {reports.length === 0 && <div className="empty-state">No expense reports yet.</div>}
+      </div>
+
+      {showForm && (
+        <div className="modal-backdrop" onClick={() => setShowForm(false)}>
+          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleCreate}>
+            <h2>New liquidation / expense report</h2>
+            <div className="form-row">
+              <label>Title / purpose</label>
+              <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required autoFocus />
+            </div>
+            <div className="form-row">
+              <label>Cash advance amount</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.cash_advance_amount}
+                onChange={(e) => setForm({ ...form, cash_advance_amount: e.target.value })}
+                placeholder="0.00"
+              />
+            </div>
+            <div className="form-row">
+              <label>Notes</label>
+              <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn" disabled={saving}>
+                {saving ? "Creating…" : "Create report"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {openId && (
+        <ReportDetail
+          id={openId}
+          isHr={isHr}
+          onClose={() => setOpenId(null)}
+          onChanged={load}
+        />
+      )}
+    </div>
+  );
+}
+
+function ReportDetail({ id, isHr, onClose, onChanged }) {
+  const [report, setReport] = useState(null);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [itemForm, setItemForm] = useState({ expense_date: "", category: "", description: "", amount: "", receipt_ref: "" });
+  const [reviewNote, setReviewNote] = useState("");
+
+  const load = () =>
+    api
+      .get(`/expenses/${id}`)
+      .then(setReport)
+      .catch((err) => setError(err.message));
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  const isOwnerEditable = report && report.status === "draft";
+  const canEdit = report && (isHr || isOwnerEditable);
+
+  const addItem = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await api.post(`/expenses/${id}/items`, { ...itemForm, amount: Number(itemForm.amount) });
+      setItemForm({ expense_date: "", category: "", description: "", amount: "", receipt_ref: "" });
+      await load();
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const removeItem = async (itemId) => {
+    try {
+      await api.del(`/expenses/items/${itemId}`);
+      await load();
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const submitReport = async () => {
+    try {
+      await api.put(`/expenses/${id}/submit`, {});
+      await load();
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const setStatus = async (status) => {
+    try {
+      await api.put(`/expenses/${id}/status`, { status, review_note: reviewNote || undefined });
+      await load();
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const deleteReport = async () => {
+    if (!confirm("Delete this report?")) return;
+    try {
+      await api.del(`/expenses/${id}`);
+      onChanged();
+      onClose();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ width: 620 }} onClick={(e) => e.stopPropagation()}>
+        {!report ? (
+          <div className="page-loading">Loading…</div>
+        ) : (
+          <>
+            <div className="page-header" style={{ marginBottom: 12 }}>
+              <div>
+                <h2 style={{ marginBottom: 2 }}>{report.title}</h2>
+                <p className="subtitle" style={{ margin: 0 }}>
+                  {report.employee?.first_name} {report.employee?.last_name}
+                </p>
+              </div>
+              <span className={`badge badge-${report.status}`}>{report.status}</span>
+            </div>
+
+            {error && <div className="error-banner">{error}</div>}
+
+            <div className="grid grid-2" style={{ marginBottom: 16 }}>
+              <div><strong>Cash advance</strong><div>{money(report.cash_advance_amount)}</div></div>
+              <div><strong>Total expenses</strong><div>{money(report.total_expenses)}</div></div>
+              <div>
+                <strong>Balance</strong>
+                <div>
+                  {report.balance > 0
+                    ? `${money(report.balance)} due to company`
+                    : report.balance < 0
+                    ? `${money(-report.balance)} due to employee`
+                    : money(0)}
+                </div>
+              </div>
+              {report.notes && <div><strong>Notes</strong><div>{report.notes}</div></div>}
+            </div>
+
+            <h2>Expense items</h2>
+            <table style={{ marginBottom: 12 }}>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Category</th>
+                  <th>Description</th>
+                  <th>Receipt</th>
+                  <th>Amount</th>
+                  {canEdit && <th></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {report.items.map((it) => (
+                  <tr key={it.id}>
+                    <td>{it.expense_date}</td>
+                    <td>{it.category || "—"}</td>
+                    <td>{it.description || "—"}</td>
+                    <td>{it.receipt_ref || "—"}</td>
+                    <td>{money(it.amount)}</td>
+                    {canEdit && (
+                      <td>
+                        <button className="link-btn" onClick={() => removeItem(it.id)}>
+                          Remove
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {report.items.length === 0 && <div className="empty-state">No items yet.</div>}
+
+            {canEdit && (
+              <form className="form-inline card" onSubmit={addItem} style={{ marginBottom: 16 }}>
+                <div className="form-row">
+                  <label>Date</label>
+                  <input type="date" value={itemForm.expense_date} onChange={(e) => setItemForm({ ...itemForm, expense_date: e.target.value })} required />
+                </div>
+                <div className="form-row">
+                  <label>Category</label>
+                  <input value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })} placeholder="Meals, transport…" />
+                </div>
+                <div className="form-row" style={{ flex: 1 }}>
+                  <label>Description</label>
+                  <input value={itemForm.description} onChange={(e) => setItemForm({ ...itemForm, description: e.target.value })} />
+                </div>
+                <div className="form-row">
+                  <label>Receipt #</label>
+                  <input value={itemForm.receipt_ref} onChange={(e) => setItemForm({ ...itemForm, receipt_ref: e.target.value })} />
+                </div>
+                <div className="form-row">
+                  <label>Amount</label>
+                  <input type="number" step="0.01" value={itemForm.amount} onChange={(e) => setItemForm({ ...itemForm, amount: e.target.value })} required />
+                </div>
+                <button type="submit" className="btn btn-sm" disabled={saving}>
+                  {saving ? "Adding…" : "+ Add item"}
+                </button>
+              </form>
+            )}
+
+            {isHr && report.status === "submitted" && (
+              <div className="form-row">
+                <label>Review note (optional)</label>
+                <textarea rows={2} value={reviewNote} onChange={(e) => setReviewNote(e.target.value)} />
+              </div>
+            )}
+
+            <div className="modal-actions" style={{ justifyContent: "space-between" }}>
+              <div>
+                {isOwnerEditable && (
+                  <button className="btn btn-danger btn-sm" onClick={deleteReport}>
+                    Delete
+                  </button>
+                )}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {isOwnerEditable && (
+                  <button className="btn" onClick={submitReport}>
+                    Submit for approval
+                  </button>
+                )}
+                {isHr && report.status === "submitted" && (
+                  <>
+                    <button className="btn btn-danger" onClick={() => setStatus("rejected")}>
+                      Reject
+                    </button>
+                    <button className="btn" onClick={() => setStatus("approved")}>
+                      Approve
+                    </button>
+                  </>
+                )}
+                {isHr && report.status === "approved" && (
+                  <button className="btn" onClick={() => setStatus("reimbursed")}>
+                    Mark reimbursed
+                  </button>
+                )}
+                <button className="btn btn-secondary" onClick={onClose}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,42 @@
+const express = require("express");
+const db = require("../db");
+const { requireAuth } = require("../middleware/auth");
+
+const router = express.Router();
+
+router.get("/stats", requireAuth, (req, res) => {
+  if (req.user.role === "employee") {
+    const employeeId = req.user.employee_id;
+    const pendingLeave = db
+      .prepare("SELECT COUNT(*) AS c FROM leave_requests WHERE employee_id = ? AND status = 'pending'")
+      .get(employeeId).c;
+    const today = new Date().toISOString().slice(0, 10);
+    const todayAttendance = db
+      .prepare("SELECT * FROM attendance WHERE employee_id = ? AND date = ?")
+      .get(employeeId, today);
+    const latestReview = db
+      .prepare(
+        `SELECT r.*, rc.name AS cycle_name FROM performance_reviews r
+         JOIN review_cycles rc ON rc.id = r.cycle_id
+         WHERE r.employee_id = ? AND r.status != 'draft' ORDER BY r.created_at DESC LIMIT 1`
+      )
+      .get(employeeId);
+    return res.json({ role: "employee", pendingLeave, todayAttendance: todayAttendance || null, latestReview: latestReview || null });
+  }
+
+  const totalEmployees = db.prepare("SELECT COUNT(*) AS c FROM employees WHERE status = 'active'").get().c;
+  const totalDepartments = db.prepare("SELECT COUNT(*) AS c FROM departments").get().c;
+  const pendingLeaveRequests = db.prepare("SELECT COUNT(*) AS c FROM leave_requests WHERE status = 'pending'").get().c;
+  const today = new Date().toISOString().slice(0, 10);
+  const presentToday = db.prepare("SELECT COUNT(*) AS c FROM attendance WHERE date = ? AND status = 'present'").get(today).c;
+  const byDepartment = db
+    .prepare(
+      `SELECT d.name, COUNT(e.id) AS count FROM departments d
+       LEFT JOIN employees e ON e.department_id = d.id AND e.status = 'active'
+       GROUP BY d.id ORDER BY d.name`
+    )
+    .all();
+  res.json({ role: req.user.role, totalEmployees, totalDepartments, pendingLeaveRequests, presentToday, byDepartment });
+});
+
+module.exports = router;
