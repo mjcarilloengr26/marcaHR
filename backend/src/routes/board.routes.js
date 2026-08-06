@@ -5,6 +5,18 @@ const { notifyCardAssigned } = require("../notifications");
 
 const router = express.Router();
 
+// Anyone can create/read cards (shared team board), but editing, moving, or deleting
+// an existing card is limited to HR/admin, whoever is assigned to it, or whoever
+// created it — otherwise any authenticated employee could reassign or delete
+// someone else's card, which is the one write-path in this codebase that lacked an
+// ownership check that every comparable module (leave, expenses, work orders) has.
+function canManageCard(req, card) {
+  const isHr = ["admin", "hr"].includes(req.user.role);
+  const isAssignee = req.user.employee_id && req.user.employee_id === card.employee_id;
+  const isCreator = req.user.employee_id && req.user.employee_id === card.created_by;
+  return isHr || isAssignee || isCreator;
+}
+
 router.get("/", requireAuth, (req, res) => {
   const columns = db.prepare("SELECT * FROM board_columns ORDER BY position, id").all();
   const cards = db
@@ -68,6 +80,7 @@ router.post("/cards", requireAuth, (req, res) => {
 router.put("/cards/:id", requireAuth, (req, res) => {
   const existing = db.prepare("SELECT * FROM board_cards WHERE id = ?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "Card not found" });
+  if (!canManageCard(req, existing)) return res.status(403).json({ error: "Insufficient permissions" });
   const { title, description, employee_id, due_date } = req.body || {};
   const nextEmployeeId = employee_id !== undefined ? employee_id : existing.employee_id;
   db.prepare(
@@ -93,6 +106,7 @@ router.put("/cards/:id/move", requireAuth, (req, res) => {
   }
   const card = db.prepare("SELECT * FROM board_cards WHERE id = ?").get(req.params.id);
   if (!card) return res.status(404).json({ error: "Card not found" });
+  if (!canManageCard(req, card)) return res.status(403).json({ error: "Insufficient permissions" });
   const column = db.prepare("SELECT * FROM board_columns WHERE id = ?").get(column_id);
   if (!column) return res.status(404).json({ error: "Column not found" });
 
@@ -129,6 +143,7 @@ router.put("/cards/:id/move", requireAuth, (req, res) => {
 router.delete("/cards/:id", requireAuth, (req, res) => {
   const existing = db.prepare("SELECT * FROM board_cards WHERE id = ?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "Card not found" });
+  if (!canManageCard(req, existing)) return res.status(403).json({ error: "Insufficient permissions" });
   db.prepare("DELETE FROM board_cards WHERE id = ?").run(req.params.id);
   res.status(204).end();
 });

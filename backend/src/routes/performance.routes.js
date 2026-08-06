@@ -83,18 +83,27 @@ router.post("/reviews", requireAuth, requireRole("admin", "hr"), (req, res) => {
 
 router.put("/reviews/:id/status", requireAuth, (req, res) => {
   const { status } = req.body || {};
+  if (!["draft", "submitted", "acknowledged"].includes(status)) {
+    return res.status(400).json({ error: "Invalid status" });
+  }
+
   const review = db.prepare("SELECT * FROM performance_reviews WHERE id = ?").get(req.params.id);
   if (!review) return res.status(404).json({ error: "Review not found" });
 
   const isHr = ["admin", "hr"].includes(req.user.role);
   const isSubject = req.user.employee_id === review.employee_id;
 
+  // Blanket check first: only HR/admin or the reviewed employee may touch this
+  // review at all — without this, any authenticated employee could read and
+  // rewrite the status of anyone else's review via an arbitrary :id.
+  if (!isHr && !isSubject) return res.status(403).json({ error: "Insufficient permissions" });
+
   if (status === "submitted" && !isHr) return res.status(403).json({ error: "Only HR/admin can submit reviews" });
   if (status === "acknowledged" && !isSubject) {
     return res.status(403).json({ error: "Only the reviewed employee can acknowledge a review" });
   }
-  if (!["draft", "submitted", "acknowledged"].includes(status)) {
-    return res.status(400).json({ error: "Invalid status" });
+  if (status === "draft" && !isHr) {
+    return res.status(403).json({ error: "Only HR/admin can reset a review to draft" });
   }
 
   db.prepare("UPDATE performance_reviews SET status = ? WHERE id = ?").run(status, req.params.id);
