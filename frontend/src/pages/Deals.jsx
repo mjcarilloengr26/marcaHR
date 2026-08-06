@@ -3,7 +3,7 @@ import { api } from "../api/client";
 
 const emptyForm = { title: "", customer_name: "", value: "", stage: "lead", owner_id: "", expected_close_date: "", notes: "" };
 const STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"];
-const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 export default function Deals() {
   const [deals, setDeals] = useState([]);

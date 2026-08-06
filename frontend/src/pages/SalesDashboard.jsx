@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import Funnel from "../components/Funnel";
 import Meter from "../components/Meter";
 
-const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 const MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 function periodLabel(periodType, year, index) {

@@ -3,7 +3,7 @@ import { api } from "../api/client";
 
 const emptyForm = { invoice_number: "", order_id: "", customer_name: "", amount: "", status: "draft", issue_date: "", due_date: "", notes: "" };
 const STATUSES = ["draft", "sent", "paid", "overdue", "cancelled"];
-const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 export default function Billing() {
   const [invoices, setInvoices] = useState([]);

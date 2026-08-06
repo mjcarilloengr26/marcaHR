@@ -125,11 +125,11 @@ export default function Payroll() {
               <tr key={r.id}>
                 {isHr && <td>{r.employee_name}</td>}
                 <td>{MONTH_NAMES[r.period_month]} {r.period_year}</td>
-                <td>${Number(r.base_salary).toLocaleString()}</td>
-                <td>${Number(r.bonuses).toLocaleString()}</td>
-                <td>${Number(r.overtime_pay || 0).toLocaleString()}</td>
-                <td>${Number(r.deductions).toLocaleString()}</td>
-                <td><strong>${Number(r.net_pay).toLocaleString()}</strong></td>
+                <td>₱{Number(r.base_salary).toLocaleString()}</td>
+                <td>₱{Number(r.bonuses).toLocaleString()}</td>
+                <td>₱{Number(r.overtime_pay || 0).toLocaleString()}</td>
+                <td>₱{Number(r.deductions).toLocaleString()}</td>
+                <td><strong>₱{Number(r.net_pay).toLocaleString()}</strong></td>
                 <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
                 {isHr && (
                   <td style={{ display: "flex", gap: 6 }}>

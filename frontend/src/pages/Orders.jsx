@@ -3,7 +3,7 @@ import { api } from "../api/client";
 
 const emptyForm = { order_number: "", customer_name: "", amount: "", status: "placed", owner_id: "", order_date: "", notes: "" };
 const STATUSES = ["placed", "processing", "shipped", "delivered", "cancelled"];
-const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 export default function Orders() {
   const [orders, setOrders] = useState([]);
