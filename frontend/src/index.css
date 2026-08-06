@@ -390,6 +390,56 @@ tbody tr:hover { background: #fafbfc; }
   margin-top: 18px;
 }
 
+.funnel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+.funnel-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 100px;
+  align-items: center;
+  gap: 12px;
+}
+.funnel-label {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: right;
+}
+.funnel-track {
+  height: 24px;
+  display: flex;
+  align-items: center;
+}
+.funnel-bar {
+  height: 24px;
+  margin: 0 auto;
+  border-radius: 6px;
+  transition: width 0.3s ease;
+  min-width: 2px;
+}
+.funnel-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.funnel-pct {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.funnel-rejected {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
 .location-link {
   color: var(--primary);
   text-decoration: none;

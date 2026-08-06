@@ -28,7 +28,7 @@ export default function Layout({ children }) {
   return (
     <div className="app-shell">
       <aside className={menuOpen ? "sidebar open" : "sidebar"}>
-        <div className="brand">MARCA Group HR</div>
+        <div className="brand">MARCA GROUP</div>
         <nav>
           {NAV_ITEMS.filter((item) => item.roles.includes(user?.role)).map((item) => (
             <NavLink

@@ -29,7 +29,7 @@ export default function Login() {
   return (
     <div className="login-screen">
       <form className="login-card" onSubmit={handleSubmit}>
-        <h1>MARCA Group HR</h1>
+        <h1>MARCA GROUP</h1>
         <p className="subtitle">Sign in to continue</p>
         {error && <div className="error-banner">{error}</div>}
         <div className="form-row">

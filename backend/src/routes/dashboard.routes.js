@@ -36,7 +36,43 @@ router.get("/stats", requireAuth, (req, res) => {
        GROUP BY d.id ORDER BY d.name`
     )
     .all();
-  res.json({ role: req.user.role, totalEmployees, totalDepartments, pendingLeaveRequests, presentToday, byDepartment });
+
+  // Expense/liquidation report funnel: each stage counts reports that reached that
+  // stage or further (status is a checkpoint each report passes through in order,
+  // except "rejected", which branches off after submission rather than continuing).
+  const expenseCounts = db
+    .prepare("SELECT status, COUNT(*) AS c FROM expense_reports GROUP BY status")
+    .all()
+    .reduce((acc, row) => ({ ...acc, [row.status]: row.c }), {});
+  const created =
+    (expenseCounts.draft || 0) +
+    (expenseCounts.submitted || 0) +
+    (expenseCounts.approved || 0) +
+    (expenseCounts.reimbursed || 0) +
+    (expenseCounts.rejected || 0);
+  const submittedOrBeyond =
+    (expenseCounts.submitted || 0) + (expenseCounts.approved || 0) + (expenseCounts.reimbursed || 0) + (expenseCounts.rejected || 0);
+  const approvedOrBeyond = (expenseCounts.approved || 0) + (expenseCounts.reimbursed || 0);
+  const reimbursed = expenseCounts.reimbursed || 0;
+  const expenseFunnel = {
+    stages: [
+      { key: "created", label: "Created", count: created },
+      { key: "submitted", label: "Submitted", count: submittedOrBeyond },
+      { key: "approved", label: "Approved", count: approvedOrBeyond },
+      { key: "reimbursed", label: "Reimbursed", count: reimbursed },
+    ],
+    rejected: expenseCounts.rejected || 0,
+  };
+
+  res.json({
+    role: req.user.role,
+    totalEmployees,
+    totalDepartments,
+    pendingLeaveRequests,
+    presentToday,
+    byDepartment,
+    expenseFunnel,
+  });
 });
 
 module.exports = router;

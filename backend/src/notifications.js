@@ -20,7 +20,7 @@ function notifyLeaveSubmitted({ employee_id, leave_type_name, start_date, end_da
   sendMail({
     to: getHrEmails(),
     subject: `New leave request — ${fullName(emp)}`,
-    text: `${fullName(emp)} requested ${days} day(s) of ${leave_type_name} leave, ${start_date} to ${end_date}.\n\nReview it in MARCA Group HR.`,
+    text: `${fullName(emp)} requested ${days} day(s) of ${leave_type_name} leave, ${start_date} to ${end_date}.\n\nReview it in MARCA GROUP.`,
   });
 }
 
@@ -40,7 +40,7 @@ function notifyExpenseSubmitted({ employee_id, title }) {
   sendMail({
     to: getHrEmails(),
     subject: `New expense report submitted — ${fullName(emp)}`,
-    text: `${fullName(emp)} submitted an expense report: "${title}".\n\nReview it in MARCA Group HR.`,
+    text: `${fullName(emp)} submitted an expense report: "${title}".\n\nReview it in MARCA GROUP.`,
   });
 }
 

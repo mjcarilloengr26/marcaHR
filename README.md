@@ -1,4 +1,4 @@
-# MARCA Group HR
+# MARCA GROUP
 
 A full-stack HRIS: employee records, departments, leave management, attendance,
 payroll, performance reviews, an HR task board (Trello-style), and liquidation/expense
