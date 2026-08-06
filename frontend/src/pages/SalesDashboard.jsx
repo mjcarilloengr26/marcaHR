@@ -1,16 +1,76 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import Funnel from "../components/Funnel";
+import Meter from "../components/Meter";
 
 const money = (n) => `$${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+const MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function periodLabel(periodType, year, index) {
+  if (periodType === "yearly") return `${year}`;
+  if (periodType === "quarterly") return `Q${index} ${year}`;
+  return `${MONTH_NAMES[index]} ${year}`;
+}
 
 export default function SalesDashboard() {
   const [stats, setStats] = useState(null);
+  const [targets, setTargets] = useState([]);
   const [error, setError] = useState("");
+  const now = new Date();
+  const [periodType, setPeriodType] = useState("monthly");
+  const [periodIndex, setPeriodIndex] = useState(now.getMonth() + 1);
+  const [year, setYear] = useState(now.getFullYear());
+  const [editingTarget, setEditingTarget] = useState(null);
+  const [targetAmount, setTargetAmount] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const loadTargets = () =>
+    api
+      .get(`/sales/targets?period_type=${periodType}&year=${year}&index=${periodIndex}`)
+      .then(setTargets)
+      .catch((err) => setError(err.message));
 
   useEffect(() => {
     api.get("/sales/stats").then(setStats).catch((err) => setError(err.message));
   }, []);
+
+  useEffect(() => {
+    loadTargets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [periodType, periodIndex, year]);
+
+  const changePeriodType = (type) => {
+    setPeriodType(type);
+    if (type === "monthly") setPeriodIndex(now.getMonth() + 1);
+    else if (type === "quarterly") setPeriodIndex(Math.floor(now.getMonth() / 3) + 1);
+    else setPeriodIndex(0);
+  };
+
+  const openEdit = (row) => {
+    setEditingTarget(row);
+    setTargetAmount(row.target_amount || "");
+  };
+
+  const saveTarget = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await api.post("/sales/targets", {
+        employee_id: editingTarget.employee_id,
+        period_type: periodType,
+        period_year: year,
+        period_index: periodIndex,
+        target_amount: Number(targetAmount) || 0,
+      });
+      setEditingTarget(null);
+      loadTargets();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (error) return <div className="error-banner">{error}</div>;
   if (!stats) return <div className="page-loading">Loading…</div>;
@@ -43,7 +103,7 @@ export default function SalesDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-2">
+      <div className="grid grid-2" style={{ marginBottom: 16 }}>
         <Funnel
           title="Sales pipeline"
           subtitle="Deals by stage reached"
@@ -61,6 +121,85 @@ export default function SalesDashboard() {
           branchUnit="order"
         />
       </div>
+
+      <div className="card">
+        <div className="page-header" style={{ marginBottom: 4 }}>
+          <div>
+            <h2>Sales targets</h2>
+            <p className="subtitle" style={{ margin: 0 }}>
+              Won deal value + order revenue vs. each rep's target
+            </p>
+          </div>
+          <div className="form-inline">
+            <div className="form-row">
+              <label>Period</label>
+              <select value={periodType} onChange={(e) => changePeriodType(e.target.value)}>
+                <option value="monthly">Monthly</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+            {periodType === "monthly" && (
+              <div className="form-row">
+                <label>Month</label>
+                <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
+                  {MONTH_NAMES.slice(1).map((name, i) => (
+                    <option key={name} value={i + 1}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {periodType === "quarterly" && (
+              <div className="form-row">
+                <label>Quarter</label>
+                <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
+                  <option value={1}>Q1</option>
+                  <option value={2}>Q2</option>
+                  <option value={3}>Q3</option>
+                  <option value={4}>Q4</option>
+                </select>
+              </div>
+            )}
+            <div className="form-row">
+              <label>Year</label>
+              <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} />
+            </div>
+          </div>
+        </div>
+
+        {targets.length === 0 && (
+          <div className="empty-state">No sales employees found for {periodLabel(periodType, year, periodIndex)}.</div>
+        )}
+        {targets.map((row) => (
+          <Meter
+            key={row.employee_id}
+            label={row.employee_name}
+            value={row.actual_amount}
+            max={row.target_amount}
+            formatValue={money}
+            onEdit={() => openEdit(row)}
+          />
+        ))}
+      </div>
+
+      {editingTarget && (
+        <div className="modal-backdrop" onClick={() => setEditingTarget(null)}>
+          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={saveTarget}>
+            <h2>Set target — {editingTarget.employee_name}</h2>
+            <p className="subtitle" style={{ marginTop: -8 }}>
+              {periodLabel(periodType, year, periodIndex)}
+            </p>
+            <div className="form-row">
+              <label>Target amount</label>
+              <input type="number" value={targetAmount} onChange={(e) => setTargetAmount(e.target.value)} autoFocus />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setEditingTarget(null)}>Cancel</button>
+              <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : "Save target"}</button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

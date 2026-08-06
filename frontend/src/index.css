@@ -451,6 +451,45 @@ tbody tr:hover { background: #fafbfc; }
   color: var(--text-muted);
 }
 
+.meter-row {
+  display: grid;
+  grid-template-columns: 130px 1fr 190px 90px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.meter-row:last-child { border-bottom: none; }
+.meter-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.meter-track {
+  height: 10px;
+  background: #eef0ff;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.meter-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+.meter-fill-complete { background: var(--success); }
+.meter-value {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.meter-pct { color: var(--text); font-weight: 600; }
+.meter-edit { font-size: 12px; white-space: nowrap; }
+
+@media (max-width: 768px) {
+  .meter-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 .location-link {
   color: var(--primary);
   text-decoration: none;

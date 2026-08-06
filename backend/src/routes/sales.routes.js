@@ -63,4 +63,116 @@ router.get("/stats", requireAuth, requireRole("admin", "hr"), (req, res) => {
   });
 });
 
+// Sales targets: a revenue goal per employee for a monthly, quarterly, or yearly
+// period, tracked against actual achieved (won deal value + non-cancelled order
+// amount) within that date range — dated by expected_close_date for deals and
+// order_date for orders, since neither table tracks a separate "actually closed
+// on" timestamp. period_index is the month (1-12) for monthly, quarter (1-4) for
+// quarterly, or unused (0) for yearly.
+function periodDateRange(periodType, year, index) {
+  if (periodType === "yearly") {
+    return { start: `${year}-01-01`, end: `${year}-12-31` };
+  }
+  const startMonth = periodType === "quarterly" ? (index - 1) * 3 + 1 : index;
+  const endMonth = periodType === "quarterly" ? startMonth + 2 : startMonth;
+  const lastDay = new Date(year, endMonth, 0).getDate();
+  return {
+    start: `${year}-${String(startMonth).padStart(2, "0")}-01`,
+    end: `${year}-${String(endMonth).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+  };
+}
+
+function parsePeriod(query) {
+  const period_type = ["monthly", "quarterly", "yearly"].includes(query.period_type) ? query.period_type : "monthly";
+  const period_year = Number(query.year) || new Date().getFullYear();
+  let period_index = Number(query.index);
+  if (!Number.isFinite(period_index)) {
+    if (period_type === "monthly") period_index = new Date().getMonth() + 1;
+    else if (period_type === "quarterly") period_index = Math.floor(new Date().getMonth() / 3) + 1;
+    else period_index = 0;
+  }
+  return { period_type, period_year, period_index };
+}
+
+router.get("/targets", requireAuth, requireRole("admin", "hr"), (req, res) => {
+  const { period_type, period_year, period_index } = parsePeriod(req.query);
+  const { start, end } = periodDateRange(period_type, period_year, period_index);
+
+  const employeeIds = db
+    .prepare(
+      `SELECT DISTINCT owner_id AS id FROM deals WHERE owner_id IS NOT NULL
+       UNION SELECT DISTINCT owner_id AS id FROM orders WHERE owner_id IS NOT NULL
+       UNION SELECT employee_id AS id FROM sales_targets
+         WHERE period_type = ? AND period_year = ? AND period_index = ?`
+    )
+    .all(period_type, period_year, period_index)
+    .map((r) => r.id);
+
+  const wonByOwner = db
+    .prepare(
+      `SELECT owner_id, COALESCE(SUM(value), 0) AS v FROM deals
+       WHERE stage = 'won' AND owner_id IS NOT NULL AND expected_close_date BETWEEN ? AND ?
+       GROUP BY owner_id`
+    )
+    .all(start, end)
+    .reduce((acc, r) => ({ ...acc, [r.owner_id]: r.v }), {});
+
+  const orderByOwner = db
+    .prepare(
+      `SELECT owner_id, COALESCE(SUM(amount), 0) AS v FROM orders
+       WHERE status != 'cancelled' AND owner_id IS NOT NULL AND order_date BETWEEN ? AND ?
+       GROUP BY owner_id`
+    )
+    .all(start, end)
+    .reduce((acc, r) => ({ ...acc, [r.owner_id]: r.v }), {});
+
+  const targets = db
+    .prepare("SELECT * FROM sales_targets WHERE period_type = ? AND period_year = ? AND period_index = ?")
+    .all(period_type, period_year, period_index)
+    .reduce((acc, r) => ({ ...acc, [r.employee_id]: r }), {});
+
+  const rows = employeeIds.map((id) => {
+    const employee = db.prepare("SELECT first_name, last_name FROM employees WHERE id = ?").get(id);
+    const actual = (wonByOwner[id] || 0) + (orderByOwner[id] || 0);
+    const target = targets[id]?.target_amount || 0;
+    return {
+      employee_id: id,
+      employee_name: employee ? `${employee.first_name} ${employee.last_name}` : "Unknown",
+      target_id: targets[id]?.id || null,
+      target_amount: target,
+      actual_amount: actual,
+      percent: target > 0 ? Math.round((actual / target) * 100) : null,
+    };
+  });
+
+  rows.sort((a, b) => a.employee_name.localeCompare(b.employee_name));
+  res.json(rows);
+});
+
+router.post("/targets", requireAuth, requireRole("admin", "hr"), (req, res) => {
+  const { employee_id, period_type, period_year, period_index, target_amount } = req.body || {};
+  if (!employee_id || !period_type || !period_year || target_amount === undefined) {
+    return res.status(400).json({ error: "employee_id, period_type, period_year and target_amount are required" });
+  }
+  if (!["monthly", "quarterly", "yearly"].includes(period_type)) {
+    return res.status(400).json({ error: "period_type must be monthly, quarterly or yearly" });
+  }
+  const index = period_type === "yearly" ? 0 : Number(period_index) || 0;
+  db.prepare(
+    `INSERT INTO sales_targets (employee_id, period_type, period_year, period_index, target_amount)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(employee_id, period_type, period_year, period_index) DO UPDATE SET target_amount = excluded.target_amount`
+  ).run(employee_id, period_type, period_year, index, Number(target_amount) || 0);
+  res.status(201).json(
+    db
+      .prepare("SELECT * FROM sales_targets WHERE employee_id = ? AND period_type = ? AND period_year = ? AND period_index = ?")
+      .get(employee_id, period_type, period_year, index)
+  );
+});
+
+router.delete("/targets/:id", requireAuth, requireRole("admin", "hr"), (req, res) => {
+  db.prepare("DELETE FROM sales_targets WHERE id = ?").run(req.params.id);
+  res.status(204).end();
+});
+
 module.exports = router;

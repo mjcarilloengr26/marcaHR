@@ -55,10 +55,15 @@ const insertOrder = db.prepare(`
   INSERT INTO orders (order_number, customer_name, amount, status, owner_id, order_date, notes)
   VALUES (?, ?, ?, ?, ?, ?, ?)
 `);
+const insertSalesTarget = db.prepare(`
+  INSERT INTO sales_targets (employee_id, period_type, period_year, period_index, target_amount)
+  VALUES (?, ?, ?, ?, ?)
+`);
 
 const seed = db.transaction(() => {
   // Wipe existing data
   for (const table of [
+    "sales_targets",
     "deals",
     "orders",
     "expense_items",
@@ -312,6 +317,17 @@ const seed = db.transaction(() => {
   insertOrder.run("ORD-1006", "Cobalt Media", 7200, "delivered", staffIds[4], `${year}-07-10`, null);
   insertOrder.run("ORD-1007", "Ironwood Bank", 9800, "delivered", staffIds[3], `${year}-07-05`, null);
   insertOrder.run("ORD-1008", "Marbleton Co", 1200, "cancelled", staffIds[4], `${year}-07-15`, "Customer changed requirements");
+
+  // Sales targets — set for the current month/quarter/year so the dashboard's
+  // default view shows real progress against the seeded deals/orders above.
+  const currentMonth = today.getMonth() + 1;
+  const currentQuarter = Math.floor(today.getMonth() / 3) + 1;
+  insertSalesTarget.run(staffIds[3], "monthly", year, currentMonth, 6000);
+  insertSalesTarget.run(staffIds[4], "monthly", year, currentMonth, 2000);
+  insertSalesTarget.run(staffIds[3], "quarterly", year, currentQuarter, 90000);
+  insertSalesTarget.run(staffIds[4], "quarterly", year, currentQuarter, 12000);
+  insertSalesTarget.run(staffIds[3], "yearly", year, 0, 200000);
+  insertSalesTarget.run(staffIds[4], "yearly", year, 0, 50000);
 
   console.log("Seed complete.");
   console.log("Login with:");

@@ -9,6 +9,17 @@ const db = new DatabaseSync(path.join(dataDir, "hr.db"));
 db.exec("PRAGMA journal_mode = WAL");
 db.exec("PRAGMA foreign_keys = ON");
 
+// sales_targets' shape changed (monthly-only -> monthly/quarterly/yearly) before this
+// table was ever deployed anywhere, so drop and let CREATE TABLE recreate it below
+// rather than carrying migration logic for a shape with no real data at stake.
+const existingTargetsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sales_targets'").get();
+if (existingTargetsTable) {
+  const cols = db.prepare("PRAGMA table_info(sales_targets)").all().map((c) => c.name);
+  if (cols.includes("period_month")) {
+    db.exec("DROP TABLE sales_targets");
+  }
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS departments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -202,6 +213,17 @@ CREATE TABLE IF NOT EXISTS orders (
   order_date TEXT NOT NULL DEFAULT (date('now')),
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sales_targets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  period_type TEXT NOT NULL DEFAULT 'monthly' CHECK(period_type IN ('monthly','quarterly','yearly')),
+  period_year INTEGER NOT NULL,
+  period_index INTEGER NOT NULL DEFAULT 0,
+  target_amount REAL NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(employee_id, period_type, period_year, period_index)
 );
 `);
 
