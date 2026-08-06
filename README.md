@@ -76,6 +76,21 @@ Visit http://localhost:5173 and log in with one of the sample accounts above.
 The frontend dev server proxies `/api` requests to the backend, so no extra
 configuration is needed.
 
+## GPS attendance
+
+When an employee clocks in or out, the app asks the browser for their location
+(they'll see the standard browser permission prompt) and stores the coordinates
+and GPS accuracy with the attendance record. HR/admin see a 📍 map link per punch
+on the Attendance page.
+
+- If the employee denies or lacks GPS, they can still clock in — the punch is
+  recorded without a location (shown as "—").
+- Optionally set `OFFICE_LAT` / `OFFICE_LNG` in `backend/.env` to your office
+  coordinates: each punch then also records the distance from the office, shown
+  next to the map pin (e.g. "📍 565 m").
+- Browser geolocation requires HTTPS (or localhost), so this works on the
+  deployed site and in local dev, but not over plain http on a LAN IP.
+
 ## Email notifications
 
 The backend sends email notifications for:

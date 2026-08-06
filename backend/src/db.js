@@ -78,6 +78,14 @@ CREATE TABLE IF NOT EXISTS attendance (
   status TEXT NOT NULL DEFAULT 'present' CHECK(status IN ('present','absent','late','half_day','leave')),
   clock_in TEXT,
   clock_out TEXT,
+  clock_in_lat REAL,
+  clock_in_lng REAL,
+  clock_in_accuracy REAL,
+  clock_in_distance_m REAL,
+  clock_out_lat REAL,
+  clock_out_lng REAL,
+  clock_out_accuracy REAL,
+  clock_out_distance_m REAL,
   note TEXT,
   UNIQUE(employee_id, date)
 );
@@ -177,5 +185,23 @@ db.transaction = function (fn) {
     }
   };
 };
+
+// Lightweight migration for databases created before the GPS columns existed:
+// CREATE TABLE IF NOT EXISTS doesn't alter existing tables, so add any missing columns here.
+const attendanceColumns = db.prepare("PRAGMA table_info(attendance)").all().map((c) => c.name);
+for (const col of [
+  "clock_in_lat",
+  "clock_in_lng",
+  "clock_in_accuracy",
+  "clock_in_distance_m",
+  "clock_out_lat",
+  "clock_out_lng",
+  "clock_out_accuracy",
+  "clock_out_distance_m",
+]) {
+  if (!attendanceColumns.includes(col)) {
+    db.exec(`ALTER TABLE attendance ADD COLUMN ${col} REAL`);
+  }
+}
 
 module.exports = db;
