@@ -2,6 +2,9 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 
+const db = require("./db");
+const seed = require("./seed");
+
 const authRoutes = require("./routes/auth.routes");
 const employeeRoutes = require("./routes/employees.routes");
 const departmentRoutes = require("./routes/departments.routes");
@@ -36,6 +39,15 @@ app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: "Internal server error" });
 });
+
+// First-boot convenience for fresh deployments (e.g. Render) where there's no
+// interactive shell to run `npm run seed` manually: seed automatically, but only
+// when the database is genuinely empty, so it never touches real data.
+const employeeCount = db.prepare("SELECT COUNT(*) AS c FROM employees").get().c;
+if (employeeCount === 0) {
+  console.log("No employees found — running first-boot seed...");
+  seed();
+}
 
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => console.log(`HR app backend listening on http://localhost:${PORT}`));

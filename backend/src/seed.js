@@ -273,4 +273,8 @@ const seed = db.transaction(() => {
   console.log("  jamie.chen@example.com / employee123");
 });
 
-seed();
+if (require.main === module) {
+  seed();
+}
+
+module.exports = seed;
