@@ -20,6 +20,17 @@ if (existingTargetsTable) {
   }
 }
 
+// work_orders' shape changed (internal request ticket -> customer-facing job tied to
+// an order) before this table was ever deployed anywhere, so drop and recreate rather
+// than migrate a shape with no real data at stake.
+const existingWorkOrdersTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='work_orders'").get();
+if (existingWorkOrdersTable) {
+  const cols = db.prepare("PRAGMA table_info(work_orders)").all().map((c) => c.name);
+  if (!cols.includes("work_order_number")) {
+    db.exec("DROP TABLE work_orders");
+  }
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS departments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,6 +184,7 @@ CREATE TABLE IF NOT EXISTS expense_reports (
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   cash_advance_amount REAL NOT NULL DEFAULT 0,
+  cost_center TEXT,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','rejected','reimbursed')),
   notes TEXT,
   reviewed_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
@@ -225,6 +237,52 @@ CREATE TABLE IF NOT EXISTS sales_targets (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(employee_id, period_type, period_year, period_index)
 );
+
+CREATE TABLE IF NOT EXISTS work_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  work_order_number TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  customer_name TEXT NOT NULL,
+  description TEXT,
+  address TEXT,
+  order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  assigned_to INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  priority TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low','medium','high','urgent')),
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','assigned','in_progress','completed','cancelled')),
+  scheduled_date TEXT,
+  completed_at TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_number TEXT NOT NULL UNIQUE,
+  order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
+  customer_name TEXT NOT NULL,
+  amount REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','sent','paid','overdue','cancelled')),
+  issue_date TEXT NOT NULL DEFAULT (date('now')),
+  due_date TEXT,
+  paid_date TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  po_number TEXT NOT NULL UNIQUE,
+  vendor_name TEXT NOT NULL,
+  description TEXT,
+  amount REAL NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','received','cancelled')),
+  requested_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  order_date TEXT NOT NULL DEFAULT (date('now')),
+  expected_delivery_date TEXT,
+  received_date TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
 // node:sqlite's DatabaseSync has no built-in transaction helper (unlike better-sqlite3),
@@ -269,6 +327,11 @@ if (!employeeColumns.includes("location_id")) {
 const payrollColumns = db.prepare("PRAGMA table_info(payroll_records)").all().map((c) => c.name);
 if (!payrollColumns.includes("overtime_pay")) {
   db.exec("ALTER TABLE payroll_records ADD COLUMN overtime_pay REAL NOT NULL DEFAULT 0");
+}
+
+const expenseReportColumns = db.prepare("PRAGMA table_info(expense_reports)").all().map((c) => c.name);
+if (!expenseReportColumns.includes("cost_center")) {
+  db.exec("ALTER TABLE expense_reports ADD COLUMN cost_center TEXT");
 }
 
 module.exports = db;

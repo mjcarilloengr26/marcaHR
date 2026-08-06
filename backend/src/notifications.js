@@ -74,6 +74,16 @@ function notifyReviewSubmitted({ employee_id, cycle_name }) {
   });
 }
 
+function notifyWorkOrderAssigned({ employee_id, title }) {
+  const emp = getEmployee(employee_id);
+  if (!emp) return;
+  sendMail({
+    to: emp.email,
+    subject: `You were assigned a work order: ${title}`,
+    text: `Hi ${emp.first_name},\n\nYou were assigned to the work order "${title}".`,
+  });
+}
+
 module.exports = {
   notifyLeaveSubmitted,
   notifyLeaveStatusChanged,
@@ -81,4 +91,5 @@ module.exports = {
   notifyExpenseStatusChanged,
   notifyCardAssigned,
   notifyReviewSubmitted,
+  notifyWorkOrderAssigned,
 };

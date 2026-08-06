@@ -13,10 +13,14 @@ const NAV_ITEMS = [
   { to: "/performance", label: "Performance", roles: ["admin", "hr", "employee"] },
   { to: "/board", label: "Task Board", roles: ["admin", "hr", "employee"] },
   { to: "/expenses", label: "Expenses", roles: ["admin", "hr", "employee"] },
-  { section: "Sales", roles: ["admin", "hr"] },
+  { section: "Sales", roles: ["admin", "hr", "employee"] },
   { to: "/sales", label: "Sales Dashboard", roles: ["admin", "hr"] },
   { to: "/deals", label: "Deals", roles: ["admin", "hr"] },
   { to: "/orders", label: "Orders", roles: ["admin", "hr"] },
+  { to: "/work-orders", label: "Work Orders", roles: ["admin", "hr", "employee"] },
+  { to: "/billing", label: "Billing", roles: ["admin", "hr"] },
+  { section: "Procurement", roles: ["admin", "hr"] },
+  { to: "/purchase-orders", label: "Purchase Orders", roles: ["admin", "hr"] },
   { to: "/users", label: "Users", roles: ["admin"] },
 ];
 

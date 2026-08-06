@@ -59,11 +59,26 @@ const insertSalesTarget = db.prepare(`
   INSERT INTO sales_targets (employee_id, period_type, period_year, period_index, target_amount)
   VALUES (?, ?, ?, ?, ?)
 `);
+const insertWorkOrder = db.prepare(`
+  INSERT INTO work_orders (work_order_number, title, customer_name, description, order_id, assigned_to, priority, status, scheduled_date, notes)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+const insertInvoice = db.prepare(`
+  INSERT INTO invoices (invoice_number, order_id, customer_name, amount, status, issue_date, due_date, paid_date)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`);
+const insertPurchaseOrder = db.prepare(`
+  INSERT INTO purchase_orders (po_number, vendor_name, description, amount, status, requested_by, order_date, expected_delivery_date, received_date)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
 
 const seed = db.transaction(() => {
   // Wipe existing data
   for (const table of [
     "sales_targets",
+    "work_orders",
+    "invoices",
+    "purchase_orders",
     "deals",
     "orders",
     "expense_items",
@@ -314,8 +329,8 @@ const seed = db.transaction(() => {
   insertOrder.run("ORD-1003", "Nomad Logistics", 3100, "processing", staffIds[3], `${year}-07-28`, null);
   insertOrder.run("ORD-1004", "Verdant Farms", 5600, "processing", staffIds[4], `${year}-07-27`, null);
   insertOrder.run("ORD-1005", "Solstice Retail", 1800, "shipped", staffIds[3], `${year}-07-20`, "Tracking sent to customer");
-  insertOrder.run("ORD-1006", "Cobalt Media", 7200, "delivered", staffIds[4], `${year}-07-10`, null);
-  insertOrder.run("ORD-1007", "Ironwood Bank", 9800, "delivered", staffIds[3], `${year}-07-05`, null);
+  const cobaltOrderId = insertOrder.run("ORD-1006", "Cobalt Media", 7200, "delivered", staffIds[4], `${year}-07-10`, null).lastInsertRowid;
+  const ironwoodOrderId = insertOrder.run("ORD-1007", "Ironwood Bank", 9800, "delivered", staffIds[3], `${year}-07-05`, null).lastInsertRowid;
   insertOrder.run("ORD-1008", "Marbleton Co", 1200, "cancelled", staffIds[4], `${year}-07-15`, "Customer changed requirements");
 
   // Sales targets — set for the current month/quarter/year so the dashboard's
@@ -328,6 +343,64 @@ const seed = db.transaction(() => {
   insertSalesTarget.run(staffIds[4], "quarterly", year, currentQuarter, 12000);
   insertSalesTarget.run(staffIds[3], "yearly", year, 0, 200000);
   insertSalesTarget.run(staffIds[4], "yearly", year, 0, 50000);
+
+  // Work orders (customer service jobs)
+  insertWorkOrder.run(
+    "WO-2001",
+    "Install network switch",
+    "Cobalt Media",
+    "Set up and configure new managed switch in server room",
+    cobaltOrderId,
+    staffIds[2],
+    "high",
+    "in_progress",
+    `${year}-08-05`,
+    null
+  );
+  insertWorkOrder.run(
+    "WO-2002",
+    "Quarterly maintenance visit",
+    "Ironwood Bank",
+    "Routine check on installed equipment",
+    ironwoodOrderId,
+    staffIds[1],
+    "medium",
+    "assigned",
+    `${year}-08-12`,
+    null
+  );
+  insertWorkOrder.run(
+    "WO-2003",
+    "Onsite training session",
+    "Solstice Retail",
+    "Train staff on new platform features",
+    null,
+    null,
+    "low",
+    "open",
+    `${year}-08-20`,
+    "Awaiting customer availability"
+  );
+
+  // Billing (invoices linked to delivered orders)
+  insertInvoice.run("INV-ORD-1006", cobaltOrderId, "Cobalt Media", 7200, "paid", `${year}-07-11`, `${year}-07-25`, `${year}-07-20`);
+  insertInvoice.run("INV-ORD-1007", ironwoodOrderId, "Ironwood Bank", 9800, "sent", `${year}-07-06`, `${year}-07-20`, null);
+
+  // Purchase orders (procurement from vendors)
+  insertPurchaseOrder.run("PO-3001", "Office Depot", "Replacement laptops for engineering", 6400, "draft", staffIds[0], `${year}-08-01`, null, null);
+  insertPurchaseOrder.run("PO-3002", "CloudNet Supplies", "Networking hardware for Cebu branch", 2100, "submitted", hrManagerId, `${year}-07-28`, `${year}-08-15`, null);
+  insertPurchaseOrder.run("PO-3003", "Print & Co", "Marketing collateral reprint", 850, "approved", staffIds[6], `${year}-07-20`, `${year}-08-05`, null);
+  insertPurchaseOrder.run(
+    "PO-3004",
+    "Global Furnishings",
+    "New desks for Manila HQ",
+    5200,
+    "received",
+    hrManagerId,
+    `${year}-07-01`,
+    `${year}-07-15`,
+    `${year}-07-14`
+  );
 
   console.log("Seed complete.");
   console.log("Login with:");

@@ -10,7 +10,7 @@ export default function Expenses() {
   const [reports, setReports] = useState([]);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: "", cash_advance_amount: "", notes: "" });
+  const [form, setForm] = useState({ title: "", cash_advance_amount: "", cost_center: "", notes: "" });
   const [saving, setSaving] = useState(false);
   const [openId, setOpenId] = useState(null);
 
@@ -30,7 +30,7 @@ export default function Expenses() {
         cash_advance_amount: form.cash_advance_amount ? Number(form.cash_advance_amount) : 0,
       });
       setShowForm(false);
-      setForm({ title: "", cash_advance_amount: "", notes: "" });
+      setForm({ title: "", cash_advance_amount: "", cost_center: "", notes: "" });
       await load();
       setOpenId(report.id);
     } catch (err) {
@@ -60,6 +60,7 @@ export default function Expenses() {
             <tr>
               {isHr && <th>Employee</th>}
               <th>Title</th>
+              <th>Cost center</th>
               <th>Cash advance</th>
               <th>Expenses</th>
               <th>Balance</th>
@@ -72,6 +73,7 @@ export default function Expenses() {
               <tr key={r.id}>
                 {isHr && <td>{r.employee_name}</td>}
                 <td>{r.title}</td>
+                <td>{r.cost_center || "—"}</td>
                 <td>{money(r.cash_advance_amount)}</td>
                 <td>{money(r.total_expenses)}</td>
                 <td>
@@ -106,6 +108,14 @@ export default function Expenses() {
                 value={form.cash_advance_amount}
                 onChange={(e) => setForm({ ...form, cash_advance_amount: e.target.value })}
                 placeholder="0.00"
+              />
+            </div>
+            <div className="form-row">
+              <label>Cost center</label>
+              <input
+                value={form.cost_center}
+                onChange={(e) => setForm({ ...form, cost_center: e.target.value })}
+                placeholder="e.g. Sales, Engineering, CC-100"
               />
             </div>
             <div className="form-row">
@@ -236,6 +246,7 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
             <div className="grid grid-2" style={{ marginBottom: 16 }}>
               <div><strong>Cash advance</strong><div>{money(report.cash_advance_amount)}</div></div>
               <div><strong>Total expenses</strong><div>{money(report.total_expenses)}</div></div>
+              <div><strong>Cost center</strong><div>{report.cost_center || "—"}</div></div>
               <div>
                 <strong>Balance</strong>
                 <div>

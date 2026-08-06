@@ -16,6 +16,9 @@ import Expenses from "./pages/Expenses";
 import SalesDashboard from "./pages/SalesDashboard";
 import Deals from "./pages/Deals";
 import Orders from "./pages/Orders";
+import WorkOrders from "./pages/WorkOrders";
+import Billing from "./pages/Billing";
+import PurchaseOrders from "./pages/PurchaseOrders";
 import Users from "./pages/Users";
 
 function Protected({ children, roles }) {
@@ -44,6 +47,9 @@ export default function App() {
       <Route path="/sales" element={<Protected roles={["admin", "hr"]}><SalesDashboard /></Protected>} />
       <Route path="/deals" element={<Protected roles={["admin", "hr"]}><Deals /></Protected>} />
       <Route path="/orders" element={<Protected roles={["admin", "hr"]}><Orders /></Protected>} />
+      <Route path="/work-orders" element={<Protected><WorkOrders /></Protected>} />
+      <Route path="/billing" element={<Protected roles={["admin", "hr"]}><Billing /></Protected>} />
+      <Route path="/purchase-orders" element={<Protected roles={["admin", "hr"]}><PurchaseOrders /></Protected>} />
       <Route path="/users" element={<Protected roles={["admin"]}><Users /></Protected>} />
     </Routes>
   );

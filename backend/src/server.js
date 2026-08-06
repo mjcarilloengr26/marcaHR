@@ -20,6 +20,9 @@ const locationsRoutes = require("./routes/locations.routes");
 const dealsRoutes = require("./routes/deals.routes");
 const ordersRoutes = require("./routes/orders.routes");
 const salesRoutes = require("./routes/sales.routes");
+const workOrdersRoutes = require("./routes/workorders.routes");
+const invoicesRoutes = require("./routes/invoices.routes");
+const purchaseOrdersRoutes = require("./routes/purchaseorders.routes");
 
 const app = express();
 app.use(cors());
@@ -40,6 +43,9 @@ app.use("/api/locations", locationsRoutes);
 app.use("/api/deals", dealsRoutes);
 app.use("/api/orders", ordersRoutes);
 app.use("/api/sales", salesRoutes);
+app.use("/api/work-orders", workOrdersRoutes);
+app.use("/api/invoices", invoicesRoutes);
+app.use("/api/purchase-orders", purchaseOrdersRoutes);
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 

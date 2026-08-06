@@ -243,11 +243,11 @@ tbody tr:hover { background: #fafbfc; }
   display: inline-block;
 }
 .badge-pending { background: #fff3cd; color: var(--warning); }
-.badge-approved, .badge-active, .badge-finalized, .badge-paid, .badge-acknowledged, .badge-present {
+.badge-approved, .badge-active, .badge-finalized, .badge-paid, .badge-acknowledged, .badge-present, .badge-received, .badge-completed {
   background: #e3f6ea; color: var(--success);
 }
-.badge-rejected, .badge-inactive, .badge-absent { background: #fde3e3; color: var(--danger); }
-.badge-draft, .badge-submitted, .badge-late, .badge-cancelled { background: #eef0f4; color: var(--text-muted); }
+.badge-rejected, .badge-inactive, .badge-absent, .badge-overdue { background: #fde3e3; color: var(--danger); }
+.badge-draft, .badge-submitted, .badge-late, .badge-cancelled, .badge-sent, .badge-open, .badge-assigned { background: #eef0f4; color: var(--text-muted); }
 
 .error-banner {
   background: #fde3e3;
