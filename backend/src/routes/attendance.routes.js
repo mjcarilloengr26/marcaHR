@@ -76,6 +76,21 @@ function formatDistance(m) {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
 }
 
+// Facial verification is opt-in and toggleable at runtime (not a build-time
+// flag) so it can be switched off while testing without a redeploy.
+router.get("/settings", requireAuth, (req, res) => {
+  const row = db.prepare("SELECT face_recognition_enabled FROM attendance_settings WHERE id = 1").get();
+  res.json({ face_recognition_enabled: Boolean(row?.face_recognition_enabled) });
+});
+
+router.put("/settings", requireAuth, requireRole("admin", "hr"), (req, res) => {
+  const enabled = Boolean(req.body?.face_recognition_enabled);
+  db.prepare("UPDATE attendance_settings SET face_recognition_enabled = ?, updated_at = datetime('now') WHERE id = 1").run(
+    enabled ? 1 : 0
+  );
+  res.json({ face_recognition_enabled: enabled });
+});
+
 // Enforces the geofence for a self clock-in/out. Only active when the employee has
 // an assigned location or a global office is configured — otherwise there's
 // nothing to check against, so location stays optional/informational.

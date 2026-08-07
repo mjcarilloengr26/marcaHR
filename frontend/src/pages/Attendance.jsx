@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { compressImageFile } from "../utils/image";
+import { compareFaces } from "../faceRecognition";
 
 // Wraps browser geolocation in a promise; resolves null if unavailable/denied/slow.
 function getPosition() {
@@ -16,31 +18,6 @@ function getPosition() {
       () => resolve(null),
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
-  });
-}
-
-// Downscales/compresses the picked photo client-side (raw phone-camera photos
-// can be several MB) so the base64 payload stays small enough to store and
-// send comfortably, regardless of the source image's original resolution.
-function compressImageFile(file, maxDim = 900, quality = 0.7) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Could not read the selected file"));
-    reader.onload = () => {
-      img.onerror = () => reject(new Error("Could not read the selected image"));
-      img.onload = () => {
-        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.round(img.width * scale);
-        canvas.height = Math.round(img.height * scale);
-        const ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
-      };
-      img.src = reader.result;
-    };
-    reader.readAsDataURL(file);
   });
 }
 
@@ -78,23 +55,42 @@ function PhotoCell({ src, onOpen }) {
 }
 
 export default function Attendance() {
-  const { user } = useAuth();
+  const { user, employee } = useAuth();
   const isHr = user.role === "admin" || user.role === "hr";
   const [records, setRecords] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [busyLabel, setBusyLabel] = useState("");
   const [search, setSearch] = useState("");
   const [nameSort, setNameSort] = useState(null); // null = default order, "asc" | "desc"
   const [pendingPhoto, setPendingPhoto] = useState(null);
   const [pendingPhotoName, setPendingPhotoName] = useState("");
   const [lightbox, setLightbox] = useState(null);
+  const [faceRecognitionEnabled, setFaceRecognitionEnabled] = useState(false);
+  const [savingFaceSetting, setSavingFaceSetting] = useState(false);
   const fileInputRef = useRef(null);
 
   const load = () => api.get("/attendance").then(setRecords).catch((err) => setError(err.message));
+  const loadSettings = () =>
+    api.get("/attendance/settings").then((s) => setFaceRecognitionEnabled(s.face_recognition_enabled)).catch(() => {});
 
   useEffect(() => {
     load();
+    loadSettings();
   }, []);
+
+  const toggleFaceRecognition = async () => {
+    setSavingFaceSetting(true);
+    setError("");
+    try {
+      const updated = await api.put("/attendance/settings", { face_recognition_enabled: !faceRecognitionEnabled });
+      setFaceRecognitionEnabled(updated.face_recognition_enabled);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingFaceSetting(false);
+    }
+  };
 
   const today = new Date().toISOString().slice(0, 10);
   const todayRecord = records.find((r) => r.date === today && r.employee_id === user.employee_id);
@@ -134,8 +130,27 @@ export default function Attendance() {
 
   const punch = async (endpoint) => {
     setBusy(true);
+    setBusyLabel("Working…");
     setError("");
     try {
+      if (faceRecognitionEnabled) {
+        if (!employee?.photo) {
+          setError("Facial verification is on, but you have no profile photo on file yet — ask HR to add one before you can clock in/out.");
+          return;
+        }
+        if (!pendingPhoto) {
+          setError("Facial verification is on — attach a photo of yourself before clocking in/out.");
+          return;
+        }
+        setBusyLabel("Verifying face…");
+        const result = await compareFaces(employee.photo, pendingPhoto);
+        if (!result.match) {
+          setError(result.reason || "Your attached photo doesn't match your profile photo — clock-in/out denied.");
+          return;
+        }
+      }
+
+      setBusyLabel("Working…");
       const loc = await getPosition();
       if (!loc) {
         const proceed = confirm(
@@ -168,7 +183,7 @@ export default function Attendance() {
               ref={fileInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
+              capture="user"
               onChange={handlePhotoPick}
               style={{ display: "none" }}
             />
@@ -188,24 +203,34 @@ export default function Attendance() {
               </div>
             ) : (
               <button type="button" className="btn btn-secondary" onClick={() => fileInputRef.current?.click()}>
-                📎 Attach photo
+                📎 {faceRecognitionEnabled ? "Attach selfie (required)" : "Attach photo"}
               </button>
             )}
             <button className="btn" onClick={() => punch("clock-in")} disabled={busy || (todayRecord && todayRecord.clock_in)}>
-              {busy ? "Working…" : "Clock in"}
+              {busy ? busyLabel : "Clock in"}
             </button>
             <button
               className="btn btn-secondary"
               onClick={() => punch("clock-out")}
               disabled={busy || !todayRecord || todayRecord.clock_out}
             >
-              Clock out
+              {busy ? busyLabel : "Clock out"}
             </button>
           </div>
+        )}
+        {isHr && (
+          <button type="button" className="btn btn-secondary" onClick={toggleFaceRecognition} disabled={savingFaceSetting}>
+            Facial recognition: {faceRecognitionEnabled ? "ON" : "OFF"}
+          </button>
         )}
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+      {!isHr && faceRecognitionEnabled && (
+        <div className="card" style={{ marginBottom: 16, borderColor: "var(--warning)", color: "var(--warning)" }}>
+          🔒 Facial verification is on — your attached photo must match your profile photo to clock in/out.
+        </div>
+      )}
 
       {isHr && (
         <div className="card form-inline" style={{ marginBottom: 16 }}>

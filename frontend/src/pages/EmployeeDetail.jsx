@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { api } from "../api/client";
+import { compressImageFile } from "../utils/image";
 
 export default function EmployeeDetail() {
   const { id } = useParams();
@@ -30,6 +31,19 @@ export default function EmployeeDetail() {
   }, [id]);
 
   const handleChange = (field) => (e) => setForm({ ...form, [field]: e.target.value });
+
+  const handlePhotoPick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setError("");
+    try {
+      const dataUrl = await compressImageFile(file, 500, 0.8);
+      setForm((f) => ({ ...f, photo: dataUrl }));
+    } catch (err) {
+      setError(err.message);
+    }
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -70,9 +84,35 @@ export default function EmployeeDetail() {
         ← Back to employees
       </Link>
       <div className="page-header" style={{ marginTop: 12 }}>
-        <div>
-          <h1>{employee.first_name} {employee.last_name}</h1>
-          <p className="subtitle">{employee.position || "—"} · {employee.department_name || "No department"}</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          {employee.photo ? (
+            <img
+              src={employee.photo}
+              alt={`${employee.first_name} ${employee.last_name}`}
+              style={{ width: 56, height: 56, objectFit: "cover", borderRadius: "50%", border: "1px solid var(--border)" }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 56,
+                height: 56,
+                borderRadius: "50%",
+                background: "var(--surface-muted, #eef0f4)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 20,
+                color: "var(--text-muted)",
+              }}
+            >
+              {employee.first_name?.[0]}
+              {employee.last_name?.[0]}
+            </div>
+          )}
+          <div>
+            <h1>{employee.first_name} {employee.last_name}</h1>
+            <p className="subtitle">{employee.position || "—"} · {employee.department_name || "No department"}</p>
+          </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           {!editing && (
@@ -102,6 +142,36 @@ export default function EmployeeDetail() {
         </div>
       ) : (
         <form className="card" onSubmit={handleSave}>
+          <div className="form-row">
+            <label>Profile photo (used as the reference for facial verification at clock-in)</label>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {form.photo ? (
+                <img
+                  src={form.photo}
+                  alt="Profile preview"
+                  style={{ width: 56, height: 56, objectFit: "cover", borderRadius: "50%", border: "1px solid var(--border)" }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: 56,
+                    height: 56,
+                    borderRadius: "50%",
+                    background: "var(--surface-muted, #eef0f4)",
+                  }}
+                />
+              )}
+              <label className="btn btn-secondary btn-sm" style={{ cursor: "pointer" }}>
+                {form.photo ? "Replace photo" : "Upload photo"}
+                <input type="file" accept="image/*" onChange={handlePhotoPick} style={{ display: "none" }} />
+              </label>
+              {form.photo && (
+                <button type="button" className="btn btn-sm btn-secondary" onClick={() => setForm((f) => ({ ...f, photo: "" }))}>
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
           <div className="grid grid-2">
             <div className="form-row">
               <label>First name</label>

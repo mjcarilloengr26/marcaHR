@@ -17,6 +17,7 @@ const EMPLOYEE_FIELDS = [
   "status",
   "base_salary",
   "address",
+  "photo",
 ];
 
 // If payroll has already been generated for the current period, a newly

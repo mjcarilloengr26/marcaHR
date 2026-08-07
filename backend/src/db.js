@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS employees (
   status TEXT NOT NULL DEFAULT 'active',
   base_salary REAL DEFAULT 0,
   address TEXT,
+  photo TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -323,9 +324,18 @@ CREATE TABLE IF NOT EXISTS inventory_settings (
   alarm_threshold_percent REAL NOT NULL DEFAULT 20,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Singleton toggle so facial verification at clock-in/out can be switched
+-- off (default) while testing, without a code change or redeploy.
+CREATE TABLE IF NOT EXISTS attendance_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  face_recognition_enabled INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
 db.prepare("INSERT OR IGNORE INTO inventory_settings (id, alarm_threshold_percent) VALUES (1, 20)").run();
+db.prepare("INSERT OR IGNORE INTO attendance_settings (id, face_recognition_enabled) VALUES (1, 0)").run();
 
 // node:sqlite's DatabaseSync has no built-in transaction helper (unlike better-sqlite3),
 // so provide a minimal equivalent for the call sites that expect db.transaction(fn).
@@ -369,6 +379,9 @@ for (const col of ["clock_in_photo", "clock_out_photo"]) {
 const employeeColumns = db.prepare("PRAGMA table_info(employees)").all().map((c) => c.name);
 if (!employeeColumns.includes("location_id")) {
   db.exec("ALTER TABLE employees ADD COLUMN location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL");
+}
+if (!employeeColumns.includes("photo")) {
+  db.exec("ALTER TABLE employees ADD COLUMN photo TEXT");
 }
 
 const payrollColumns = db.prepare("PRAGMA table_info(payroll_records)").all().map((c) => c.name);
