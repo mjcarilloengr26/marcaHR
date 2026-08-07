@@ -175,6 +175,57 @@ router.put("/requests/:id/status", requireAuth, requireRole("admin", "hr"), (req
   res.json(db.prepare("SELECT * FROM leave_requests WHERE id = ?").get(req.params.id));
 });
 
+// After a rejection (often for something fixable, like a missing supporting
+// document — see review_note), the employee can fix it up and send the same
+// request back to "pending" instead of having to start a brand new one.
+router.put("/requests/:id/resubmit", requireAuth, (req, res) => {
+  const request = db.prepare("SELECT * FROM leave_requests WHERE id = ?").get(req.params.id);
+  if (!request) return res.status(404).json({ error: "Leave request not found" });
+  if (req.user.employee_id !== request.employee_id) {
+    return res.status(403).json({ error: "Insufficient permissions" });
+  }
+  if (request.status !== "rejected") {
+    return res.status(400).json({ error: "Only rejected requests can be resubmitted" });
+  }
+
+  const body = req.body || {};
+  const start_date = body.start_date || request.start_date;
+  const end_date = body.end_date || request.end_date;
+  const days = daysBetween(start_date, end_date);
+  if (days <= 0) return res.status(400).json({ error: "end_date must be on or after start_date" });
+
+  const attachment = body.attachment_data !== undefined ? parseAttachment(body) : null;
+
+  db.prepare(
+    `UPDATE leave_requests SET leave_type_id = ?, start_date = ?, end_date = ?, days = ?, reason = ?,
+     status = 'pending', reviewed_by = NULL, review_note = NULL,
+     attachment_name = COALESCE(?, attachment_name), attachment_type = COALESCE(?, attachment_type), attachment_data = COALESCE(?, attachment_data)
+     WHERE id = ?`
+  ).run(
+    body.leave_type_id || request.leave_type_id,
+    start_date,
+    end_date,
+    days,
+    body.reason !== undefined ? body.reason : request.reason,
+    attachment?.name || null,
+    attachment?.type || null,
+    attachment?.data || null,
+    req.params.id
+  );
+
+  const updated = db.prepare("SELECT * FROM leave_requests WHERE id = ?").get(req.params.id);
+  const leaveType = db.prepare("SELECT name FROM leave_types WHERE id = ?").get(updated.leave_type_id);
+  notifyLeaveSubmitted({
+    employee_id: updated.employee_id,
+    leave_type_name: leaveType?.name || "leave",
+    start_date: updated.start_date,
+    end_date: updated.end_date,
+    days: updated.days,
+  });
+
+  res.json(updated);
+});
+
 router.delete("/requests/:id", requireAuth, (req, res) => {
   const request = db.prepare("SELECT * FROM leave_requests WHERE id = ?").get(req.params.id);
   if (!request) return res.status(404).json({ error: "Leave request not found" });

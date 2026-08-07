@@ -26,6 +26,8 @@ export default function Leave() {
   const [form, setForm] = useState(emptyForm);
   const [attachment, setAttachment] = useState(null); // { name, type, data }
   const [attaching, setAttaching] = useState(false);
+  const [resubmitting, setResubmitting] = useState(null); // the request being resubmitted, or null
+  const [reviewNoteDrafts, setReviewNoteDrafts] = useState({}); // { [requestId]: text }
 
   const loadRequests = () => api.get("/leave/requests").then(setRequests).catch((err) => setError(err.message));
 
@@ -52,18 +54,44 @@ export default function Leave() {
     }
   };
 
+  const openRequestForm = () => {
+    setResubmitting(null);
+    setForm(emptyForm);
+    setAttachment(null);
+    setShowForm(true);
+  };
+
+  const openResubmitForm = (request) => {
+    setResubmitting(request);
+    setForm({
+      employee_id: request.employee_id,
+      leave_type_id: request.leave_type_id,
+      start_date: request.start_date,
+      end_date: request.end_date,
+      reason: request.reason || "",
+    });
+    setAttachment(null);
+    setShowForm(true);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     try {
-      await api.post("/leave/requests", {
+      const payload = {
         ...form,
         attachment_name: attachment?.name,
         attachment_type: attachment?.type,
         attachment_data: attachment?.data,
-      });
+      };
+      if (resubmitting) {
+        await api.put(`/leave/requests/${resubmitting.id}/resubmit`, payload);
+      } else {
+        await api.post("/leave/requests", payload);
+      }
       setShowForm(false);
+      setResubmitting(null);
       setForm(emptyForm);
       setAttachment(null);
       loadRequests();
@@ -76,7 +104,12 @@ export default function Leave() {
 
   const updateStatus = async (id, status) => {
     try {
-      await api.put(`/leave/requests/${id}/status`, { status });
+      await api.put(`/leave/requests/${id}/status`, { status, review_note: reviewNoteDrafts[id] || undefined });
+      setReviewNoteDrafts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
       loadRequests();
     } catch (err) {
       setError(err.message);
@@ -100,7 +133,7 @@ export default function Leave() {
           <h1>Leave</h1>
           <p className="subtitle">{isHr ? "Review and manage leave requests" : "Request and track your time off"}</p>
         </div>
-        <button className="btn" onClick={() => setShowForm(true)}>
+        <button className="btn" onClick={openRequestForm}>
           + Request leave
         </button>
       </div>
@@ -118,6 +151,7 @@ export default function Leave() {
               <th>Reason</th>
               <th>Attachment</th>
               <th>Status</th>
+              <th>Review note</th>
               <th></th>
             </tr>
           </thead>
@@ -131,15 +165,27 @@ export default function Leave() {
                 <td>{r.reason || "—"}</td>
                 <td><AttachmentCell name={r.attachment_name} data={r.attachment_data} /></td>
                 <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
+                <td>{r.review_note || "—"}</td>
                 <td>
                   {isHr && r.status === "pending" && (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button className="btn btn-sm" onClick={() => updateStatus(r.id, "approved")}>Approve</button>
-                      <button className="btn btn-sm btn-danger" onClick={() => updateStatus(r.id, "rejected")}>Reject</button>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 180 }}>
+                      <input
+                        type="text"
+                        placeholder="Note (e.g. missing document)"
+                        value={reviewNoteDrafts[r.id] || ""}
+                        onChange={(e) => setReviewNoteDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                      />
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button className="btn btn-sm" onClick={() => updateStatus(r.id, "approved")}>Approve</button>
+                        <button className="btn btn-sm btn-danger" onClick={() => updateStatus(r.id, "rejected")}>Reject</button>
+                      </div>
                     </div>
                   )}
                   {!isHr && r.status === "pending" && (
                     <button className="btn btn-sm btn-secondary" onClick={() => cancelRequest(r.id)}>Cancel</button>
+                  )}
+                  {!isHr && r.status === "rejected" && (
+                    <button className="btn btn-sm" onClick={() => openResubmitForm(r)}>Resubmit</button>
                   )}
                 </td>
               </tr>
@@ -152,11 +198,21 @@ export default function Leave() {
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
-            <h2>Request leave</h2>
+            <h2>{resubmitting ? "Resubmit leave request" : "Request leave"}</h2>
+            {resubmitting?.review_note && (
+              <div className="card" style={{ marginBottom: 12, borderColor: "var(--danger)", color: "var(--danger)" }}>
+                Rejected: {resubmitting.review_note}
+              </div>
+            )}
             {isHr && (
               <div className="form-row">
                 <label>Employee</label>
-                <select value={form.employee_id} onChange={(e) => setForm({ ...form, employee_id: e.target.value })} required>
+                <select
+                  value={form.employee_id}
+                  onChange={(e) => setForm({ ...form, employee_id: e.target.value })}
+                  required
+                  disabled={Boolean(resubmitting)}
+                >
                   <option value="">Select employee</option>
                   {employees.map((e) => (
                     <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>
@@ -188,7 +244,7 @@ export default function Leave() {
               <textarea rows={3} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
             </div>
             <div className="form-row">
-              <label>Supporting document (optional)</label>
+              <label>Supporting document {resubmitting ? "(leave blank to keep the one already attached)" : "(optional)"}</label>
               {attachment ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span className="subtitle" style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -199,13 +255,20 @@ export default function Leave() {
                   </button>
                 </div>
               ) : (
-                <input type="file" accept="image/*,.pdf,.doc,.docx" onChange={handleFilePick} disabled={attaching} />
+                <>
+                  {resubmitting?.attachment_name && (
+                    <p className="subtitle" style={{ marginTop: 0 }}>Currently attached: 📎 {resubmitting.attachment_name}</p>
+                  )}
+                  <input type="file" accept="image/*,.pdf,.doc,.docx" onChange={handleFilePick} disabled={attaching} />
+                </>
               )}
               {attaching && <span className="subtitle">Attaching…</span>}
             </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-              <button type="submit" className="btn" disabled={saving || attaching}>{saving ? "Submitting…" : "Submit request"}</button>
+              <button type="submit" className="btn" disabled={saving || attaching}>
+                {saving ? "Submitting…" : resubmitting ? "Resubmit request" : "Submit request"}
+              </button>
             </div>
           </form>
         </div>
