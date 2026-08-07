@@ -19,6 +19,27 @@ const EMPLOYEE_FIELDS = [
   "address",
 ];
 
+// If payroll has already been generated for the current period, a newly
+// hired employee should show up in it immediately rather than sitting
+// invisible in the Payroll list until HR notices and re-runs "Generate
+// payroll for period". Mirrors the same insert /generate uses, so it's a
+// no-op if this employee already has a record for the period.
+function backfillCurrentPayrollIfGenerated(employee) {
+  if (employee.status !== "active") return;
+  const now = new Date();
+  const period_month = now.getMonth() + 1;
+  const period_year = now.getFullYear();
+  const alreadyGenerated = db
+    .prepare("SELECT 1 FROM payroll_records WHERE period_month = ? AND period_year = ? LIMIT 1")
+    .get(period_month, period_year);
+  if (!alreadyGenerated) return;
+  db.prepare(
+    `INSERT INTO payroll_records (employee_id, period_month, period_year, base_salary, bonuses, overtime_pay, deductions, net_pay, status)
+     VALUES (?, ?, ?, ?, 0, 0, 0, ?, 'draft')
+     ON CONFLICT(employee_id, period_month, period_year) DO NOTHING`
+  ).run(employee.id, period_month, period_year, employee.base_salary, employee.base_salary);
+}
+
 router.get("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
   const { department_id, status, q } = req.query;
   let sql = `SELECT e.*, d.name AS department_name, l.name AS location_name,
@@ -73,7 +94,9 @@ router.post("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
     const info = db
       .prepare(`INSERT INTO employees (${cols.join(", ")}) VALUES (${placeholders})`)
       .run(...values);
-    res.status(201).json(db.prepare("SELECT * FROM employees WHERE id = ?").get(info.lastInsertRowid));
+    const employee = db.prepare("SELECT * FROM employees WHERE id = ?").get(info.lastInsertRowid);
+    backfillCurrentPayrollIfGenerated(employee);
+    res.status(201).json(employee);
   } catch (err) {
     res.status(400).json({ error: "Could not create employee (duplicate email?)" });
   }
