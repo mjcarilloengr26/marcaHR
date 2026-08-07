@@ -21,6 +21,14 @@ function getPosition() {
   });
 }
 
+// Must match the backend's date anchoring (Asia/Manila, GMT+8) so "today" here
+// is the same calendar day the server just recorded a clock-in against —
+// otherwise the Clock in/out buttons could enable/disable on the wrong side
+// of midnight for a device not set to Philippine local time.
+function manilaToday() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+}
+
 function formatDistance(m) {
   if (m === null || m === undefined) return null;
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
@@ -92,7 +100,7 @@ export default function Attendance() {
     }
   };
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = manilaToday();
   const todayRecord = records.find((r) => r.date === today && r.employee_id === user.employee_id);
 
   let displayed = records;
@@ -174,7 +182,7 @@ export default function Attendance() {
         <div>
           <h1>Attendance</h1>
           <p className="subtitle">
-            {isHr ? "Team attendance records with clock-in/out locations" : "Clock in and out — your GPS location is recorded"}
+            {isHr ? "Team attendance records with clock-in/out locations" : "Clock in and out — your GPS location is recorded"} (times in GMT+8, Philippine time)
           </p>
         </div>
         {!isHr && (

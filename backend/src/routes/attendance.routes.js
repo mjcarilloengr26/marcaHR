@@ -4,6 +4,18 @@ const { requireAuth, requireRole, requireSelfOrRole } = require("../middleware/a
 
 const router = express.Router();
 
+// The server's system clock (UTC on Render) isn't the employees' clock —
+// attendance date/time must be anchored to Philippine local time (GMT+8,
+// no DST) regardless of what timezone the process actually runs in, or a
+// clock-in near midnight gets filed under the wrong calendar date.
+const MANILA_TZ = "Asia/Manila";
+function manilaToday() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: MANILA_TZ }); // YYYY-MM-DD
+}
+function manilaNow() {
+  return new Date().toLocaleTimeString("en-GB", { timeZone: MANILA_TZ, hour12: false }); // HH:MM:SS
+}
+
 // Distance in meters between two lat/lng points (haversine).
 function distanceMeters(lat1, lng1, lat2, lng2) {
   const R = 6371000;
@@ -122,7 +134,7 @@ router.get("/", requireAuth, (req, res) => {
     params.push(employeeIdFilter);
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = manilaToday();
   // A newly-added employee has no attendance row until they clock in (or HR
   // records one), so the records-only query above would silently omit them —
   // only surface that gap for "today", since backfilling absent placeholders
@@ -186,8 +198,8 @@ router.get("/", requireAuth, (req, res) => {
 // Employee self clock-in/out for today
 router.post("/clock-in", requireAuth, (req, res) => {
   if (!req.user.employee_id) return res.status(400).json({ error: "No employee profile linked to this user" });
-  const today = new Date().toISOString().slice(0, 10);
-  const now = new Date().toISOString().slice(11, 19);
+  const today = manilaToday();
+  const now = manilaNow();
   const loc = parseLocation(req.body, req.user.employee_id);
   const geofenceError = checkGeofence(loc, req.user.employee_id);
   if (geofenceError) return res.status(403).json({ error: geofenceError });
@@ -206,8 +218,8 @@ router.post("/clock-in", requireAuth, (req, res) => {
 
 router.post("/clock-out", requireAuth, (req, res) => {
   if (!req.user.employee_id) return res.status(400).json({ error: "No employee profile linked to this user" });
-  const today = new Date().toISOString().slice(0, 10);
-  const now = new Date().toISOString().slice(11, 19);
+  const today = manilaToday();
+  const now = manilaNow();
   const record = db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND date = ?").get(req.user.employee_id, today);
   if (!record) return res.status(400).json({ error: "You have not clocked in today" });
   const loc = parseLocation(req.body, req.user.employee_id);
