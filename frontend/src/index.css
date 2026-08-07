@@ -39,6 +39,8 @@ button, input, select, textarea {
   flex-direction: column;
   padding: 20px 0;
   flex-shrink: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .menu-toggle {
