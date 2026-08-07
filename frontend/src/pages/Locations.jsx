@@ -9,6 +9,7 @@ export default function Locations() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [editingId, setEditingId] = useState(null);
 
   const load = () => api.get("/locations").then(setLocations).catch((err) => setError(err.message));
 
@@ -35,17 +36,23 @@ export default function Locations() {
     );
   };
 
-  const handleAdd = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     try {
-      await api.post("/locations", {
+      const payload = {
         ...form,
         lat: Number(form.lat),
         lng: Number(form.lng),
         radius_meters: Number(form.radius_meters) || 1000,
-      });
+      };
+      if (editingId) {
+        await api.put(`/locations/${editingId}`, payload);
+        setEditingId(null);
+      } else {
+        await api.post("/locations", payload);
+      }
       setForm(emptyForm);
       load();
     } catch (err) {
@@ -53,6 +60,23 @@ export default function Locations() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const openEdit = (location) => {
+    setEditingId(location.id);
+    setForm({
+      name: location.name,
+      lat: location.lat,
+      lng: location.lng,
+      radius_meters: location.radius_meters,
+      address: location.address || "",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setForm(emptyForm);
   };
 
   const handleDelete = async (id) => {
@@ -76,7 +100,12 @@ export default function Locations() {
 
       {error && <div className="error-banner">{error}</div>}
 
-      <form className="card" onSubmit={handleAdd} style={{ marginBottom: 16 }}>
+      <form className="card" onSubmit={handleSubmit} style={{ marginBottom: 16 }}>
+        {editingId && (
+          <div className="form-row" style={{ marginBottom: 4 }}>
+            <strong>Editing: {form.name}</strong>
+          </div>
+        )}
         <div className="form-inline">
           <div className="form-row">
             <label>Name</label>
@@ -104,8 +133,13 @@ export default function Locations() {
         </div>
         <div className="modal-actions" style={{ justifyContent: "flex-start", marginTop: 12 }}>
           <button className="btn" type="submit" disabled={saving}>
-            {saving ? "Adding…" : "+ Add location"}
+            {saving ? "Saving…" : editingId ? "Save changes" : "+ Add location"}
           </button>
+          {editingId && (
+            <button type="button" className="btn btn-secondary" onClick={cancelEdit}>
+              Cancel
+            </button>
+          )}
         </div>
       </form>
 
@@ -138,7 +172,10 @@ export default function Locations() {
                 <td>{l.radius_meters >= 1000 ? `${(l.radius_meters / 1000).toFixed(1)} km` : `${l.radius_meters} m`}</td>
                 <td>{l.address || "—"}</td>
                 <td>{l.employee_count}</td>
-                <td>
+                <td style={{ display: "flex", gap: 6 }}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => openEdit(l)}>
+                    Edit
+                  </button>
                   <button className="btn btn-danger btn-sm" onClick={() => handleDelete(l.id)}>
                     Delete
                   </button>
