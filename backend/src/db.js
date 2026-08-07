@@ -101,6 +101,9 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','cancelled')),
   reviewed_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   review_note TEXT,
+  attachment_name TEXT,
+  attachment_type TEXT,
+  attachment_data TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -382,6 +385,13 @@ if (!employeeColumns.includes("location_id")) {
 }
 if (!employeeColumns.includes("photo")) {
   db.exec("ALTER TABLE employees ADD COLUMN photo TEXT");
+}
+
+const leaveRequestColumns = db.prepare("PRAGMA table_info(leave_requests)").all().map((c) => c.name);
+for (const col of ["attachment_name", "attachment_type", "attachment_data"]) {
+  if (!leaveRequestColumns.includes(col)) {
+    db.exec(`ALTER TABLE leave_requests ADD COLUMN ${col} TEXT`);
+  }
 }
 
 const payrollColumns = db.prepare("PRAGMA table_info(payroll_records)").all().map((c) => c.name);

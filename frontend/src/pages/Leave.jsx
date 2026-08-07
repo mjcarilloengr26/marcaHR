@@ -1,6 +1,18 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { compressImageFile, readFileAsDataUrl } from "../utils/image";
+
+const emptyForm = { employee_id: "", leave_type_id: "", start_date: "", end_date: "", reason: "" };
+
+function AttachmentCell({ name, data }) {
+  if (!data) return <span>—</span>;
+  return (
+    <a href={data} download={name || "attachment"} target="_blank" rel="noreferrer" className="location-link">
+      📎 {name || "View"}
+    </a>
+  );
+}
 
 export default function Leave() {
   const { user } = useAuth();
@@ -11,7 +23,9 @@ export default function Leave() {
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ employee_id: "", leave_type_id: "", start_date: "", end_date: "", reason: "" });
+  const [form, setForm] = useState(emptyForm);
+  const [attachment, setAttachment] = useState(null); // { name, type, data }
+  const [attaching, setAttaching] = useState(false);
 
   const loadRequests = () => api.get("/leave/requests").then(setRequests).catch((err) => setError(err.message));
 
@@ -22,14 +36,36 @@ export default function Leave() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleFilePick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setError("");
+    setAttaching(true);
+    try {
+      const data = file.type.startsWith("image/") ? await compressImageFile(file, 1400, 0.8) : await readFileAsDataUrl(file);
+      setAttachment({ name: file.name, type: file.type, data });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAttaching(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     try {
-      await api.post("/leave/requests", form);
+      await api.post("/leave/requests", {
+        ...form,
+        attachment_name: attachment?.name,
+        attachment_type: attachment?.type,
+        attachment_data: attachment?.data,
+      });
       setShowForm(false);
-      setForm({ employee_id: "", leave_type_id: "", start_date: "", end_date: "", reason: "" });
+      setForm(emptyForm);
+      setAttachment(null);
       loadRequests();
     } catch (err) {
       setError(err.message);
@@ -80,6 +116,7 @@ export default function Leave() {
               <th>Dates</th>
               <th>Days</th>
               <th>Reason</th>
+              <th>Attachment</th>
               <th>Status</th>
               <th></th>
             </tr>
@@ -92,6 +129,7 @@ export default function Leave() {
                 <td>{r.start_date} → {r.end_date}</td>
                 <td>{r.days}</td>
                 <td>{r.reason || "—"}</td>
+                <td><AttachmentCell name={r.attachment_name} data={r.attachment_data} /></td>
                 <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
                 <td>
                   {isHr && r.status === "pending" && (
@@ -149,9 +187,25 @@ export default function Leave() {
               <label>Reason</label>
               <textarea rows={3} value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} />
             </div>
+            <div className="form-row">
+              <label>Supporting document (optional)</label>
+              {attachment ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="subtitle" style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    📎 {attachment.name}
+                  </span>
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setAttachment(null)}>
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <input type="file" accept="image/*,.pdf,.doc,.docx" onChange={handleFilePick} disabled={attaching} />
+              )}
+              {attaching && <span className="subtitle">Attaching…</span>}
+            </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-              <button type="submit" className="btn" disabled={saving}>{saving ? "Submitting…" : "Submit request"}</button>
+              <button type="submit" className="btn" disabled={saving || attaching}>{saving ? "Submitting…" : "Submit request"}</button>
             </div>
           </form>
         </div>

@@ -10,6 +10,22 @@ function daysBetween(start, end) {
   return Math.round(ms / (1000 * 60 * 60 * 24)) + 1;
 }
 
+// Accepts a base64 data URL (image or PDF, compressed/as-is client-side) or
+// null. Caps the stored size defensively even though express.json()'s limit
+// already bounds the whole request.
+function parseAttachment(body) {
+  const data = body?.attachment_data;
+  if (!data) return { name: null, type: null, data: null };
+  if (typeof data !== "string" || !data.startsWith("data:") || data.length > 6_000_000) {
+    return { name: null, type: null, data: null };
+  }
+  return {
+    name: typeof body.attachment_name === "string" ? body.attachment_name.slice(0, 255) : null,
+    type: typeof body.attachment_type === "string" ? body.attachment_type.slice(0, 100) : null,
+    data,
+  };
+}
+
 // --- Leave types ---
 router.get("/types", requireAuth, (req, res) => {
   res.json(db.prepare("SELECT * FROM leave_types ORDER BY name").all());
@@ -98,12 +114,13 @@ router.post("/requests", requireAuth, (req, res) => {
   const days = daysBetween(start_date, end_date);
   if (days <= 0) return res.status(400).json({ error: "end_date must be on or after start_date" });
 
+  const attachment = parseAttachment(body);
   const info = db
     .prepare(
-      `INSERT INTO leave_requests (employee_id, leave_type_id, start_date, end_date, days, reason, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending')`
+      `INSERT INTO leave_requests (employee_id, leave_type_id, start_date, end_date, days, reason, status, attachment_name, attachment_type, attachment_data)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
     )
-    .run(employee_id, leave_type_id, start_date, end_date, days, reason || null);
+    .run(employee_id, leave_type_id, start_date, end_date, days, reason || null, attachment.name, attachment.type, attachment.data);
 
   const created = db.prepare("SELECT * FROM leave_requests WHERE id = ?").get(info.lastInsertRowid);
   const leaveType = db.prepare("SELECT name FROM leave_types WHERE id = ?").get(leave_type_id);

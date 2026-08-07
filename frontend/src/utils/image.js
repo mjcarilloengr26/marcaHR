@@ -23,3 +23,18 @@ export function compressImageFile(file, maxDim = 900, quality = 0.7) {
     reader.readAsDataURL(file);
   });
 }
+
+// Reads any file (PDF, doc, etc.) as a base64 data URL as-is — no compression
+// possible for non-image types, so a client-side size cap stands in for it.
+export function readFileAsDataUrl(file, maxBytes = 5_000_000) {
+  return new Promise((resolve, reject) => {
+    if (file.size > maxBytes) {
+      reject(new Error(`File is too large (max ${Math.round(maxBytes / 1_000_000)}MB)`));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read the selected file"));
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(file);
+  });
+}
