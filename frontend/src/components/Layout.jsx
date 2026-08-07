@@ -31,6 +31,7 @@ const NAV_ITEMS = [
 
   { section: "Procurement", roles: ["admin", "hr"] },
   { to: "/purchase-orders", label: "Purchase Orders", roles: ["admin", "hr"] },
+  { to: "/inventory", label: "Inventory", roles: ["admin", "hr"] },
 
   { section: "Administration", roles: ["admin"] },
   { to: "/users", label: "Users", roles: ["admin"] },

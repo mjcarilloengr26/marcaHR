@@ -71,10 +71,20 @@ const insertPurchaseOrder = db.prepare(`
   INSERT INTO purchase_orders (po_number, vendor_name, description, amount, status, requested_by, order_date, expected_delivery_date, received_date)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
+const insertInventoryItem = db.prepare(`
+  INSERT INTO inventory_items (sku, name, category, unit, quantity_on_hand, reorder_level, unit_cost, unit_price, location_id, notes)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+const insertInventoryTxn = db.prepare(`
+  INSERT INTO inventory_transactions (item_id, type, quantity, reason, reference, created_by)
+  VALUES (?, ?, ?, ?, ?, ?)
+`);
 
 const seed = db.transaction(() => {
   // Wipe existing data
   for (const table of [
+    "inventory_transactions",
+    "inventory_items",
     "sales_targets",
     "work_orders",
     "invoices",
@@ -401,6 +411,41 @@ const seed = db.transaction(() => {
     `${year}-07-15`,
     `${year}-07-14`
   );
+
+  // Inventory (stock items + their movement history)
+  function addInventoryItem([sku, name, category, unit, initialQty, reorderLevel, unitCost, unitPrice, locationName, notes]) {
+    const itemId = insertInventoryItem.run(
+      sku,
+      name,
+      category,
+      unit,
+      initialQty,
+      reorderLevel,
+      unitCost,
+      unitPrice,
+      locationIds[locationName] || null,
+      notes || null
+    ).lastInsertRowid;
+    insertInventoryTxn.run(itemId, "in", initialQty, "Initial stock", null, hrManagerId);
+    return itemId;
+  }
+
+  const laptopItemId = addInventoryItem(["INV-1001", "Laptop — 14\" Business", "IT Equipment", "pcs", 18, 5, 32000, 42000, "Manila HQ", null]);
+  const pensItemId = addInventoryItem(["INV-1002", "Ballpoint Pens (box of 12)", "Office Supplies", "box", 25, 8, 90, 140, "Manila HQ", null]);
+  addInventoryItem(["INV-1003", "A4 Bond Paper (ream)", "Office Supplies", "ream", 6, 15, 180, 240, "Manila HQ", null]);
+  const cableItemId = addInventoryItem(["INV-1004", "Ethernet Cable 10m", "Networking", "pcs", 30, 10, 220, 320, "Cebu Branch", null]);
+  addInventoryItem(["INV-1005", "Network Switch — 24 port", "Networking", "pcs", 2, 3, 4200, 5600, "Cebu Branch", null]);
+  addInventoryItem(["INV-1006", "Office Desk", "Furniture", "pcs", 12, 4, 3800, 5200, "Manila HQ", "Matches PO-3004 delivery"]);
+
+  // A few follow-on movements so the history view has more than one entry.
+  db.prepare("UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - 3 WHERE id = ?").run(laptopItemId);
+  insertInventoryTxn.run(laptopItemId, "out", 3, "Issued to new engineering hires", null, engManagerId);
+
+  db.prepare("UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - 9 WHERE id = ?").run(pensItemId);
+  insertInventoryTxn.run(pensItemId, "out", 9, "Monthly office restock", null, hrManagerId);
+
+  db.prepare("UPDATE inventory_items SET quantity_on_hand = 28 WHERE id = ?").run(cableItemId);
+  insertInventoryTxn.run(cableItemId, "adjustment", -2, "Physical count correction", null, hrManagerId);
 
   console.log("Seed complete.");
   console.log("Login with:");

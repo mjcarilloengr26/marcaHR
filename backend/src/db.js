@@ -284,6 +284,35 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS inventory_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sku TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  category TEXT,
+  unit TEXT NOT NULL DEFAULT 'pcs',
+  quantity_on_hand REAL NOT NULL DEFAULT 0,
+  reorder_level REAL NOT NULL DEFAULT 0,
+  unit_cost REAL NOT NULL DEFAULT 0,
+  unit_price REAL NOT NULL DEFAULT 0,
+  location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Every stock change (received, consumed, or manually adjusted) is logged here
+-- rather than letting callers write quantity_on_hand directly, so there is
+-- always an audit trail of who moved how much stock and why.
+CREATE TABLE IF NOT EXISTS inventory_transactions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  item_id INTEGER NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  type TEXT NOT NULL CHECK(type IN ('in','out','adjustment')),
+  quantity REAL NOT NULL,
+  reason TEXT,
+  reference TEXT,
+  created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
 
 // node:sqlite's DatabaseSync has no built-in transaction helper (unlike better-sqlite3),
