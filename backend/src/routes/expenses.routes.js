@@ -5,6 +5,22 @@ const { notifyExpenseSubmitted, notifyExpenseStatusChanged } = require("../notif
 
 const router = express.Router();
 
+// Accepts a base64 data URL (image, PDF, etc.) or null. Caps the stored size
+// defensively even though express.json()'s limit already bounds the whole
+// request — a single field shouldn't be allowed to approach that cap.
+function parseReceipt(body) {
+  const data = body?.receipt_data;
+  if (!data) return { name: null, type: null, data: null };
+  if (typeof data !== "string" || !data.startsWith("data:") || data.length > 6_000_000) {
+    return { name: null, type: null, data: null };
+  }
+  return {
+    name: typeof body.receipt_name === "string" ? body.receipt_name.slice(0, 255) : null,
+    type: typeof body.receipt_type === "string" ? body.receipt_type.slice(0, 100) : null,
+    data,
+  };
+}
+
 function withTotals(report) {
   const totals = db
     .prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM expense_items WHERE report_id = ?")
@@ -107,16 +123,28 @@ router.delete("/:id", requireAuth, loadEditableReport, (req, res) => {
 });
 
 router.post("/:id/items", requireAuth, loadEditableReport, (req, res) => {
-  const { expense_date, category, description, amount, receipt_ref } = req.body || {};
+  const body = req.body || {};
+  const { expense_date, category, description, amount, receipt_ref } = body;
   if (!expense_date || amount === undefined) {
     return res.status(400).json({ error: "expense_date and amount are required" });
   }
+  const receipt = parseReceipt(body);
   const info = db
     .prepare(
-      `INSERT INTO expense_items (report_id, expense_date, category, description, amount, receipt_ref)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO expense_items (report_id, expense_date, category, description, amount, receipt_ref, receipt_name, receipt_type, receipt_data)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(req.expenseReport.id, expense_date, category || null, description || null, amount, receipt_ref || null);
+    .run(
+      req.expenseReport.id,
+      expense_date,
+      category || null,
+      description || null,
+      amount,
+      receipt_ref || null,
+      receipt.name,
+      receipt.type,
+      receipt.data
+    );
   res.status(201).json(db.prepare("SELECT * FROM expense_items WHERE id = ?").get(info.lastInsertRowid));
 });
 

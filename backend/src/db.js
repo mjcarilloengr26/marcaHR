@@ -206,7 +206,10 @@ CREATE TABLE IF NOT EXISTS expense_items (
   category TEXT,
   description TEXT,
   amount REAL NOT NULL DEFAULT 0,
-  receipt_ref TEXT
+  receipt_ref TEXT,
+  receipt_name TEXT,
+  receipt_type TEXT,
+  receipt_data TEXT
 );
 
 CREATE TABLE IF NOT EXISTS deals (
@@ -391,6 +394,13 @@ const leaveRequestColumns = db.prepare("PRAGMA table_info(leave_requests)").all(
 for (const col of ["attachment_name", "attachment_type", "attachment_data"]) {
   if (!leaveRequestColumns.includes(col)) {
     db.exec(`ALTER TABLE leave_requests ADD COLUMN ${col} TEXT`);
+  }
+}
+
+const expenseItemColumns = db.prepare("PRAGMA table_info(expense_items)").all().map((c) => c.name);
+for (const col of ["receipt_name", "receipt_type", "receipt_data"]) {
+  if (!expenseItemColumns.includes(col)) {
+    db.exec(`ALTER TABLE expense_items ADD COLUMN ${col} TEXT`);
   }
 }
 

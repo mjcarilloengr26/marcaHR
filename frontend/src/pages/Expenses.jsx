@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { compressImageFile, readFileAsDataUrl } from "../utils/image";
 
 const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -151,6 +152,8 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [itemForm, setItemForm] = useState({ expense_date: "", category: "", description: "", amount: "", receipt_ref: "" });
+  const [receipt, setReceipt] = useState(null); // { name, type, data }
+  const [attaching, setAttaching] = useState(false);
   const [reviewNote, setReviewNote] = useState("");
 
   const load = () =>
@@ -167,13 +170,36 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
   const isOwnerEditable = report && report.status === "draft";
   const canEdit = report && (isHr || isOwnerEditable);
 
+  const handleReceiptPick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setError("");
+    setAttaching(true);
+    try {
+      const data = file.type.startsWith("image/") ? await compressImageFile(file, 1400, 0.8) : await readFileAsDataUrl(file);
+      setReceipt({ name: file.name, type: file.type, data });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAttaching(false);
+    }
+  };
+
   const addItem = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     try {
-      await api.post(`/expenses/${id}/items`, { ...itemForm, amount: Number(itemForm.amount) });
+      await api.post(`/expenses/${id}/items`, {
+        ...itemForm,
+        amount: Number(itemForm.amount),
+        receipt_name: receipt?.name,
+        receipt_type: receipt?.type,
+        receipt_data: receipt?.data,
+      });
       setItemForm({ expense_date: "", category: "", description: "", amount: "", receipt_ref: "" });
+      setReceipt(null);
       await load();
       onChanged();
     } catch (err) {
@@ -278,7 +304,22 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                     <td>{it.expense_date}</td>
                     <td>{it.category || "—"}</td>
                     <td>{it.description || "—"}</td>
-                    <td>{it.receipt_ref || "—"}</td>
+                    <td>
+                      {it.receipt_ref || ""}
+                      {it.receipt_data && (
+                        <a
+                          href={it.receipt_data}
+                          download={it.receipt_name || "receipt"}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="location-link"
+                          style={{ marginLeft: it.receipt_ref ? 6 : 0 }}
+                        >
+                          📎 {it.receipt_name || "receipt"}
+                        </a>
+                      )}
+                      {!it.receipt_ref && !it.receipt_data && "—"}
+                    </td>
                     <td>{money(it.amount)}</td>
                     {canEdit && (
                       <td>
@@ -315,7 +356,22 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                   <label>Amount</label>
                   <input type="number" step="0.01" value={itemForm.amount} onChange={(e) => setItemForm({ ...itemForm, amount: e.target.value })} required />
                 </div>
-                <button type="submit" className="btn btn-sm" disabled={saving}>
+                <div className="form-row">
+                  <label>Proof of receipt</label>
+                  {receipt ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span className="subtitle" style={{ maxWidth: 140, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        📎 {receipt.name}
+                      </span>
+                      <button type="button" className="btn btn-sm btn-secondary" onClick={() => setReceipt(null)}>
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <input type="file" accept="image/*,.pdf,.doc,.docx" onChange={handleReceiptPick} disabled={attaching} />
+                  )}
+                </div>
+                <button type="submit" className="btn btn-sm" disabled={saving || attaching}>
                   {saving ? "Adding…" : "+ Add item"}
                 </button>
               </form>
