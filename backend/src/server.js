@@ -27,7 +27,9 @@ const inventoryRoutes = require("./routes/inventory.routes");
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Raised from Express's 100kb default so clock-in/out photo attachments
+// (base64-encoded, compressed client-side) fit in the request body.
+app.use(express.json({ limit: "8mb" }));
 
 app.use("/api/auth", authRoutes);
 app.use("/api/employees", employeeRoutes);

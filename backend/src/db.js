@@ -118,6 +118,8 @@ CREATE TABLE IF NOT EXISTS attendance (
   clock_out_lng REAL,
   clock_out_accuracy REAL,
   clock_out_distance_m REAL,
+  clock_in_photo TEXT,
+  clock_out_photo TEXT,
   note TEXT,
   UNIQUE(employee_id, date)
 );
@@ -356,6 +358,11 @@ for (const col of [
 ]) {
   if (!attendanceColumns.includes(col)) {
     db.exec(`ALTER TABLE attendance ADD COLUMN ${col} REAL`);
+  }
+}
+for (const col of ["clock_in_photo", "clock_out_photo"]) {
+  if (!attendanceColumns.includes(col)) {
+    db.exec(`ALTER TABLE attendance ADD COLUMN ${col} TEXT`);
   }
 }
 

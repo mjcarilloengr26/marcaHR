@@ -60,6 +60,18 @@ function parseLocation(body, employeeId) {
   return { lat, lng, accuracy, distance_m };
 }
 
+// Accepts a base64 data URL (image compressed client-side) or null. Caps the
+// stored size defensively even though express.json()'s limit already bounds
+// the whole request — a single field shouldn't be allowed to approach that cap.
+function parsePhoto(body) {
+  const photo = body?.photo;
+  if (!photo) return null;
+  if (typeof photo !== "string" || !photo.startsWith("data:image/") || photo.length > 6_000_000) {
+    return null;
+  }
+  return photo;
+}
+
 function formatDistance(m) {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
 }
@@ -146,6 +158,8 @@ router.get("/", requireAuth, (req, res) => {
         clock_out_lng: null,
         clock_out_accuracy: null,
         clock_out_distance_m: null,
+        clock_in_photo: null,
+        clock_out_photo: null,
         note: null,
       });
     }
@@ -162,14 +176,16 @@ router.post("/clock-in", requireAuth, (req, res) => {
   const loc = parseLocation(req.body, req.user.employee_id);
   const geofenceError = checkGeofence(loc, req.user.employee_id);
   if (geofenceError) return res.status(403).json({ error: geofenceError });
+  const photo = parsePhoto(req.body);
   db.prepare(
-    `INSERT INTO attendance (employee_id, date, status, clock_in, clock_in_lat, clock_in_lng, clock_in_accuracy, clock_in_distance_m)
-     VALUES (?, ?, 'present', ?, ?, ?, ?, ?)
+    `INSERT INTO attendance (employee_id, date, status, clock_in, clock_in_lat, clock_in_lng, clock_in_accuracy, clock_in_distance_m, clock_in_photo)
+     VALUES (?, ?, 'present', ?, ?, ?, ?, ?, ?)
      ON CONFLICT(employee_id, date) DO UPDATE SET
        clock_in = excluded.clock_in, status = 'present',
        clock_in_lat = excluded.clock_in_lat, clock_in_lng = excluded.clock_in_lng,
-       clock_in_accuracy = excluded.clock_in_accuracy, clock_in_distance_m = excluded.clock_in_distance_m`
-  ).run(req.user.employee_id, today, now, loc.lat, loc.lng, loc.accuracy, loc.distance_m);
+       clock_in_accuracy = excluded.clock_in_accuracy, clock_in_distance_m = excluded.clock_in_distance_m,
+       clock_in_photo = excluded.clock_in_photo`
+  ).run(req.user.employee_id, today, now, loc.lat, loc.lng, loc.accuracy, loc.distance_m, photo);
   res.json(db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND date = ?").get(req.user.employee_id, today));
 });
 
@@ -182,10 +198,11 @@ router.post("/clock-out", requireAuth, (req, res) => {
   const loc = parseLocation(req.body, req.user.employee_id);
   const geofenceError = checkGeofence(loc, req.user.employee_id);
   if (geofenceError) return res.status(403).json({ error: geofenceError });
+  const photo = parsePhoto(req.body);
   db.prepare(
     `UPDATE attendance SET clock_out = ?, clock_out_lat = ?, clock_out_lng = ?,
-     clock_out_accuracy = ?, clock_out_distance_m = ? WHERE id = ?`
-  ).run(now, loc.lat, loc.lng, loc.accuracy, loc.distance_m, record.id);
+     clock_out_accuracy = ?, clock_out_distance_m = ?, clock_out_photo = ? WHERE id = ?`
+  ).run(now, loc.lat, loc.lng, loc.accuracy, loc.distance_m, photo, record.id);
   res.json(db.prepare("SELECT * FROM attendance WHERE id = ?").get(record.id));
 });
 
