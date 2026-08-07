@@ -98,7 +98,13 @@ router.post("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
     backfillCurrentPayrollIfGenerated(employee);
     res.status(201).json(employee);
   } catch (err) {
-    res.status(400).json({ error: "Could not create employee (duplicate email?)" });
+    if (err.message.includes("UNIQUE")) {
+      return res.status(400).json({ error: "An employee with that email already exists" });
+    }
+    if (err.message.includes("FOREIGN KEY")) {
+      return res.status(400).json({ error: "The selected department, location, or manager no longer exists — refresh the page and try again" });
+    }
+    res.status(400).json({ error: "Could not create employee" });
   }
 });
 
@@ -117,7 +123,17 @@ router.put("/:id", requireAuth, requireSelfOrRole((req) => req.params.id, "admin
   if (cols.length === 0) return res.json(existing);
   const setClause = cols.map((f) => `${f} = ?`).join(", ");
   const values = cols.map((f) => body[f]);
-  db.prepare(`UPDATE employees SET ${setClause} WHERE id = ?`).run(...values, req.params.id);
+  try {
+    db.prepare(`UPDATE employees SET ${setClause} WHERE id = ?`).run(...values, req.params.id);
+  } catch (err) {
+    if (err.message.includes("UNIQUE")) {
+      return res.status(400).json({ error: "An employee with that email already exists" });
+    }
+    if (err.message.includes("FOREIGN KEY")) {
+      return res.status(400).json({ error: "The selected department, location, or manager no longer exists — refresh the page and try again" });
+    }
+    return res.status(400).json({ error: "Could not update employee" });
+  }
   res.json(db.prepare("SELECT * FROM employees WHERE id = ?").get(req.params.id));
 });
 

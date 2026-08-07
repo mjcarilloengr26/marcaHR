@@ -32,8 +32,8 @@ export default function Employees() {
   };
 
   useEffect(() => {
-    api.get("/departments").then(setDepartments).catch(() => {});
-    api.get("/locations").then(setLocations).catch(() => {});
+    api.get("/departments").then(setDepartments).catch(() => setError("Could not load departments — department selection may be unavailable. Try reloading the page."));
+    api.get("/locations").then(setLocations).catch(() => setError("Could not load locations — location selection may be unavailable. Try reloading the page."));
   }, []);
 
   useEffect(() => {

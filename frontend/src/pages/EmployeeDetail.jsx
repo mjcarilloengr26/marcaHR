@@ -24,8 +24,8 @@ export default function EmployeeDetail() {
   useEffect(() => {
     load();
     setEditing(Boolean(routerLocation.state?.edit));
-    api.get("/departments").then(setDepartments).catch(() => {});
-    api.get("/locations").then(setLocations).catch(() => {});
+    api.get("/departments").then(setDepartments).catch(() => setError("Could not load departments — department selection may be unavailable. Try reloading the page."));
+    api.get("/locations").then(setLocations).catch(() => setError("Could not load locations — location selection may be unavailable. Try reloading the page."));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
