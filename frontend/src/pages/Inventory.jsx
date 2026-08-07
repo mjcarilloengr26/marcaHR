@@ -19,6 +19,10 @@ export default function Inventory() {
   const [stockForm, setStockForm] = useState({ quantity: "", reason: "" });
   const [historyItem, setHistoryItem] = useState(null);
   const [history, setHistory] = useState([]);
+  const [alarmThreshold, setAlarmThreshold] = useState(null);
+  const [showThresholdForm, setShowThresholdForm] = useState(false);
+  const [thresholdInput, setThresholdInput] = useState("");
+  const [savingThreshold, setSavingThreshold] = useState(false);
 
   const load = () => {
     const params = new URLSearchParams();
@@ -29,8 +33,12 @@ export default function Inventory() {
     api.get("/inventory/summary").then(setSummary).catch(() => {});
   };
 
+  const loadThreshold = () =>
+    api.get("/inventory/settings").then((s) => setAlarmThreshold(s.alarm_threshold_percent)).catch(() => {});
+
   useEffect(() => {
     load();
+    loadThreshold();
     api.get("/locations").then(setLocations).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -132,6 +140,35 @@ export default function Inventory() {
     }
   };
 
+  const openThresholdForm = () => {
+    setThresholdInput(alarmThreshold ?? "");
+    setShowThresholdForm(true);
+  };
+
+  const saveThreshold = async (e) => {
+    e.preventDefault();
+    setSavingThreshold(true);
+    setError("");
+    try {
+      const updated = await api.put("/inventory/settings", { alarm_threshold_percent: Number(thresholdInput) });
+      setAlarmThreshold(updated.alarm_threshold_percent);
+      setShowThresholdForm(false);
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingThreshold(false);
+    }
+  };
+
+  const statusBadge = (status) => {
+    const cls = status === "critical" ? "absent" : status === "low" ? "pending" : "active";
+    const label = status === "critical" ? "alarm" : status === "low" ? "low stock" : "ok";
+    return <span className={`badge badge-${cls}`}>{label}</span>;
+  };
+
+  const criticalItems = summary?.lowStockItems?.filter((i) => i.stock_status === "critical") || [];
+
   return (
     <div>
       <div className="page-header">
@@ -139,10 +176,22 @@ export default function Inventory() {
           <h1>Inventory</h1>
           <p className="subtitle">Stock levels, valuation, and movement history</p>
         </div>
-        <button className="btn" onClick={openAdd}>+ Add item</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-secondary" onClick={openThresholdForm}>
+            Alarm threshold: {alarmThreshold ?? "…"}%
+          </button>
+          <button className="btn" onClick={openAdd}>+ Add item</button>
+        </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+
+      {criticalItems.length > 0 && (
+        <div className="card" style={{ marginBottom: 16, borderColor: "var(--danger)", color: "var(--danger)" }}>
+          ⚠ Low stock alarm — {criticalItems.length} item{criticalItems.length > 1 ? "s" : ""} at or below {alarmThreshold}% of reorder level:{" "}
+          {criticalItems.map((i) => `${i.name} (${i.quantity_on_hand} ${i.unit})`).join(", ")}
+        </div>
+      )}
 
       {summary && (
         <div className="grid grid-4" style={{ marginBottom: 16 }}>
@@ -157,6 +206,10 @@ export default function Inventory() {
           <div className="stat-card">
             <div className="stat-value">{summary.lowStockCount}</div>
             <div className="stat-label">Low stock items</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-value">{summary.criticalCount}</div>
+            <div className="stat-label">In alarm zone</div>
           </div>
         </div>
       )}
@@ -199,7 +252,7 @@ export default function Inventory() {
                 <td>{money(i.unit_cost)}</td>
                 <td>{money(i.total_value)}</td>
                 <td>{i.location_name || "—"}</td>
-                <td><span className={`badge badge-${i.stock_status === "low" ? "absent" : "active"}`}>{i.stock_status === "low" ? "low stock" : "ok"}</span></td>
+                <td>{statusBadge(i.stock_status)}</td>
                 <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <button className="btn btn-sm" onClick={() => openStock(i, "in")}>Stock in</button>
                   <button className="btn btn-sm btn-secondary" onClick={() => openStock(i, "out")}>Stock out</button>
@@ -301,6 +354,34 @@ export default function Inventory() {
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setStockModal(null)}>Cancel</button>
               <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : "Confirm"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {showThresholdForm && (
+        <div className="modal-backdrop" onClick={() => setShowThresholdForm(false)}>
+          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={saveThreshold}>
+            <h2>Low stock alarm threshold</h2>
+            <p className="subtitle" style={{ marginTop: -8 }}>
+              An item enters the alarm zone (and HR/admin get emailed) once its quantity on hand falls to this
+              percentage of its reorder level.
+            </p>
+            <div className="form-row">
+              <label>Threshold (%)</label>
+              <input
+                type="number"
+                min="1"
+                max="100"
+                value={thresholdInput}
+                onChange={(e) => setThresholdInput(e.target.value)}
+                autoFocus
+                required
+              />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setShowThresholdForm(false)}>Cancel</button>
+              <button type="submit" className="btn" disabled={savingThreshold}>{savingThreshold ? "Saving…" : "Save"}</button>
             </div>
           </form>
         </div>

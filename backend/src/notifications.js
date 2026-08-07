@@ -84,6 +84,14 @@ function notifyWorkOrderAssigned({ employee_id, title }) {
   });
 }
 
+function notifyLowStockAlarm({ sku, name, quantity_on_hand, unit, reorder_level }) {
+  sendMail({
+    to: getHrEmails(),
+    subject: `Low stock alarm — ${name}`,
+    text: `${name} (SKU ${sku}) has dropped into the alarm zone: ${quantity_on_hand} ${unit} on hand (reorder level ${reorder_level} ${unit}).\n\nReview it in MARCA GROUP Inventory.`,
+  });
+}
+
 module.exports = {
   notifyLeaveSubmitted,
   notifyLeaveStatusChanged,
@@ -92,4 +100,5 @@ module.exports = {
   notifyCardAssigned,
   notifyReviewSubmitted,
   notifyWorkOrderAssigned,
+  notifyLowStockAlarm,
 };

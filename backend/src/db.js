@@ -313,7 +313,17 @@ CREATE TABLE IF NOT EXISTS inventory_transactions (
   created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Singleton settings row (id is pinned to 1) so the low-stock alarm threshold
+-- is a single editable value instead of a one-off config file.
+CREATE TABLE IF NOT EXISTS inventory_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  alarm_threshold_percent REAL NOT NULL DEFAULT 20,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `);
+
+db.prepare("INSERT OR IGNORE INTO inventory_settings (id, alarm_threshold_percent) VALUES (1, 20)").run();
 
 // node:sqlite's DatabaseSync has no built-in transaction helper (unlike better-sqlite3),
 // so provide a minimal equivalent for the call sites that expect db.transaction(fn).

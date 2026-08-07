@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
+const { notifyLowStockAlarm } = require("../notifications");
 
 const router = express.Router();
 
@@ -9,6 +10,34 @@ const SELECT_BASE = `
   FROM inventory_items i
   LEFT JOIN locations l ON l.id = i.location_id
 `;
+
+function getAlarmThresholdPercent() {
+  const row = db.prepare("SELECT alarm_threshold_percent FROM inventory_settings WHERE id = 1").get();
+  return row ? row.alarm_threshold_percent : 20;
+}
+
+// Three tiers: "ok" (above reorder level), "low" (at/below reorder level —
+// time to reorder), "critical" (at/below the alarm threshold % of reorder
+// level — the alarm zone that also triggers an email notification).
+function computeStatus(item, thresholdPercent) {
+  const alarmQty = item.reorder_level * (thresholdPercent / 100);
+  if (item.quantity_on_hand <= alarmQty) return "critical";
+  if (item.quantity_on_hand <= item.reorder_level) return "low";
+  return "ok";
+}
+
+router.get("/settings", requireAuth, requireRole("admin", "hr"), (req, res) => {
+  res.json({ alarm_threshold_percent: getAlarmThresholdPercent() });
+});
+
+router.put("/settings", requireAuth, requireRole("admin", "hr"), (req, res) => {
+  const pct = Number(req.body?.alarm_threshold_percent);
+  if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
+    return res.status(400).json({ error: "alarm_threshold_percent must be a number between 0 and 100" });
+  }
+  db.prepare("UPDATE inventory_settings SET alarm_threshold_percent = ?, updated_at = datetime('now') WHERE id = 1").run(pct);
+  res.json({ alarm_threshold_percent: pct });
+});
 
 router.get("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
   let sql = `${SELECT_BASE} WHERE 1=1`;
@@ -24,25 +53,39 @@ router.get("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
   }
   sql += " ORDER BY i.name ASC";
   const items = db.prepare(sql).all(...params);
+  const thresholdPercent = getAlarmThresholdPercent();
   const withStatus = items.map((i) => ({
     ...i,
-    stock_status: i.quantity_on_hand <= i.reorder_level ? "low" : "ok",
+    stock_status: computeStatus(i, thresholdPercent),
     total_value: i.quantity_on_hand * i.unit_cost,
   }));
-  const filtered = req.query.low_stock === "true" ? withStatus.filter((i) => i.stock_status === "low") : withStatus;
+  const filtered = req.query.low_stock === "true" ? withStatus.filter((i) => i.stock_status !== "ok") : withStatus;
   res.json(filtered);
 });
 
 router.get("/summary", requireAuth, requireRole("admin", "hr"), (req, res) => {
   const items = db.prepare("SELECT * FROM inventory_items").all();
+  const thresholdPercent = getAlarmThresholdPercent();
+  const withStatus = items.map((i) => ({ ...i, stock_status: computeStatus(i, thresholdPercent) }));
   const totalItems = items.length;
   const totalValue = items.reduce((sum, i) => sum + i.quantity_on_hand * i.unit_cost, 0);
-  const lowStockItems = items.filter((i) => i.quantity_on_hand <= i.reorder_level);
+  const notOk = withStatus.filter((i) => i.stock_status !== "ok");
+  const critical = withStatus.filter((i) => i.stock_status === "critical");
   res.json({
     totalItems,
     totalValue,
-    lowStockCount: lowStockItems.length,
-    lowStockItems: lowStockItems.map((i) => ({ id: i.id, sku: i.sku, name: i.name, quantity_on_hand: i.quantity_on_hand, reorder_level: i.reorder_level })),
+    alarmThresholdPercent: thresholdPercent,
+    lowStockCount: notOk.length,
+    criticalCount: critical.length,
+    lowStockItems: notOk.map((i) => ({
+      id: i.id,
+      sku: i.sku,
+      name: i.name,
+      quantity_on_hand: i.quantity_on_hand,
+      reorder_level: i.reorder_level,
+      unit: i.unit,
+      stock_status: i.stock_status,
+    })),
   });
 });
 
@@ -111,6 +154,16 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), (req, res) => {
   res.json(db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(req.params.id));
 });
 
+// Emails HR/admin the moment an item's quantity crosses INTO the alarm zone
+// (not on every movement while it stays there, and not on the way out).
+function notifyIfEnteredCritical(existing, newQuantity, thresholdPercent) {
+  const oldStatus = computeStatus(existing, thresholdPercent);
+  const newStatus = computeStatus({ ...existing, quantity_on_hand: newQuantity }, thresholdPercent);
+  if (newStatus === "critical" && oldStatus !== "critical") {
+    notifyLowStockAlarm({ ...existing, quantity_on_hand: newQuantity });
+  }
+}
+
 function moveStock(req, res, type, sign) {
   const existing = db.prepare("SELECT * FROM inventory_items WHERE id = ?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "Inventory item not found" });
@@ -130,6 +183,7 @@ function moveStock(req, res, type, sign) {
        VALUES (?, ?, ?, ?, ?, ?)`
     ).run(req.params.id, type, quantity, reason || null, reference || null, req.user.employee_id || null);
   })();
+  if (type === "out") notifyIfEnteredCritical(existing, newQuantity, getAlarmThresholdPercent());
   res.json(db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(req.params.id));
 }
 
@@ -154,6 +208,7 @@ router.post("/:id/adjust", requireAuth, requireRole("admin", "hr"), (req, res) =
        VALUES (?, 'adjustment', ?, ?, NULL, ?)`
     ).run(req.params.id, delta, reason || null, req.user.employee_id || null);
   })();
+  notifyIfEnteredCritical(existing, newQuantity, getAlarmThresholdPercent());
   res.json(db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(req.params.id));
 });
 
