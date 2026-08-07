@@ -17,9 +17,14 @@ function distanceMeters(lat1, lng1, lat2, lng2) {
 }
 
 // The geofence target for an employee: their assigned location (locations table)
-// takes priority; falls back to a single global office via OFFICE_LAT/OFFICE_LNG
-// env vars when the employee has no assigned location. Null means "no geofence" —
-// location is then purely informational, not enforced.
+// takes priority. If the system already has real Locations set up, an employee
+// with none assigned simply hasn't been onboarded yet — clock-in stays
+// unenforced (not silently checked against some other office) until HR
+// assigns them one, otherwise a brand-new hire can be blocked by a geofence
+// that has nothing to do with where they actually work.
+// Only falls back to the single global OFFICE_LAT/OFFICE_LNG office when the
+// system has no Locations configured at all (legacy single-office mode).
+// Null means "no geofence" — location is then purely informational.
 function resolveTargetLocation(employeeId) {
   const assigned = db
     .prepare(
@@ -29,6 +34,9 @@ function resolveTargetLocation(employeeId) {
     )
     .get(employeeId);
   if (assigned) return assigned;
+
+  const anyLocationsExist = db.prepare("SELECT 1 FROM locations LIMIT 1").get();
+  if (anyLocationsExist) return null;
 
   const lat = Number(process.env.OFFICE_LAT);
   const lng = Number(process.env.OFFICE_LNG);
