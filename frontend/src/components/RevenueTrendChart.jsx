@@ -1,11 +1,21 @@
-const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+import { useEffect, useRef, useState } from "react";
 
-const WIDTH = 1000;
+const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+// Compact form for the y-axis (₱1,200,000 -> ₱1.2M) — the full format is reserved
+// for hover tooltips, where there's room, so axis labels don't crowd narrow screens.
+const moneyCompact = (n) => {
+  const v = Number(n || 0);
+  if (v >= 1_000_000) return `₱${(v / 1_000_000).toFixed(v % 1_000_000 === 0 ? 0 : 1)}M`;
+  if (v >= 1_000) return `₱${(v / 1_000).toFixed(0)}k`;
+  return `₱${v}`;
+};
+
 const HEIGHT = 280;
-const PAD_LEFT = 64;
-const PAD_RIGHT = 16;
+const PAD_LEFT = 56;
+const PAD_RIGHT = 12;
 const PAD_TOP = 16;
-const PAD_BOTTOM = 32;
+const PAD_BOTTOM = 28;
+const MOBILE_BREAKPOINT = 480;
 
 // This-year vs last-year is an identity comparison (two distinct series), not a
 // magnitude ramp, so it gets two fixed categorical hues rather than shades of one
@@ -20,10 +30,37 @@ function buildPath(values, xFor, yFor) {
   return values.map((v, i) => `${i === 0 ? "M" : "L"} ${xFor(i)} ${yFor(v)}`).join(" ");
 }
 
+// Measures the container's real rendered width so the SVG's viewBox can be set
+// 1:1 with actual CSS pixels — keeping font-size a true, legible size at any
+// screen width, rather than shrinking proportionally the way a fixed-viewBox
+// SVG scaled via width:100% would (illegible axis labels on narrow phones).
+function useContainerWidth() {
+  const ref = useRef(null);
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const el = ref.current;
+    const observer = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width;
+      if (w) setWidth(w);
+    });
+    observer.observe(el);
+    setWidth(el.getBoundingClientRect().width);
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, width];
+}
+
 export default function RevenueTrendChart({ thisYear, lastYear, months }) {
+  const [containerRef, measuredWidth] = useContainerWidth();
+
   if (!months || months.length === 0) return null;
 
-  const innerWidth = WIDTH - PAD_LEFT - PAD_RIGHT;
+  const width = measuredWidth || 800;
+  const isMobile = width < MOBILE_BREAKPOINT;
+  const innerWidth = width - PAD_LEFT - PAD_RIGHT;
   const innerHeight = HEIGHT - PAD_TOP - PAD_BOTTOM;
   const maxValue = Math.max(1, ...months.map((m) => Math.max(m.thisYear, m.lastYear)));
   // Round the axis ceiling up to a friendly step so gridline labels aren't jagged numbers.
@@ -33,13 +70,17 @@ export default function RevenueTrendChart({ thisYear, lastYear, months }) {
   const xFor = (i) => PAD_LEFT + (innerWidth * i) / (months.length - 1 || 1);
   const yFor = (v) => PAD_TOP + innerHeight - (innerHeight * v) / niceMax;
 
-  const gridLines = [0, 0.25, 0.5, 0.75, 1];
+  const gridLines = isMobile ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1];
+  // Every month on a full-size screen; every other month once it's too narrow for
+  // 12 non-overlapping labels, so text never gets crammed together.
+  const labelIndices = isMobile ? months.map((_, i) => i).filter((i) => i % 2 === 0) : months.map((_, i) => i);
+  const fontSize = isMobile ? 10 : 11;
   const thisYearValues = months.map((m) => m.thisYear);
   const lastYearValues = months.map((m) => m.lastYear);
 
   return (
     <div className="card" style={{ marginBottom: 16 }}>
-      <div className="page-header" style={{ marginBottom: 4 }}>
+      <div className="page-header" style={{ marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
         <div>
           <h2>Revenue Trend</h2>
           <p className="subtitle" style={{ margin: 0 }}>
@@ -58,39 +99,43 @@ export default function RevenueTrendChart({ thisYear, lastYear, months }) {
         </div>
       </div>
 
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} style={{ width: "100%", height: "auto", display: "block" }} role="img" aria-label={`Monthly order revenue, ${thisYear} versus ${lastYear}`}>
-        {gridLines.map((g) => {
-          const y = PAD_TOP + innerHeight * (1 - g);
-          return (
-            <g key={g}>
-              <line x1={PAD_LEFT} x2={WIDTH - PAD_RIGHT} y1={y} y2={y} stroke="var(--border)" strokeWidth="1" />
-              <text x={PAD_LEFT - 8} y={y + 4} textAnchor="end" fontSize="11" fill="var(--text-muted)">
-                {money(niceMax * g)}
+      <div ref={containerRef}>
+        {width > 0 && (
+          <svg width={width} height={HEIGHT} viewBox={`0 0 ${width} ${HEIGHT}`} style={{ display: "block" }} role="img" aria-label={`Monthly order revenue, ${thisYear} versus ${lastYear}`}>
+            {gridLines.map((g) => {
+              const y = PAD_TOP + innerHeight * (1 - g);
+              return (
+                <g key={g}>
+                  <line x1={PAD_LEFT} x2={width - PAD_RIGHT} y1={y} y2={y} stroke="var(--border)" strokeWidth="1" />
+                  <text x={PAD_LEFT - 8} y={y + 4} textAnchor="end" fontSize={fontSize} fill="var(--text-muted)">
+                    {moneyCompact(niceMax * g)}
+                  </text>
+                </g>
+              );
+            })}
+
+            {labelIndices.map((i) => (
+              <text key={months[i].month} x={xFor(i)} y={HEIGHT - 8} textAnchor="middle" fontSize={fontSize} fill="var(--text-muted)">
+                {months[i].label}
               </text>
-            </g>
-          );
-        })}
+            ))}
 
-        {months.map((m, i) => (
-          <text key={m.month} x={xFor(i)} y={HEIGHT - 8} textAnchor="middle" fontSize="11" fill="var(--text-muted)">
-            {m.label}
-          </text>
-        ))}
+            <path d={buildPath(lastYearValues, xFor, yFor)} fill="none" stroke={LAST_YEAR_COLOR} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+            <path d={buildPath(thisYearValues, xFor, yFor)} fill="none" stroke={THIS_YEAR_COLOR} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
 
-        <path d={buildPath(lastYearValues, xFor, yFor)} fill="none" stroke={LAST_YEAR_COLOR} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        <path d={buildPath(thisYearValues, xFor, yFor)} fill="none" stroke={THIS_YEAR_COLOR} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-
-        {months.map((m, i) => (
-          <circle key={`ly-${m.month}`} cx={xFor(i)} cy={yFor(m.lastYear)} r="4" fill="var(--surface)" stroke={LAST_YEAR_COLOR} strokeWidth="2">
-            <title>{`${m.label} ${lastYear}: ${money(m.lastYear)}`}</title>
-          </circle>
-        ))}
-        {months.map((m, i) => (
-          <circle key={`ty-${m.month}`} cx={xFor(i)} cy={yFor(m.thisYear)} r="4" fill="var(--surface)" stroke={THIS_YEAR_COLOR} strokeWidth="2">
-            <title>{`${m.label} ${thisYear}: ${money(m.thisYear)}`}</title>
-          </circle>
-        ))}
-      </svg>
+            {months.map((m, i) => (
+              <circle key={`ly-${m.month}`} cx={xFor(i)} cy={yFor(m.lastYear)} r={isMobile ? 3 : 4} fill="var(--surface)" stroke={LAST_YEAR_COLOR} strokeWidth="2">
+                <title>{`${m.label} ${lastYear}: ${money(m.lastYear)}`}</title>
+              </circle>
+            ))}
+            {months.map((m, i) => (
+              <circle key={`ty-${m.month}`} cx={xFor(i)} cy={yFor(m.thisYear)} r={isMobile ? 3 : 4} fill="var(--surface)" stroke={THIS_YEAR_COLOR} strokeWidth="2">
+                <title>{`${m.label} ${thisYear}: ${money(m.thisYear)}`}</title>
+              </circle>
+            ))}
+          </svg>
+        )}
+      </div>
     </div>
   );
 }
