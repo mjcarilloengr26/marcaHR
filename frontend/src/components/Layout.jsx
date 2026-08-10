@@ -63,12 +63,12 @@ const NAV_ITEMS = [
   { to: "/purchase-orders", label: "Purchase Orders", icon: "📝", roles: ["admin", "hr"] },
   { to: "/inventory", label: "Inventory", icon: "📦", roles: ["admin", "hr"] },
 
+  { section: "Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true },
+  { to: "/reports", label: "Export Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true },
+
   { section: "Administration", icon: "⚙️", roles: ["admin"] },
   { to: "/users", label: "Users", icon: "👤", roles: ["admin"] },
   { to: "/events", label: "Events", icon: "📜", roles: ["admin"] },
-
-  { section: "Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true },
-  { to: "/reports", label: "Export Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true },
 ];
 
 export default function Layout({ children }) {

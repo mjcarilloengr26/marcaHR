@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import Funnel from "../components/Funnel";
 import Meter from "../components/Meter";
+import RevenueTrendChart from "../components/RevenueTrendChart";
 
 const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 const MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -34,6 +35,7 @@ function YtdComparison({ thisYear, lastYear }) {
 
 export default function SalesDashboard() {
   const [stats, setStats] = useState(null);
+  const [revenueTrend, setRevenueTrend] = useState(null);
   const [targets, setTargets] = useState([]);
   const [error, setError] = useState("");
   const now = new Date();
@@ -52,6 +54,7 @@ export default function SalesDashboard() {
 
   useEffect(() => {
     api.get("/sales/stats").then(setStats).catch((err) => setError(err.message));
+    api.get("/sales/revenue-trend").then(setRevenueTrend).catch((err) => setError(err.message));
   }, []);
 
   useEffect(() => {
@@ -136,6 +139,8 @@ export default function SalesDashboard() {
           </div>
         </div>
       </div>
+
+      {revenueTrend && <RevenueTrendChart thisYear={revenueTrend.thisYear} lastYear={revenueTrend.lastYear} months={revenueTrend.months} />}
 
       <div className="grid grid-2" style={{ marginBottom: 16 }}>
         <Funnel
