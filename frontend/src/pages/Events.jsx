@@ -16,6 +16,13 @@ const ACTION_LABELS = {
   deal_stage_change: "Opportunity stage change",
   update_sales_target: "Update sales target",
   export_excel: "Export to Excel",
+  update_leave_type: "Update leave type",
+  generate_payroll: "Generate payroll",
+  update_payroll: "Update payroll",
+  update_payroll_settings: "Update payroll settings",
+  email_sent: "Email sent",
+  email_failed: "Email failed",
+  email_skipped: "Email skipped",
 };
 
 function actionLabel(action) {
