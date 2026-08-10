@@ -1,6 +1,36 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+
+const MANILA_TZ = "Asia/Manila";
+const clockFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: MANILA_TZ,
+  weekday: "short",
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  hour12: true,
+});
+
+// Always Philippine time regardless of the viewer's own device timezone —
+// matches how attendance/leave/expense timestamps are anchored server-side,
+// so what's on screen agrees with what got recorded.
+function TopbarClock() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="topbar-clock">
+      {clockFormatter.format(now)} <span className="topbar-clock-tz">GMT+8</span>
+    </div>
+  );
+}
 
 const NAV_ITEMS = [
   { to: "/", label: "Overview", icon: "🏠", roles: ["admin", "hr", "employee"] },
@@ -98,6 +128,7 @@ export default function Layout({ children }) {
           >
             ☰
           </button>
+          <TopbarClock />
           <div className="user-info">
             {employee?.photo ? (
               <img className="topbar-avatar" src={employee.photo} alt="" />
