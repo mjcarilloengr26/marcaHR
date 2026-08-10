@@ -52,8 +52,8 @@ const NAV_ITEMS = [
   { to: "/expenses", label: "Expenses", icon: "🧾", roles: ["admin", "hr", "employee"] },
 
   { section: "Sales", icon: "💹", roles: ["admin", "hr", "employee"], salesOnly: true },
-  { to: "/sales", label: "Sales Dashboard", icon: "📊", roles: ["admin", "hr"] },
-  { to: "/deals", label: "Sales Opportunities", icon: "🎯", roles: ["admin", "hr", "employee"], salesOnly: true },
+  { to: "/sales", label: "Dashboard", icon: "📊", roles: ["admin", "hr"] },
+  { to: "/deals", label: "Opportunities", icon: "🎯", roles: ["admin", "hr", "employee"], salesOnly: true },
   { to: "/orders", label: "Orders", icon: "🛍️", roles: ["admin", "hr"] },
   { to: "/billing", label: "Billing", icon: "💳", roles: ["admin", "hr"] },
 
