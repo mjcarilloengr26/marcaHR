@@ -24,6 +24,7 @@ const workOrdersRoutes = require("./routes/workorders.routes");
 const invoicesRoutes = require("./routes/invoices.routes");
 const purchaseOrdersRoutes = require("./routes/purchaseorders.routes");
 const inventoryRoutes = require("./routes/inventory.routes");
+const reportsRoutes = require("./routes/reports.routes");
 
 const app = express();
 app.use(cors());
@@ -54,6 +55,7 @@ app.use("/api/work-orders", workOrdersRoutes);
 app.use("/api/invoices", invoicesRoutes);
 app.use("/api/purchase-orders", purchaseOrdersRoutes);
 app.use("/api/inventory", inventoryRoutes);
+app.use("/api/reports", reportsRoutes);
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 

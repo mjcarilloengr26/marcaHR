@@ -65,6 +65,9 @@ const NAV_ITEMS = [
 
   { section: "Administration", icon: "⚙️", roles: ["admin"] },
   { to: "/users", label: "Users", icon: "👤", roles: ["admin"] },
+
+  { section: "Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true },
+  { to: "/reports", label: "Export Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true },
 ];
 
 export default function Layout({ children }) {
@@ -85,8 +88,19 @@ export default function Layout({ children }) {
     (employee?.department_name || "").toLowerCase().includes("sales") ||
     (employee?.position || "").toLowerCase().includes("sales");
 
+  // The Reports export is Admin/Finance territory specifically — unlike Sales
+  // above, HR doesn't get blanket access here, only admin or an employee (of
+  // any role) who's actually in Finance by department or job title.
+  const isFinanceOrAdmin =
+    user?.role === "admin" ||
+    (employee?.department_name || "").toLowerCase().includes("finance") ||
+    (employee?.position || "").toLowerCase().includes("finance");
+
   const visibleNavItems = NAV_ITEMS.filter(
-    (item) => item.roles.includes(user?.role) && (!item.salesOnly || isSalesEmployee)
+    (item) =>
+      item.roles.includes(user?.role) &&
+      (!item.salesOnly || isSalesEmployee) &&
+      (!item.financeOnly || isFinanceOrAdmin)
   );
 
   return (

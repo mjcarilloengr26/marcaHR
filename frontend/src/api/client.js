@@ -42,3 +42,31 @@ export const api = {
   put: (path, body) => request(path, { method: "PUT", body }),
   del: (path) => request(path, { method: "DELETE" }),
 };
+
+// For file downloads (e.g. Excel export) — the JSON-only `request` helper above
+// can't handle a binary response, and the browser needs a real click-to-download
+// flow rather than just the fetched bytes.
+export async function downloadFile(path, fallbackFilename) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const contentType = res.headers.get("content-type") || "";
+    const data = contentType.includes("application/json") ? await res.json() : null;
+    throw new Error((data && data.error) || `Download failed (${res.status})`);
+  }
+  const disposition = res.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const filename = match ? match[1] : fallbackFilename;
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
