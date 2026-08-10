@@ -19,6 +19,11 @@ function getTransporter() {
     port,
     secure: port === 465,
     auth: { user: SMTP_USER, pass: SMTP_PASS },
+    // Render's outbound network has no IPv6 route (same gap hit earlier with
+    // Supabase's direct connection host) — smtp.gmail.com resolves dual-stack,
+    // and without this the socket sometimes gets the IPv6 address and fails
+    // with ENETUNREACH. Forcing IPv4 avoids that family entirely.
+    family: 4,
   });
   return transporter;
 }
