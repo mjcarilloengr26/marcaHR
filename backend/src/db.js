@@ -1,49 +1,101 @@
-const path = require("path");
-const fs = require("fs");
-const { DatabaseSync } = require("node:sqlite");
+const { Pool } = require("pg");
 
-// DATA_DIR lets a deploy point the SQLite file at a mounted persistent disk
-// (e.g. Render's disk add-on) instead of the container's ephemeral local
-// filesystem, which is wiped on every redeploy/restart on the free tier.
-// Falls back to the local ./data folder for dev, matching prior behavior.
-const dataDir = process.env.DATA_DIR || path.join(__dirname, "..", "data");
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-
-const db = new DatabaseSync(path.join(dataDir, "hr.db"));
-db.exec("PRAGMA journal_mode = WAL");
-db.exec("PRAGMA foreign_keys = ON");
-
-// sales_targets' shape changed (monthly-only -> monthly/quarterly/yearly) before this
-// table was ever deployed anywhere, so drop and let CREATE TABLE recreate it below
-// rather than carrying migration logic for a shape with no real data at stake.
-const existingTargetsTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sales_targets'").get();
-if (existingTargetsTable) {
-  const cols = db.prepare("PRAGMA table_info(sales_targets)").all().map((c) => c.name);
-  if (cols.includes("period_month")) {
-    db.exec("DROP TABLE sales_targets");
-  }
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL is required (a Postgres connection string, e.g. from Supabase)");
 }
 
-// work_orders' shape changed (internal request ticket -> customer-facing job tied to
-// an order) before this table was ever deployed anywhere, so drop and recreate rather
-// than migrate a shape with no real data at stake.
-const existingWorkOrdersTable = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='work_orders'").get();
-if (existingWorkOrdersTable) {
-  const cols = db.prepare("PRAGMA table_info(work_orders)").all().map((c) => c.name);
-  if (!cols.includes("work_order_number")) {
-    db.exec("DROP TABLE work_orders");
-  }
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
+
+// Every route file was written against node:sqlite's synchronous
+// db.prepare(sql).get/all/run(...params) shape. Rather than rewrite every
+// query across ~20 route files into a different API, this shim keeps that
+// exact call shape but backs it with Postgres — callers just need to await
+// the result now (get/all/run all return promises).
+//
+// currentExecutor lets db.transaction() route every query issued inside its
+// callback through one checked-out client instead of the shared pool, so
+// multi-statement writes are actually atomic. Safe as plain module state
+// because Node is single-threaded and every transaction() call is awaited to
+// completion (BEGIN...COMMIT/ROLLBACK) before the next statement runs — two
+// transactions can't interleave and stomp on this variable.
+let currentExecutor = pool;
+
+// SQLite placeholders are positional "?"; Postgres wants "$1, $2, ...".
+function toPgParams(sql) {
+  let i = 0;
+  return sql.replace(/\?/g, () => `$${++i}`);
 }
 
-db.exec(`
+function prepare(sql) {
+  const pgSql = toPgParams(sql);
+  // node:sqlite's .run() returns lastInsertRowid for INSERTs; Postgres has no
+  // equivalent, so auto-append RETURNING id to any INSERT that doesn't
+  // already have one. Every table in this schema has an `id` primary key, so
+  // this is safe everywhere .run() is used for an insert.
+  const isPlainInsert = /^\s*insert/i.test(sql) && !/returning/i.test(sql);
+  const runSql = isPlainInsert ? `${pgSql} RETURNING id` : pgSql;
+  return {
+    async get(...params) {
+      const { rows } = await currentExecutor.query(pgSql, params);
+      return rows[0];
+    },
+    async all(...params) {
+      const { rows } = await currentExecutor.query(pgSql, params);
+      return rows;
+    },
+    async run(...params) {
+      const { rows, rowCount } = await currentExecutor.query(runSql, params);
+      return { lastInsertRowid: rows[0]?.id, changes: rowCount };
+    },
+  };
+}
+
+const db = {
+  prepare,
+  async exec(sql) {
+    await currentExecutor.query(sql);
+  },
+  transaction(fn) {
+    return async (...args) => {
+      const client = await pool.connect();
+      const prevExecutor = currentExecutor;
+      currentExecutor = client;
+      try {
+        await client.query("BEGIN");
+        const result = await fn(...args);
+        await client.query("COMMIT");
+        return result;
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        currentExecutor = prevExecutor;
+        client.release();
+      }
+    };
+  },
+};
+
+// Schema is created fresh against Supabase (no pre-existing production data
+// to migrate), so this is the final table shape directly — no need to carry
+// the historical ALTER TABLE patches that accumulated over the SQLite era.
+// "TEXT ... DEFAULT to_char(now() AT TIME ZONE 'UTC', ...)" keeps timestamp
+// columns as plain UTC-formatted strings in exactly the shape the app's JS
+// already parses everywhere (e.g. "2026-08-07 03:15:59"), rather than
+// switching to native Postgres timestamp types and having to touch every
+// date-handling call site across the app.
+const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS departments (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   description TEXT
 );
 
 CREATE TABLE IF NOT EXISTS locations (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   lat REAL NOT NULL,
   lng REAL NOT NULL,
@@ -52,7 +104,7 @@ CREATE TABLE IF NOT EXISTS locations (
 );
 
 CREATE TABLE IF NOT EXISTS employees (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   first_name TEXT NOT NULL,
   last_name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
@@ -66,26 +118,26 @@ CREATE TABLE IF NOT EXISTS employees (
   base_salary REAL DEFAULT 0,
   address TEXT,
   photo TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('admin','hr','employee')),
   employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS leave_types (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   default_days_per_year INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS leave_balances (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   leave_type_id INTEGER NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE,
   year INTEGER NOT NULL,
@@ -95,7 +147,7 @@ CREATE TABLE IF NOT EXISTS leave_balances (
 );
 
 CREATE TABLE IF NOT EXISTS leave_requests (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   leave_type_id INTEGER NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE,
   start_date TEXT NOT NULL,
@@ -108,11 +160,11 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   attachment_name TEXT,
   attachment_type TEXT,
   attachment_data TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS attendance (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   date TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'present' CHECK(status IN ('present','absent','late','half_day','leave')),
@@ -133,7 +185,7 @@ CREATE TABLE IF NOT EXISTS attendance (
 );
 
 CREATE TABLE IF NOT EXISTS payroll_records (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   period_month INTEGER NOT NULL,
   period_year INTEGER NOT NULL,
@@ -144,12 +196,12 @@ CREATE TABLE IF NOT EXISTS payroll_records (
   net_pay REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','finalized','paid')),
   notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
   UNIQUE(employee_id, period_month, period_year)
 );
 
 CREATE TABLE IF NOT EXISTS review_cycles (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   start_date TEXT,
   end_date TEXT,
@@ -157,7 +209,7 @@ CREATE TABLE IF NOT EXISTS review_cycles (
 );
 
 CREATE TABLE IF NOT EXISTS performance_reviews (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   cycle_id INTEGER NOT NULL REFERENCES review_cycles(id) ON DELETE CASCADE,
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   reviewer_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
@@ -167,18 +219,18 @@ CREATE TABLE IF NOT EXISTS performance_reviews (
   improvements TEXT,
   comments TEXT,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','acknowledged')),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
   UNIQUE(cycle_id, employee_id)
 );
 
 CREATE TABLE IF NOT EXISTS board_columns (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   position INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS board_cards (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   column_id INTEGER NOT NULL REFERENCES board_columns(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   description TEXT,
@@ -186,11 +238,11 @@ CREATE TABLE IF NOT EXISTS board_cards (
   due_date TEXT,
   position INTEGER NOT NULL DEFAULT 0,
   created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS expense_reports (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   cash_advance_amount REAL NOT NULL DEFAULT 0,
@@ -200,11 +252,11 @@ CREATE TABLE IF NOT EXISTS expense_reports (
   reviewed_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   review_note TEXT,
   submitted_at TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS expense_items (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   report_id INTEGER NOT NULL REFERENCES expense_reports(id) ON DELETE CASCADE,
   expense_date TEXT NOT NULL,
   category TEXT,
@@ -217,7 +269,7 @@ CREATE TABLE IF NOT EXISTS expense_items (
 );
 
 CREATE TABLE IF NOT EXISTS deals (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   title TEXT NOT NULL,
   customer_name TEXT NOT NULL,
   value REAL NOT NULL DEFAULT 0,
@@ -225,35 +277,35 @@ CREATE TABLE IF NOT EXISTS deals (
   owner_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   expected_close_date TEXT,
   notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS orders (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   order_number TEXT NOT NULL UNIQUE,
   customer_name TEXT NOT NULL,
   amount REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'placed' CHECK(status IN ('placed','processing','shipped','delivered','cancelled')),
   owner_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   deal_id INTEGER UNIQUE REFERENCES deals(id) ON DELETE SET NULL,
-  order_date TEXT NOT NULL DEFAULT (date('now')),
+  order_date TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
   notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS sales_targets (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   period_type TEXT NOT NULL DEFAULT 'monthly' CHECK(period_type IN ('monthly','quarterly','yearly')),
   period_year INTEGER NOT NULL,
   period_index INTEGER NOT NULL DEFAULT 0,
   target_amount REAL NOT NULL DEFAULT 0,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
   UNIQUE(employee_id, period_type, period_year, period_index)
 );
 
 CREATE TABLE IF NOT EXISTS work_orders (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   work_order_number TEXT NOT NULL UNIQUE,
   title TEXT NOT NULL,
   customer_name TEXT NOT NULL,
@@ -266,40 +318,40 @@ CREATE TABLE IF NOT EXISTS work_orders (
   scheduled_date TEXT,
   completed_at TEXT,
   notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS invoices (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   invoice_number TEXT NOT NULL UNIQUE,
   order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
   customer_name TEXT NOT NULL,
   amount REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','sent','paid','overdue','cancelled')),
-  issue_date TEXT NOT NULL DEFAULT (date('now')),
+  issue_date TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
   due_date TEXT,
   paid_date TEXT,
   notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS purchase_orders (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   po_number TEXT NOT NULL UNIQUE,
   vendor_name TEXT NOT NULL,
   description TEXT,
   amount REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','received','cancelled')),
   requested_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
-  order_date TEXT NOT NULL DEFAULT (date('now')),
+  order_date TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
   expected_delivery_date TEXT,
   received_date TEXT,
   notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
 CREATE TABLE IF NOT EXISTS inventory_items (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   sku TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL,
   category TEXT,
@@ -310,121 +362,54 @@ CREATE TABLE IF NOT EXISTS inventory_items (
   unit_price REAL NOT NULL DEFAULT 0,
   location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
   notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
--- Every stock change (received, consumed, or manually adjusted) is logged here
--- rather than letting callers write quantity_on_hand directly, so there is
--- always an audit trail of who moved how much stock and why.
 CREATE TABLE IF NOT EXISTS inventory_transactions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  id SERIAL PRIMARY KEY,
   item_id INTEGER NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
   type TEXT NOT NULL CHECK(type IN ('in','out','adjustment')),
   quantity REAL NOT NULL,
   reason TEXT,
   reference TEXT,
   created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
--- Singleton settings row (id is pinned to 1) so the low-stock alarm threshold
--- is a single editable value instead of a one-off config file.
 CREATE TABLE IF NOT EXISTS inventory_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   alarm_threshold_percent REAL NOT NULL DEFAULT 20,
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
--- Singleton toggle so facial verification at clock-in/out can be switched
--- off (default) while testing, without a code change or redeploy.
 CREATE TABLE IF NOT EXISTS attendance_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   face_recognition_enabled INTEGER NOT NULL DEFAULT 0,
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
-`);
 
-db.prepare("INSERT OR IGNORE INTO inventory_settings (id, alarm_threshold_percent) VALUES (1, 20)").run();
-db.prepare("INSERT OR IGNORE INTO attendance_settings (id, face_recognition_enabled) VALUES (1, 0)").run();
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_deal_id ON orders(deal_id) WHERE deal_id IS NOT NULL;
+`;
 
-// node:sqlite's DatabaseSync has no built-in transaction helper (unlike better-sqlite3),
-// so provide a minimal equivalent for the call sites that expect db.transaction(fn).
-db.transaction = function (fn) {
-  return function (...args) {
-    db.exec("BEGIN");
-    try {
-      const result = fn(...args);
-      db.exec("COMMIT");
-      return result;
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
-  };
+let migrated = null;
+// Idempotent: safe to call on every boot. Runs the full schema once per
+// process (CREATE TABLE IF NOT EXISTS makes re-running harmless besides).
+db.migrate = function () {
+  if (!migrated) {
+    migrated = pool
+      .query(SCHEMA_SQL)
+      .then(() =>
+        pool.query(
+          "INSERT INTO inventory_settings (id, alarm_threshold_percent) VALUES (1, 20) ON CONFLICT (id) DO NOTHING"
+        )
+      )
+      .then(() =>
+        pool.query(
+          "INSERT INTO attendance_settings (id, face_recognition_enabled) VALUES (1, 0) ON CONFLICT (id) DO NOTHING"
+        )
+      );
+  }
+  return migrated;
 };
-
-// Lightweight migration for databases created before the GPS columns existed:
-// CREATE TABLE IF NOT EXISTS doesn't alter existing tables, so add any missing columns here.
-const attendanceColumns = db.prepare("PRAGMA table_info(attendance)").all().map((c) => c.name);
-for (const col of [
-  "clock_in_lat",
-  "clock_in_lng",
-  "clock_in_accuracy",
-  "clock_in_distance_m",
-  "clock_out_lat",
-  "clock_out_lng",
-  "clock_out_accuracy",
-  "clock_out_distance_m",
-]) {
-  if (!attendanceColumns.includes(col)) {
-    db.exec(`ALTER TABLE attendance ADD COLUMN ${col} REAL`);
-  }
-}
-for (const col of ["clock_in_photo", "clock_out_photo"]) {
-  if (!attendanceColumns.includes(col)) {
-    db.exec(`ALTER TABLE attendance ADD COLUMN ${col} TEXT`);
-  }
-}
-
-const employeeColumns = db.prepare("PRAGMA table_info(employees)").all().map((c) => c.name);
-if (!employeeColumns.includes("location_id")) {
-  db.exec("ALTER TABLE employees ADD COLUMN location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL");
-}
-if (!employeeColumns.includes("photo")) {
-  db.exec("ALTER TABLE employees ADD COLUMN photo TEXT");
-}
-
-const leaveRequestColumns = db.prepare("PRAGMA table_info(leave_requests)").all().map((c) => c.name);
-for (const col of ["attachment_name", "attachment_type", "attachment_data"]) {
-  if (!leaveRequestColumns.includes(col)) {
-    db.exec(`ALTER TABLE leave_requests ADD COLUMN ${col} TEXT`);
-  }
-}
-
-const expenseItemColumns = db.prepare("PRAGMA table_info(expense_items)").all().map((c) => c.name);
-for (const col of ["receipt_name", "receipt_type", "receipt_data"]) {
-  if (!expenseItemColumns.includes(col)) {
-    db.exec(`ALTER TABLE expense_items ADD COLUMN ${col} TEXT`);
-  }
-}
-
-const payrollColumns = db.prepare("PRAGMA table_info(payroll_records)").all().map((c) => c.name);
-if (!payrollColumns.includes("overtime_pay")) {
-  db.exec("ALTER TABLE payroll_records ADD COLUMN overtime_pay REAL NOT NULL DEFAULT 0");
-}
-
-const expenseReportColumns = db.prepare("PRAGMA table_info(expense_reports)").all().map((c) => c.name);
-if (!expenseReportColumns.includes("cost_center")) {
-  db.exec("ALTER TABLE expense_reports ADD COLUMN cost_center TEXT");
-}
-
-// SQLite's ALTER TABLE ADD COLUMN can't carry a UNIQUE constraint, so add the column
-// plain and enforce uniqueness via a separate index (fresh installs get UNIQUE inline
-// in the CREATE TABLE above; this only runs for databases that predate this column).
-const orderColumns = db.prepare("PRAGMA table_info(orders)").all().map((c) => c.name);
-if (!orderColumns.includes("deal_id")) {
-  db.exec("ALTER TABLE orders ADD COLUMN deal_id INTEGER REFERENCES deals(id) ON DELETE SET NULL");
-  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_deal_id ON orders(deal_id) WHERE deal_id IS NOT NULL");
-}
 
 module.exports = db;

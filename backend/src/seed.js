@@ -1,3 +1,4 @@
+require("dotenv").config();
 const bcrypt = require("bcryptjs");
 const db = require("./db");
 
@@ -9,7 +10,7 @@ const insertDept = db.prepare("INSERT INTO departments (name, description) VALUE
 const insertLocation = db.prepare("INSERT INTO locations (name, lat, lng, radius_meters, address) VALUES (?, ?, ?, ?, ?)");
 const insertEmployee = db.prepare(`
   INSERT INTO employees (first_name, last_name, email, phone, department_id, location_id, position, manager_id, hire_date, status, base_salary, address)
-  VALUES (@first_name, @last_name, @email, @phone, @department_id, @location_id, @position, @manager_id, @hire_date, @status, @base_salary, @address)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 const insertUser = db.prepare(
   "INSERT INTO users (email, password_hash, role, employee_id) VALUES (?, ?, ?, ?)"
@@ -80,7 +81,7 @@ const insertInventoryTxn = db.prepare(`
   VALUES (?, ?, ?, ?, ?, ?)
 `);
 
-const seed = db.transaction(() => {
+const seed = db.transaction(async () => {
   // Wipe existing data
   for (const table of [
     "inventory_transactions",
@@ -107,7 +108,7 @@ const seed = db.transaction(() => {
     "departments",
     "locations",
   ]) {
-    db.prepare(`DELETE FROM ${table}`).run();
+    await db.prepare(`DELETE FROM ${table}`).run();
   }
 
   const deptIds = {};
@@ -117,7 +118,7 @@ const seed = db.transaction(() => {
     ["Sales", "Revenue and customer acquisition"],
     ["Finance", "Accounting and payroll"],
   ]) {
-    const info = insertDept.run(name, description);
+    const info = await insertDept.run(name, description);
     deptIds[name] = info.lastInsertRowid;
   }
 
@@ -126,12 +127,12 @@ const seed = db.transaction(() => {
     ["Manila HQ", 14.5995, 120.9842, 500, "Ermita, Manila"],
     ["Cebu Branch", 10.3157, 123.8854, 500, "Cebu City"],
   ]) {
-    const info = insertLocation.run(name, lat, lng, radius, address);
+    const info = await insertLocation.run(name, lat, lng, radius, address);
     locationIds[name] = info.lastInsertRowid;
   }
 
-  function addEmployee(e) {
-    const info = insertEmployee.run({
+  async function addEmployee(e) {
+    const emp = {
       manager_id: null,
       status: "active",
       base_salary: 0,
@@ -139,11 +140,25 @@ const seed = db.transaction(() => {
       address: null,
       location_id: null,
       ...e,
-    });
+    };
+    const info = await insertEmployee.run(
+      emp.first_name,
+      emp.last_name,
+      emp.email,
+      emp.phone,
+      emp.department_id,
+      emp.location_id,
+      emp.position,
+      emp.manager_id,
+      emp.hire_date,
+      emp.status,
+      emp.base_salary,
+      emp.address
+    );
     return info.lastInsertRowid;
   }
 
-  const ceoId = addEmployee({
+  const ceoId = await addEmployee({
     first_name: "Avery",
     last_name: "Reyes",
     email: "avery.reyes@example.com",
@@ -155,7 +170,7 @@ const seed = db.transaction(() => {
     phone: "555-0100",
   });
 
-  const hrManagerId = addEmployee({
+  const hrManagerId = await addEmployee({
     first_name: "Priya",
     last_name: "Natarajan",
     email: "priya.natarajan@example.com",
@@ -168,7 +183,7 @@ const seed = db.transaction(() => {
     phone: "555-0101",
   });
 
-  const engManagerId = addEmployee({
+  const engManagerId = await addEmployee({
     first_name: "Diego",
     last_name: "Martinez",
     email: "diego.martinez@example.com",
@@ -181,12 +196,6 @@ const seed = db.transaction(() => {
     phone: "555-0102",
   });
 
-  const empIds = {
-    ceo: ceoId,
-    hrManager: hrManagerId,
-    engManager: engManagerId,
-  };
-
   const staff = [
     { first_name: "Jamie", last_name: "Chen", email: "jamie.chen@example.com", department_id: deptIds["Engineering"], location_id: locationIds["Manila HQ"], position: "Senior Software Engineer", manager_id: engManagerId, hire_date: "2021-02-10", base_salary: 7200, phone: "555-0103" },
     { first_name: "Morgan", last_name: "Lee", email: "morgan.lee@example.com", department_id: deptIds["Engineering"], location_id: locationIds["Manila HQ"], position: "Software Engineer", manager_id: engManagerId, hire_date: "2022-05-20", base_salary: 6100, phone: "555-0104" },
@@ -197,32 +206,35 @@ const seed = db.transaction(() => {
     { first_name: "Jordan", last_name: "Patel", email: "jordan.patel@example.com", department_id: deptIds["Human Resources"], location_id: locationIds["Manila HQ"], position: "HR Generalist", manager_id: hrManagerId, hire_date: "2023-07-18", base_salary: 4800, phone: "555-0109" },
   ];
 
-  const staffIds = staff.map(addEmployee);
+  const staffIds = [];
+  for (const s of staff) {
+    staffIds.push(await addEmployee(s));
+  }
 
   // Users / logins
-  insertUser.run("admin@example.com", hash("admin123"), "admin", ceoId);
-  insertUser.run("hr@example.com", hash("hr123"), "hr", hrManagerId);
-  insertUser.run("jamie.chen@example.com", hash("employee123"), "employee", staffIds[0]);
-  insertUser.run("morgan.lee@example.com", hash("employee123"), "employee", staffIds[1]);
+  await insertUser.run("admin@example.com", hash("admin123"), "admin", ceoId);
+  await insertUser.run("hr@example.com", hash("hr123"), "hr", hrManagerId);
+  await insertUser.run("jamie.chen@example.com", hash("employee123"), "employee", staffIds[0]);
+  await insertUser.run("morgan.lee@example.com", hash("employee123"), "employee", staffIds[1]);
 
   // Leave types
-  const vacationId = insertLeaveType.run("Vacation", 15).lastInsertRowid;
-  const sickId = insertLeaveType.run("Sick", 10).lastInsertRowid;
-  const personalId = insertLeaveType.run("Personal", 5).lastInsertRowid;
+  const vacationId = (await insertLeaveType.run("Vacation", 15)).lastInsertRowid;
+  const sickId = (await insertLeaveType.run("Sick", 10)).lastInsertRowid;
+  const personalId = (await insertLeaveType.run("Personal", 5)).lastInsertRowid;
 
   const year = new Date().getFullYear();
   const allEmployeeIds = [ceoId, hrManagerId, engManagerId, ...staffIds];
   for (const id of allEmployeeIds) {
-    insertBalance.run(id, vacationId, year, 15, 0);
-    insertBalance.run(id, sickId, year, 10, 0);
-    insertBalance.run(id, personalId, year, 5, 0);
+    await insertBalance.run(id, vacationId, year, 15, 0);
+    await insertBalance.run(id, sickId, year, 10, 0);
+    await insertBalance.run(id, personalId, year, 5, 0);
   }
 
   // Sample leave requests
-  insertLeaveRequest.run(staffIds[0], vacationId, `${year}-08-10`, `${year}-08-14`, 5, "Family trip", "pending");
-  insertLeaveRequest.run(staffIds[1], sickId, `${year}-07-02`, `${year}-07-02`, 1, "Flu", "approved");
-  insertLeaveRequest.run(staffIds[3], personalId, `${year}-09-01`, `${year}-09-01`, 1, "Personal errand", "pending");
-  db.prepare("UPDATE leave_balances SET used_days = 1 WHERE employee_id = ? AND leave_type_id = ? AND year = ?").run(
+  await insertLeaveRequest.run(staffIds[0], vacationId, `${year}-08-10`, `${year}-08-14`, 5, "Family trip", "pending");
+  await insertLeaveRequest.run(staffIds[1], sickId, `${year}-07-02`, `${year}-07-02`, 1, "Flu", "approved");
+  await insertLeaveRequest.run(staffIds[3], personalId, `${year}-09-01`, `${year}-09-01`, 1, "Personal errand", "pending");
+  await db.prepare("UPDATE leave_balances SET used_days = 1 WHERE employee_id = ? AND leave_type_id = ? AND year = ?").run(
     staffIds[1],
     sickId,
     year
@@ -238,22 +250,22 @@ const seed = db.transaction(() => {
     const dateStr = d.toISOString().slice(0, 10);
     for (const id of allEmployeeIds) {
       const isLate = Math.random() < 0.1;
-      insertAttendance.run(id, dateStr, isLate ? "late" : "present", isLate ? "09:20:00" : "09:00:00", "18:00:00");
+      await insertAttendance.run(id, dateStr, isLate ? "late" : "present", isLate ? "09:20:00" : "09:00:00", "18:00:00");
     }
   }
 
   // Sample payroll for current month
   const month = today.getMonth() + 1;
   for (const id of allEmployeeIds) {
-    const emp = db.prepare("SELECT base_salary FROM employees WHERE id = ?").get(id);
+    const emp = await db.prepare("SELECT base_salary FROM employees WHERE id = ?").get(id);
     const bonus = Math.random() < 0.3 ? 500 : 0;
     const net = emp.base_salary + bonus;
-    insertPayroll.run(id, month, year, emp.base_salary, bonus, 0, net, "finalized");
+    await insertPayroll.run(id, month, year, emp.base_salary, bonus, 0, net, "finalized");
   }
 
   // Performance review cycle
-  const cycleId = insertCycle.run(`${year} Mid-Year Review`, `${year}-06-01`, `${year}-06-30`, "closed").lastInsertRowid;
-  insertReview.run(
+  const cycleId = (await insertCycle.run(`${year} Mid-Year Review`, `${year}-06-01`, `${year}-06-30`, "closed")).lastInsertRowid;
+  await insertReview.run(
     cycleId,
     staffIds[0],
     engManagerId,
@@ -264,7 +276,7 @@ const seed = db.transaction(() => {
     "Outstanding performance this cycle.",
     "acknowledged"
   );
-  insertReview.run(
+  await insertReview.run(
     cycleId,
     staffIds[1],
     engManagerId,
@@ -277,85 +289,91 @@ const seed = db.transaction(() => {
   );
 
   // HR task board
-  const todoId = insertColumn.run("To Do", 0).lastInsertRowid;
-  const inProgressId = insertColumn.run("In Progress", 1).lastInsertRowid;
-  const doneId = insertColumn.run("Done", 2).lastInsertRowid;
+  const todoId = (await insertColumn.run("To Do", 0)).lastInsertRowid;
+  const inProgressId = (await insertColumn.run("In Progress", 1)).lastInsertRowid;
+  const doneId = (await insertColumn.run("Done", 2)).lastInsertRowid;
 
-  insertCard.run(todoId, "Set up onboarding for new hire", "Prepare laptop, accounts, and welcome packet", staffIds[2], `${year}-08-15`, 0, hrManagerId);
-  insertCard.run(todoId, "Renew Q3 benefits enrollment", "Confirm vendor rates before the enrollment window opens", null, `${year}-08-20`, 1, hrManagerId);
-  insertCard.run(inProgressId, "Draft updated remote work policy", "Incorporate feedback from last town hall", staffIds[6], `${year}-08-12`, 0, hrManagerId);
-  insertCard.run(doneId, "Finish mid-year review cycle", "All reviews submitted and acknowledged", engManagerId, `${year}-06-30`, 0, hrManagerId);
+  await insertCard.run(todoId, "Set up onboarding for new hire", "Prepare laptop, accounts, and welcome packet", staffIds[2], `${year}-08-15`, 0, hrManagerId);
+  await insertCard.run(todoId, "Renew Q3 benefits enrollment", "Confirm vendor rates before the enrollment window opens", null, `${year}-08-20`, 1, hrManagerId);
+  await insertCard.run(inProgressId, "Draft updated remote work policy", "Incorporate feedback from last town hall", staffIds[6], `${year}-08-12`, 0, hrManagerId);
+  await insertCard.run(doneId, "Finish mid-year review cycle", "All reviews submitted and acknowledged", engManagerId, `${year}-06-30`, 0, hrManagerId);
 
   // Liquidation / expense reports
-  const clientTripReportId = insertExpenseReport.run(
-    staffIds[3],
-    "Client site visit - Cebu",
-    5000,
-    "submitted",
-    "Cash advance for 2-day client visit",
-    null,
-    `${year}-07-20 09:00:00`
+  const clientTripReportId = (
+    await insertExpenseReport.run(
+      staffIds[3],
+      "Client site visit - Cebu",
+      5000,
+      "submitted",
+      "Cash advance for 2-day client visit",
+      null,
+      `${year}-07-20 09:00:00`
+    )
   ).lastInsertRowid;
-  insertExpenseItem.run(clientTripReportId, `${year}-07-18`, "Transportation", "Round-trip airfare", 3200, "OR-1042");
-  insertExpenseItem.run(clientTripReportId, `${year}-07-18`, "Meals", "Dinner with client", 850, "OR-1043");
-  insertExpenseItem.run(clientTripReportId, `${year}-07-19`, "Lodging", "Hotel, 1 night", 2100, "OR-1044");
+  await insertExpenseItem.run(clientTripReportId, `${year}-07-18`, "Transportation", "Round-trip airfare", 3200, "OR-1042");
+  await insertExpenseItem.run(clientTripReportId, `${year}-07-18`, "Meals", "Dinner with client", 850, "OR-1043");
+  await insertExpenseItem.run(clientTripReportId, `${year}-07-19`, "Lodging", "Hotel, 1 night", 2100, "OR-1044");
 
-  const suppliesReportId = insertExpenseReport.run(
-    staffIds[0],
-    "Office supplies - Q3",
-    1500,
-    "approved",
-    "Replenish team supplies",
-    hrManagerId,
-    `${year}-07-05 14:00:00`
+  const suppliesReportId = (
+    await insertExpenseReport.run(
+      staffIds[0],
+      "Office supplies - Q3",
+      1500,
+      "approved",
+      "Replenish team supplies",
+      hrManagerId,
+      `${year}-07-05 14:00:00`
+    )
   ).lastInsertRowid;
-  insertExpenseItem.run(suppliesReportId, `${year}-07-03`, "Supplies", "Notebooks and pens", 620, "OR-0991");
-  insertExpenseItem.run(suppliesReportId, `${year}-07-04`, "Supplies", "Whiteboard markers", 340, "OR-0992");
+  await insertExpenseItem.run(suppliesReportId, `${year}-07-03`, "Supplies", "Notebooks and pens", 620, "OR-0991");
+  await insertExpenseItem.run(suppliesReportId, `${year}-07-04`, "Supplies", "Whiteboard markers", 340, "OR-0992");
 
-  const draftReportId = insertExpenseReport.run(
-    staffIds[4],
-    "Sales conference - Manila",
-    8000,
-    "draft",
-    "Awaiting remaining receipts",
-    null,
-    null
+  const draftReportId = (
+    await insertExpenseReport.run(
+      staffIds[4],
+      "Sales conference - Manila",
+      8000,
+      "draft",
+      "Awaiting remaining receipts",
+      null,
+      null
+    )
   ).lastInsertRowid;
-  insertExpenseItem.run(draftReportId, `${year}-08-01`, "Registration", "Conference ticket", 4500, "OR-1102");
+  await insertExpenseItem.run(draftReportId, `${year}-08-01`, "Registration", "Conference ticket", 4500, "OR-1102");
 
   // Sales pipeline
-  insertDeal.run("Enterprise rollout - Alta Corp", "Alta Corp", 45000, "lead", staffIds[3], `${year}-09-15`, null);
-  insertDeal.run("Website revamp - Bright Foods", "Bright Foods", 18000, "lead", staffIds[4], `${year}-09-01`, null);
-  insertDeal.run("Support contract - Nomad Logistics", "Nomad Logistics", 12000, "qualified", staffIds[3], `${year}-08-25`, "Budget confirmed");
-  insertDeal.run("Platform license - Verdant Farms", "Verdant Farms", 30000, "qualified", staffIds[4], `${year}-09-05`, null);
-  insertDeal.run("Onboarding package - Solstice Retail", "Solstice Retail", 9500, "proposal", staffIds[3], `${year}-08-20`, "Proposal sent, awaiting feedback");
-  insertDeal.run("Annual renewal - Cobalt Media", "Cobalt Media", 22000, "negotiation", staffIds[4], `${year}-08-18`, "Negotiating discount tier");
-  insertDeal.run("Pilot program - Ironwood Bank", "Ironwood Bank", 60000, "won", staffIds[3], `${year}-07-30`, "Closed — kickoff scheduled");
-  insertDeal.run("Trial upgrade - Marbleton Co", "Marbleton Co", 8000, "lost", staffIds[4], `${year}-07-22`, "Went with a competitor");
+  await insertDeal.run("Enterprise rollout - Alta Corp", "Alta Corp", 45000, "lead", staffIds[3], `${year}-09-15`, null);
+  await insertDeal.run("Website revamp - Bright Foods", "Bright Foods", 18000, "lead", staffIds[4], `${year}-09-01`, null);
+  await insertDeal.run("Support contract - Nomad Logistics", "Nomad Logistics", 12000, "qualified", staffIds[3], `${year}-08-25`, "Budget confirmed");
+  await insertDeal.run("Platform license - Verdant Farms", "Verdant Farms", 30000, "qualified", staffIds[4], `${year}-09-05`, null);
+  await insertDeal.run("Onboarding package - Solstice Retail", "Solstice Retail", 9500, "proposal", staffIds[3], `${year}-08-20`, "Proposal sent, awaiting feedback");
+  await insertDeal.run("Annual renewal - Cobalt Media", "Cobalt Media", 22000, "negotiation", staffIds[4], `${year}-08-18`, "Negotiating discount tier");
+  await insertDeal.run("Pilot program - Ironwood Bank", "Ironwood Bank", 60000, "won", staffIds[3], `${year}-07-30`, "Closed — kickoff scheduled");
+  await insertDeal.run("Trial upgrade - Marbleton Co", "Marbleton Co", 8000, "lost", staffIds[4], `${year}-07-22`, "Went with a competitor");
 
   // Orders
-  insertOrder.run("ORD-1001", "Alta Corp", 4500, "placed", staffIds[3], `${year}-08-01`, null);
-  insertOrder.run("ORD-1002", "Bright Foods", 2200, "placed", staffIds[4], `${year}-08-02`, null);
-  insertOrder.run("ORD-1003", "Nomad Logistics", 3100, "processing", staffIds[3], `${year}-07-28`, null);
-  insertOrder.run("ORD-1004", "Verdant Farms", 5600, "processing", staffIds[4], `${year}-07-27`, null);
-  insertOrder.run("ORD-1005", "Solstice Retail", 1800, "shipped", staffIds[3], `${year}-07-20`, "Tracking sent to customer");
-  const cobaltOrderId = insertOrder.run("ORD-1006", "Cobalt Media", 7200, "delivered", staffIds[4], `${year}-07-10`, null).lastInsertRowid;
-  const ironwoodOrderId = insertOrder.run("ORD-1007", "Ironwood Bank", 9800, "delivered", staffIds[3], `${year}-07-05`, null).lastInsertRowid;
-  insertOrder.run("ORD-1008", "Marbleton Co", 1200, "cancelled", staffIds[4], `${year}-07-15`, "Customer changed requirements");
+  await insertOrder.run("ORD-1001", "Alta Corp", 4500, "placed", staffIds[3], `${year}-08-01`, null);
+  await insertOrder.run("ORD-1002", "Bright Foods", 2200, "placed", staffIds[4], `${year}-08-02`, null);
+  await insertOrder.run("ORD-1003", "Nomad Logistics", 3100, "processing", staffIds[3], `${year}-07-28`, null);
+  await insertOrder.run("ORD-1004", "Verdant Farms", 5600, "processing", staffIds[4], `${year}-07-27`, null);
+  await insertOrder.run("ORD-1005", "Solstice Retail", 1800, "shipped", staffIds[3], `${year}-07-20`, "Tracking sent to customer");
+  const cobaltOrderId = (await insertOrder.run("ORD-1006", "Cobalt Media", 7200, "delivered", staffIds[4], `${year}-07-10`, null)).lastInsertRowid;
+  const ironwoodOrderId = (await insertOrder.run("ORD-1007", "Ironwood Bank", 9800, "delivered", staffIds[3], `${year}-07-05`, null)).lastInsertRowid;
+  await insertOrder.run("ORD-1008", "Marbleton Co", 1200, "cancelled", staffIds[4], `${year}-07-15`, "Customer changed requirements");
 
   // Sales targets — set for the current month/quarter/year so the dashboard's
   // default view shows real progress against the seeded deals/orders above.
   const currentMonth = today.getMonth() + 1;
   const currentQuarter = Math.floor(today.getMonth() / 3) + 1;
-  insertSalesTarget.run(staffIds[3], "monthly", year, currentMonth, 6000);
-  insertSalesTarget.run(staffIds[4], "monthly", year, currentMonth, 2000);
-  insertSalesTarget.run(staffIds[3], "quarterly", year, currentQuarter, 90000);
-  insertSalesTarget.run(staffIds[4], "quarterly", year, currentQuarter, 12000);
-  insertSalesTarget.run(staffIds[3], "yearly", year, 0, 200000);
-  insertSalesTarget.run(staffIds[4], "yearly", year, 0, 50000);
+  await insertSalesTarget.run(staffIds[3], "monthly", year, currentMonth, 6000);
+  await insertSalesTarget.run(staffIds[4], "monthly", year, currentMonth, 2000);
+  await insertSalesTarget.run(staffIds[3], "quarterly", year, currentQuarter, 90000);
+  await insertSalesTarget.run(staffIds[4], "quarterly", year, currentQuarter, 12000);
+  await insertSalesTarget.run(staffIds[3], "yearly", year, 0, 200000);
+  await insertSalesTarget.run(staffIds[4], "yearly", year, 0, 50000);
 
   // Work orders (customer service jobs)
-  insertWorkOrder.run(
+  await insertWorkOrder.run(
     "WO-2001",
     "Install network switch",
     "Cobalt Media",
@@ -367,7 +385,7 @@ const seed = db.transaction(() => {
     `${year}-08-05`,
     null
   );
-  insertWorkOrder.run(
+  await insertWorkOrder.run(
     "WO-2002",
     "Quarterly maintenance visit",
     "Ironwood Bank",
@@ -379,7 +397,7 @@ const seed = db.transaction(() => {
     `${year}-08-12`,
     null
   );
-  insertWorkOrder.run(
+  await insertWorkOrder.run(
     "WO-2003",
     "Onsite training session",
     "Solstice Retail",
@@ -393,14 +411,14 @@ const seed = db.transaction(() => {
   );
 
   // Billing (invoices linked to delivered orders)
-  insertInvoice.run("INV-ORD-1006", cobaltOrderId, "Cobalt Media", 7200, "paid", `${year}-07-11`, `${year}-07-25`, `${year}-07-20`);
-  insertInvoice.run("INV-ORD-1007", ironwoodOrderId, "Ironwood Bank", 9800, "sent", `${year}-07-06`, `${year}-07-20`, null);
+  await insertInvoice.run("INV-ORD-1006", cobaltOrderId, "Cobalt Media", 7200, "paid", `${year}-07-11`, `${year}-07-25`, `${year}-07-20`);
+  await insertInvoice.run("INV-ORD-1007", ironwoodOrderId, "Ironwood Bank", 9800, "sent", `${year}-07-06`, `${year}-07-20`, null);
 
   // Purchase orders (procurement from vendors)
-  insertPurchaseOrder.run("PO-3001", "Office Depot", "Replacement laptops for engineering", 6400, "draft", staffIds[0], `${year}-08-01`, null, null);
-  insertPurchaseOrder.run("PO-3002", "CloudNet Supplies", "Networking hardware for Cebu branch", 2100, "submitted", hrManagerId, `${year}-07-28`, `${year}-08-15`, null);
-  insertPurchaseOrder.run("PO-3003", "Print & Co", "Marketing collateral reprint", 850, "approved", staffIds[6], `${year}-07-20`, `${year}-08-05`, null);
-  insertPurchaseOrder.run(
+  await insertPurchaseOrder.run("PO-3001", "Office Depot", "Replacement laptops for engineering", 6400, "draft", staffIds[0], `${year}-08-01`, null, null);
+  await insertPurchaseOrder.run("PO-3002", "CloudNet Supplies", "Networking hardware for Cebu branch", 2100, "submitted", hrManagerId, `${year}-07-28`, `${year}-08-15`, null);
+  await insertPurchaseOrder.run("PO-3003", "Print & Co", "Marketing collateral reprint", 850, "approved", staffIds[6], `${year}-07-20`, `${year}-08-05`, null);
+  await insertPurchaseOrder.run(
     "PO-3004",
     "Global Furnishings",
     "New desks for Manila HQ",
@@ -413,39 +431,41 @@ const seed = db.transaction(() => {
   );
 
   // Inventory (stock items + their movement history)
-  function addInventoryItem([sku, name, category, unit, initialQty, reorderLevel, unitCost, unitPrice, locationName, notes]) {
-    const itemId = insertInventoryItem.run(
-      sku,
-      name,
-      category,
-      unit,
-      initialQty,
-      reorderLevel,
-      unitCost,
-      unitPrice,
-      locationIds[locationName] || null,
-      notes || null
+  async function addInventoryItem([sku, name, category, unit, initialQty, reorderLevel, unitCost, unitPrice, locationName, notes]) {
+    const itemId = (
+      await insertInventoryItem.run(
+        sku,
+        name,
+        category,
+        unit,
+        initialQty,
+        reorderLevel,
+        unitCost,
+        unitPrice,
+        locationIds[locationName] || null,
+        notes || null
+      )
     ).lastInsertRowid;
-    insertInventoryTxn.run(itemId, "in", initialQty, "Initial stock", null, hrManagerId);
+    await insertInventoryTxn.run(itemId, "in", initialQty, "Initial stock", null, hrManagerId);
     return itemId;
   }
 
-  const laptopItemId = addInventoryItem(["INV-1001", "Laptop — 14\" Business", "IT Equipment", "pcs", 18, 5, 32000, 42000, "Manila HQ", null]);
-  const pensItemId = addInventoryItem(["INV-1002", "Ballpoint Pens (box of 12)", "Office Supplies", "box", 25, 8, 90, 140, "Manila HQ", null]);
-  addInventoryItem(["INV-1003", "A4 Bond Paper (ream)", "Office Supplies", "ream", 6, 15, 180, 240, "Manila HQ", null]);
-  const cableItemId = addInventoryItem(["INV-1004", "Ethernet Cable 10m", "Networking", "pcs", 30, 10, 220, 320, "Cebu Branch", null]);
-  addInventoryItem(["INV-1005", "Network Switch — 24 port", "Networking", "pcs", 2, 3, 4200, 5600, "Cebu Branch", null]);
-  addInventoryItem(["INV-1006", "Office Desk", "Furniture", "pcs", 12, 4, 3800, 5200, "Manila HQ", "Matches PO-3004 delivery"]);
+  const laptopItemId = await addInventoryItem(["INV-1001", "Laptop — 14\" Business", "IT Equipment", "pcs", 18, 5, 32000, 42000, "Manila HQ", null]);
+  const pensItemId = await addInventoryItem(["INV-1002", "Ballpoint Pens (box of 12)", "Office Supplies", "box", 25, 8, 90, 140, "Manila HQ", null]);
+  await addInventoryItem(["INV-1003", "A4 Bond Paper (ream)", "Office Supplies", "ream", 6, 15, 180, 240, "Manila HQ", null]);
+  const cableItemId = await addInventoryItem(["INV-1004", "Ethernet Cable 10m", "Networking", "pcs", 30, 10, 220, 320, "Cebu Branch", null]);
+  await addInventoryItem(["INV-1005", "Network Switch — 24 port", "Networking", "pcs", 2, 3, 4200, 5600, "Cebu Branch", null]);
+  await addInventoryItem(["INV-1006", "Office Desk", "Furniture", "pcs", 12, 4, 3800, 5200, "Manila HQ", "Matches PO-3004 delivery"]);
 
   // A few follow-on movements so the history view has more than one entry.
-  db.prepare("UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - 3 WHERE id = ?").run(laptopItemId);
-  insertInventoryTxn.run(laptopItemId, "out", 3, "Issued to new engineering hires", null, engManagerId);
+  await db.prepare("UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - 3 WHERE id = ?").run(laptopItemId);
+  await insertInventoryTxn.run(laptopItemId, "out", 3, "Issued to new engineering hires", null, engManagerId);
 
-  db.prepare("UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - 9 WHERE id = ?").run(pensItemId);
-  insertInventoryTxn.run(pensItemId, "out", 9, "Monthly office restock", null, hrManagerId);
+  await db.prepare("UPDATE inventory_items SET quantity_on_hand = quantity_on_hand - 9 WHERE id = ?").run(pensItemId);
+  await insertInventoryTxn.run(pensItemId, "out", 9, "Monthly office restock", null, hrManagerId);
 
-  db.prepare("UPDATE inventory_items SET quantity_on_hand = 28 WHERE id = ?").run(cableItemId);
-  insertInventoryTxn.run(cableItemId, "adjustment", -2, "Physical count correction", null, hrManagerId);
+  await db.prepare("UPDATE inventory_items SET quantity_on_hand = 28 WHERE id = ?").run(cableItemId);
+  await insertInventoryTxn.run(cableItemId, "adjustment", -2, "Physical count correction", null, hrManagerId);
 
   console.log("Seed complete.");
   console.log("Login with:");
@@ -455,7 +475,10 @@ const seed = db.transaction(() => {
 });
 
 if (require.main === module) {
-  seed();
+  seed().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }
 
 module.exports = seed;

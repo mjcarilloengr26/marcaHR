@@ -4,13 +4,13 @@ A full-stack HRIS: employee records, departments, leave management, attendance,
 payroll, performance reviews, an HR task board (Trello-style), and liquidation/expense
 reports, with role-based access (admin / hr / employee).
 
-- **Backend**: Node.js + Express + SQLite (`node:sqlite`, built into Node — no native build tools needed), JWT auth
+- **Backend**: Node.js + Express + Postgres (Supabase), JWT auth
 - **Frontend**: React (Vite) + React Router
 
 ## 1. Install Node.js
 
 This machine doesn't have Node.js installed yet. Download and install the LTS
-version from https://nodejs.org (v22.5 or later — needed for the built-in `node:sqlite` module), then confirm it works:
+version from https://nodejs.org (v22.5 or later), then confirm it works:
 
 ```bash
 node -v
@@ -35,11 +35,12 @@ cd backend
 copy .env.example .env
 ```
 
-Edit `.env` and set `JWT_SECRET` to a long random string (used to sign login tokens).
+Edit `.env` and set `JWT_SECRET` to a long random string (used to sign login tokens),
+and `DATABASE_URL` to a Postgres connection string (see "Database (Supabase)" below).
 
 ## 4. Seed the database
 
-This creates `backend/data/hr.db` (SQLite file) with sample departments,
+This wipes and repopulates every table with sample departments,
 employees, leave/attendance/payroll/performance data, and login accounts:
 
 ```bash
@@ -130,11 +131,27 @@ Any other SMTP provider works the same way — just set `SMTP_HOST`/`SMTP_PORT` 
 "HR/admin" recipients are looked up dynamically from every `users` row with role `admin` or `hr`
 (the accounts created via the Users page), so no extra config is needed for that part.
 
+## Database (Supabase)
+
+Data lives in Postgres on Supabase rather than a local file, so it survives Render
+redeploys, restarts, and free-tier idle spin-down without needing a persistent disk.
+
+1. Create a project at https://supabase.com (or use an existing one).
+2. In the project's **Database Settings**, copy the **Session pooler** connection
+   string (not the direct connection, which is IPv6-only and won't resolve from most
+   hosts; not the transaction pooler, which doesn't suit a long-running Express server
+   as well as session mode does). It looks like:
+   `postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres`
+3. URL-encode any special characters in the password (e.g. `@` → `%40`, `%` → `%25`).
+4. Set that full string as `DATABASE_URL` in `backend/.env` (local) and in the Render
+   dashboard (production).
+5. The schema is created automatically on first boot (`db.migrate()` runs before the
+   server starts listening) — no manual migration step needed.
+
 ## Deploying (Vercel + Render)
 
-The frontend is a static build, but the backend keeps its data in a local SQLite file —
-that needs a host with a persistent, always-running process, not a serverless platform
-like Vercel functions (their filesystem is wiped between invocations). The split that works:
+The frontend is a static build; the backend needs a host with a long-running Node
+process (not a serverless platform like Vercel functions). The split that works:
 
 - **Frontend → Vercel** (static hosting)
 - **Backend → Render** (or Railway/Fly.io — anywhere with a long-running Node process)
@@ -147,26 +164,17 @@ like Vercel functions (their filesystem is wiped between invocations). The split
 3. If configuring manually: root directory `backend`, build command `npm install`,
    start command `npm start`.
 4. Set environment variables in the Render dashboard: `JWT_SECRET` (a long random string),
+   `DATABASE_URL` (the Supabase session pooler string from above),
    and optionally `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM` for email notifications.
-5. After it deploys, run the seed script once from Render's **Shell** tab: `npm run seed`.
+5. The service auto-seeds sample data on first boot if the `employees` table is empty
+   (see `server.js`), so no manual seed step is needed for a fresh database. To reseed
+   deliberately (wipes and repopulates every table), run `npm run seed` from Render's
+   **Shell** tab.
 6. Copy the service's URL (e.g. `https://marca-hr-backend.onrender.com`).
 
-**Persistent disk (required for real use)**: Render's free web services have no
-persistent disk — the SQLite file resets on every redeploy and on wake-up after the
-free tier's 15-minute idle spin-down, silently discarding any real data entered in
-between. `render.yaml` now declares a 1GB disk mounted at `/var/data`, and `DATA_DIR`
-points the app at it — but **persistent disks require a paid instance type** (Render's
-free plan can't attach one). To actually get persistent storage:
-
-1. In the Render dashboard, change the service's plan from Free to **Starter** (or
-   higher) — this is a billing change only you can approve.
-2. If the service was created before this disk was added, add it manually: service
-   settings → **Disks** → **Add Disk**, mount path `/var/data`, then set the `DATA_DIR`
-   env var to `/var/data` (both already automatic if you (re)deploy the Blueprint fresh).
-3. Redeploy. From then on, the database survives deploys, restarts, and idle spin-down.
-
-Without this, treat any data entered on the free tier as temporary — expect it to be
-gone after the next code deploy.
+The free plan is sufficient — since data lives in Supabase, not on Render's disk, the
+free tier's idle spin-down no longer risks losing anything (it just adds a cold-start
+delay on the first request after a period of inactivity).
 
 ### Frontend on Vercel
 
@@ -193,11 +201,10 @@ hr-app/
   backend/
     src/
       server.js          Express app entry point
-      db.js               SQLite schema + connection
+      db.js               Postgres schema + connection (Supabase)
       seed.js             Sample data seeding script
       middleware/auth.js  JWT auth + role-check middleware
       routes/              One file per resource (employees, leave, payroll, ...)
-    data/hr.db            SQLite database file (created after seeding)
   frontend/
     src/
       pages/               One page per feature area

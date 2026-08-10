@@ -58,14 +58,25 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error" });
 });
 
-// First-boot convenience for fresh deployments (e.g. Render) where there's no
-// interactive shell to run `npm run seed` manually: seed automatically, but only
-// when the database is genuinely empty, so it never touches real data.
-const employeeCount = db.prepare("SELECT COUNT(*) AS c FROM employees").get().c;
-if (employeeCount === 0) {
-  console.log("No employees found — running first-boot seed...");
-  seed();
+async function start() {
+  await db.migrate();
+
+  // First-boot convenience for fresh deployments where there's no interactive
+  // shell to run `npm run seed` manually: seed automatically, but only when
+  // the database is genuinely empty, so it never touches real data. Now that
+  // storage is Supabase Postgres (persistent) rather than Render's ephemeral
+  // disk, this should only ever fire on a truly first-ever boot.
+  const employeeCount = (await db.prepare("SELECT COUNT(*) AS c FROM employees").get()).c;
+  if (Number(employeeCount) === 0) {
+    console.log("No employees found — running first-boot seed...");
+    await seed();
+  }
+
+  const PORT = process.env.PORT || 4000;
+  app.listen(PORT, () => console.log(`HR app backend listening on http://localhost:${PORT}`));
 }
 
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`HR app backend listening on http://localhost:${PORT}`));
+start().catch((err) => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});

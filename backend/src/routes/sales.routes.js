@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
+const asyncHandler = require("../middleware/asyncHandler");
 
 const router = express.Router();
 
@@ -21,79 +22,89 @@ function buildFunnel(counts, order, labels, terminalKey, terminalLabel) {
   return { stages, [terminalKey]: counts[terminalKey] || 0, terminalLabel };
 }
 
-router.get("/stats", requireAuth, requireRole("admin", "hr"), (req, res) => {
-  const dealCounts = db
-    .prepare("SELECT stage, COUNT(*) AS c FROM deals GROUP BY stage")
-    .all()
-    .reduce((acc, row) => ({ ...acc, [row.stage]: row.c }), {});
+router.get(
+  "/stats",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const dealCounts = (await db.prepare("SELECT stage, COUNT(*) AS c FROM deals GROUP BY stage").all()).reduce(
+      (acc, row) => ({ ...acc, [row.stage]: row.c }),
+      {}
+    );
 
-  const dealStageLabels = {
-    lead: "Lead",
-    qualified: "Qualified",
-    proposal: "Proposal",
-    negotiation: "Negotiation",
-    won: "Won",
-  };
-  const dealFunnel = buildFunnel(dealCounts, DEAL_STAGES, dealStageLabels, "lost", "Lost");
+    const dealStageLabels = {
+      lead: "Lead",
+      qualified: "Qualified",
+      proposal: "Proposal",
+      negotiation: "Negotiation",
+      won: "Won",
+    };
+    const dealFunnel = buildFunnel(dealCounts, DEAL_STAGES, dealStageLabels, "lost", "Lost");
 
-  const orderCounts = db
-    .prepare("SELECT status, COUNT(*) AS c FROM orders GROUP BY status")
-    .all()
-    .reduce((acc, row) => ({ ...acc, [row.status]: row.c }), {});
-  const orderStatusLabels = { placed: "Placed", processing: "Processing", shipped: "Shipped", delivered: "Delivered" };
-  const orderFunnel = buildFunnel(orderCounts, ORDER_STATUSES, orderStatusLabels, "cancelled", "Cancelled");
+    const orderCounts = (await db.prepare("SELECT status, COUNT(*) AS c FROM orders GROUP BY status").all()).reduce(
+      (acc, row) => ({ ...acc, [row.status]: row.c }),
+      {}
+    );
+    const orderStatusLabels = { placed: "Placed", processing: "Processing", shipped: "Shipped", delivered: "Delivered" };
+    const orderFunnel = buildFunnel(orderCounts, ORDER_STATUSES, orderStatusLabels, "cancelled", "Cancelled");
 
-  const pipelineValue = db
-    .prepare("SELECT COALESCE(SUM(value), 0) AS v FROM deals WHERE stage NOT IN ('won', 'lost')")
-    .get().v;
-  const wonValue = db.prepare("SELECT COALESCE(SUM(value), 0) AS v FROM deals WHERE stage = 'won'").get().v;
-  const openDeals = db.prepare("SELECT COUNT(*) AS c FROM deals WHERE stage NOT IN ('won', 'lost')").get().c;
+    const pipelineValue = (
+      await db.prepare("SELECT COALESCE(SUM(value), 0) AS v FROM deals WHERE stage NOT IN ('won', 'lost')").get()
+    ).v;
+    const wonValue = (await db.prepare("SELECT COALESCE(SUM(value), 0) AS v FROM deals WHERE stage = 'won'").get()).v;
+    const openDeals = (await db.prepare("SELECT COUNT(*) AS c FROM deals WHERE stage NOT IN ('won', 'lost')").get()).c;
 
-  const ordersRevenue = db
-    .prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled'")
-    .get().v;
-  const ordersThisMonth = db
-    .prepare("SELECT COUNT(*) AS c FROM orders WHERE strftime('%Y-%m', order_date) = strftime('%Y-%m', 'now')")
-    .get().c;
+    const ordersRevenue = (await db.prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled'").get())
+      .v;
+    const ordersThisMonth = (
+      await db
+        .prepare(
+          "SELECT COUNT(*) AS c FROM orders WHERE to_char(order_date::date, 'YYYY-MM') = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM')"
+        )
+        .get()
+    ).c;
 
-  // Order backlog: value still owed to customers — placed/processing/shipped
-  // but not yet delivered (and not cancelled, since that's a dead order, not
-  // outstanding work).
-  const orderBacklog = db
-    .prepare("SELECT COUNT(*) AS c, COALESCE(SUM(amount), 0) AS v FROM orders WHERE status NOT IN ('delivered', 'cancelled')")
-    .get();
+    // Order backlog: value still owed to customers — placed/processing/shipped
+    // but not yet delivered (and not cancelled, since that's a dead order, not
+    // outstanding work).
+    const orderBacklog = await db
+      .prepare("SELECT COUNT(*) AS c, COALESCE(SUM(amount), 0) AS v FROM orders WHERE status NOT IN ('delivered', 'cancelled')")
+      .get();
 
-  // Year-to-date order revenue, this year vs the same Jan-1-through-today
-  // window last year — an apples-to-apples YoY comparison, not full-year
-  // totals (which would unfairly compare a partial year to a complete one).
-  // Anchored to Manila "today" like the rest of the app's date logic.
-  const todayManila = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
-  const [todayYear, todayMonth, todayDay] = todayManila.split("-");
-  const lastYear = String(Number(todayYear) - 1);
-  const ytdRevenue = (year, end) =>
-    db
-      .prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled' AND order_date BETWEEN ? AND ?")
-      .get(`${year}-01-01`, end).v;
-  const ordersRevenueYtdThisYear = ytdRevenue(todayYear, todayManila);
-  const ordersRevenueYtdLastYear = ytdRevenue(lastYear, `${lastYear}-${todayMonth}-${todayDay}`);
+    // Year-to-date order revenue, this year vs the same Jan-1-through-today
+    // window last year — an apples-to-apples YoY comparison, not full-year
+    // totals (which would unfairly compare a partial year to a complete one).
+    // Anchored to Manila "today" like the rest of the app's date logic.
+    const todayManila = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+    const [todayYear, todayMonth, todayDay] = todayManila.split("-");
+    const lastYear = String(Number(todayYear) - 1);
+    const ytdRevenue = async (year, end) =>
+      (
+        await db
+          .prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled' AND order_date BETWEEN ? AND ?")
+          .get(`${year}-01-01`, end)
+      ).v;
+    const ordersRevenueYtdThisYear = await ytdRevenue(todayYear, todayManila);
+    const ordersRevenueYtdLastYear = await ytdRevenue(lastYear, `${lastYear}-${todayMonth}-${todayDay}`);
 
-  res.json({
-    dealFunnel,
-    orderFunnel,
-    kpis: {
-      pipelineValue,
-      wonValue,
-      openDeals,
-      ordersRevenue,
-      ordersThisMonth,
-      orderBacklogValue: orderBacklog.v,
-      orderBacklogCount: orderBacklog.c,
-      ordersRevenueYtdThisYear,
-      ordersRevenueYtdLastYear,
-      ytdAsOf: todayManila,
-    },
-  });
-});
+    res.json({
+      dealFunnel,
+      orderFunnel,
+      kpis: {
+        pipelineValue,
+        wonValue,
+        openDeals,
+        ordersRevenue,
+        ordersThisMonth,
+        orderBacklogValue: orderBacklog.v,
+        orderBacklogCount: orderBacklog.c,
+        ordersRevenueYtdThisYear,
+        ordersRevenueYtdLastYear,
+        ytdAsOf: todayManila,
+      },
+    });
+  })
+);
 
 // Sales targets: a revenue goal per employee for a monthly, quarterly, or yearly
 // period, tracked against actual achieved (won deal value + non-cancelled order
@@ -126,156 +137,183 @@ function parsePeriod(query) {
   return { period_type, period_year, period_index };
 }
 
-router.get("/targets", requireAuth, requireRole("admin", "hr"), (req, res) => {
-  const { period_type, period_year, period_index } = parsePeriod(req.query);
-  const { start, end } = periodDateRange(period_type, period_year, period_index);
+router.get(
+  "/targets",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const { period_type, period_year, period_index } = parsePeriod(req.query);
+    const { start, end } = periodDateRange(period_type, period_year, period_index);
 
-  // Include anyone who already owns a deal/order or has a target for this period (as
-  // before), plus every active employee in the Sales department — so a newly hired
-  // sales rep shows up (ready to get a target set) even before they own anything yet.
-  const employeeIds = db
-    .prepare(
-      `SELECT DISTINCT owner_id AS id FROM deals WHERE owner_id IS NOT NULL
+    // Include anyone who already owns a deal/order or has a target for this period (as
+    // before), plus every active employee in the Sales department — so a newly hired
+    // sales rep shows up (ready to get a target set) even before they own anything yet.
+    const employeeIds = (
+      await db
+        .prepare(
+          `SELECT DISTINCT owner_id AS id FROM deals WHERE owner_id IS NOT NULL
        UNION SELECT DISTINCT owner_id AS id FROM orders WHERE owner_id IS NOT NULL
        UNION SELECT employee_id AS id FROM sales_targets
          WHERE period_type = ? AND period_year = ? AND period_index = ?
        UNION SELECT e.id AS id FROM employees e
          JOIN departments d ON d.id = e.department_id
          WHERE LOWER(d.name) = 'sales' AND e.status = 'active'`
-    )
-    .all(period_type, period_year, period_index)
-    .map((r) => r.id);
+        )
+        .all(period_type, period_year, period_index)
+    ).map((r) => r.id);
 
-  const wonByOwner = db
-    .prepare(
-      `SELECT owner_id, COALESCE(SUM(value), 0) AS v FROM deals
+    const wonByOwner = (
+      await db
+        .prepare(
+          `SELECT owner_id, COALESCE(SUM(value), 0) AS v FROM deals
        WHERE stage = 'won' AND owner_id IS NOT NULL AND expected_close_date BETWEEN ? AND ?
        GROUP BY owner_id`
-    )
-    .all(start, end)
-    .reduce((acc, r) => ({ ...acc, [r.owner_id]: r.v }), {});
+        )
+        .all(start, end)
+    ).reduce((acc, r) => ({ ...acc, [r.owner_id]: r.v }), {});
 
-  const orderByOwner = db
-    .prepare(
-      `SELECT owner_id, COALESCE(SUM(amount), 0) AS v FROM orders
+    const orderByOwner = (
+      await db
+        .prepare(
+          `SELECT owner_id, COALESCE(SUM(amount), 0) AS v FROM orders
        WHERE status != 'cancelled' AND owner_id IS NOT NULL AND order_date BETWEEN ? AND ?
        GROUP BY owner_id`
-    )
-    .all(start, end)
-    .reduce((acc, r) => ({ ...acc, [r.owner_id]: r.v }), {});
+        )
+        .all(start, end)
+    ).reduce((acc, r) => ({ ...acc, [r.owner_id]: r.v }), {});
 
-  const targets = db
-    .prepare("SELECT * FROM sales_targets WHERE period_type = ? AND period_year = ? AND period_index = ?")
-    .all(period_type, period_year, period_index)
-    .reduce((acc, r) => ({ ...acc, [r.employee_id]: r }), {});
+    const targets = (
+      await db.prepare("SELECT * FROM sales_targets WHERE period_type = ? AND period_year = ? AND period_index = ?").all(
+        period_type,
+        period_year,
+        period_index
+      )
+    ).reduce((acc, r) => ({ ...acc, [r.employee_id]: r }), {});
 
-  // Lead summary per rep — every opportunity they own, any stage, bucketed by
-  // when it was created (not period-scoped like actual_amount, since "how
-  // many leads is this rep carrying" isn't a per-period achievement metric).
-  // created_at is stored as UTC; bucketing uses the Manila wall-clock date so
-  // it agrees with everywhere else in the app that's anchored to GMT+8.
-  const nowParts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Manila",
-    year: "numeric",
-    month: "2-digit",
-  })
-    .format(new Date())
-    .split("-")
-    .map(Number);
-  const [currentYear, currentMonth] = nowParts;
-  const currentQuarter = Math.floor((currentMonth - 1) / 3) + 1;
-
-  const emptyBucket = () => ({ count: 0, value: 0 });
-  const leadSummaryByOwner = {};
-  for (const d of db.prepare("SELECT owner_id, value, created_at FROM deals WHERE owner_id IS NOT NULL").all()) {
-    const manilaYM = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit" })
-      .format(new Date(`${d.created_at.replace(" ", "T")}Z`))
+    // Lead summary per rep — every opportunity they own, any stage, bucketed by
+    // when it was created (not period-scoped like actual_amount, since "how
+    // many leads is this rep carrying" isn't a per-period achievement metric).
+    // created_at is stored as UTC; bucketing uses the Manila wall-clock date so
+    // it agrees with everywhere else in the app that's anchored to GMT+8.
+    const nowParts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+    })
+      .format(new Date())
       .split("-")
       .map(Number);
-    const [y, m] = manilaYM;
-    const q = Math.floor((m - 1) / 3) + 1;
+    const [currentYear, currentMonth] = nowParts;
+    const currentQuarter = Math.floor((currentMonth - 1) / 3) + 1;
 
-    if (!leadSummaryByOwner[d.owner_id]) {
-      leadSummaryByOwner[d.owner_id] = {
+    const emptyBucket = () => ({ count: 0, value: 0 });
+    const leadSummaryByOwner = {};
+    const ownerDeals = await db.prepare("SELECT owner_id, value, created_at FROM deals WHERE owner_id IS NOT NULL").all();
+    for (const d of ownerDeals) {
+      const manilaYM = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit" })
+        .format(new Date(`${d.created_at.replace(" ", "T")}Z`))
+        .split("-")
+        .map(Number);
+      const [y, m] = manilaYM;
+      const q = Math.floor((m - 1) / 3) + 1;
+
+      if (!leadSummaryByOwner[d.owner_id]) {
+        leadSummaryByOwner[d.owner_id] = {
+          monthly: emptyBucket(),
+          quarterly: emptyBucket(),
+          annually: emptyBucket(),
+          total: emptyBucket(),
+        };
+      }
+      const s = leadSummaryByOwner[d.owner_id];
+      s.total.count += 1;
+      s.total.value += d.value;
+      if (y === currentYear) {
+        s.annually.count += 1;
+        s.annually.value += d.value;
+        if (q === currentQuarter) {
+          s.quarterly.count += 1;
+          s.quarterly.value += d.value;
+          if (m === currentMonth) {
+            s.monthly.count += 1;
+            s.monthly.value += d.value;
+          }
+        }
+      }
+    }
+
+    const rows = [];
+    for (const id of employeeIds) {
+      const employee = await db.prepare("SELECT first_name, last_name FROM employees WHERE id = ?").get(id);
+      const actual = (wonByOwner[id] || 0) + (orderByOwner[id] || 0);
+      const target = targets[id]?.target_amount || 0;
+      const leadSummary = leadSummaryByOwner[id] || {
         monthly: emptyBucket(),
         quarterly: emptyBucket(),
         annually: emptyBucket(),
         total: emptyBucket(),
       };
+      rows.push({
+        employee_id: id,
+        employee_name: employee ? `${employee.first_name} ${employee.last_name}` : "Unknown",
+        target_id: targets[id]?.id || null,
+        target_amount: target,
+        actual_amount: actual,
+        percent: target > 0 ? Math.round((actual / target) * 100) : null,
+        monthly_leads: leadSummary.monthly.count,
+        monthly_lead_value: leadSummary.monthly.value,
+        quarterly_leads: leadSummary.quarterly.count,
+        quarterly_lead_value: leadSummary.quarterly.value,
+        annual_leads: leadSummary.annually.count,
+        annual_lead_value: leadSummary.annually.value,
+        total_leads: leadSummary.total.count,
+        total_lead_value: leadSummary.total.value,
+      });
     }
-    const s = leadSummaryByOwner[d.owner_id];
-    s.total.count += 1;
-    s.total.value += d.value;
-    if (y === currentYear) {
-      s.annually.count += 1;
-      s.annually.value += d.value;
-      if (q === currentQuarter) {
-        s.quarterly.count += 1;
-        s.quarterly.value += d.value;
-        if (m === currentMonth) {
-          s.monthly.count += 1;
-          s.monthly.value += d.value;
-        }
-      }
+
+    rows.sort((a, b) => a.employee_name.localeCompare(b.employee_name));
+    res.json(rows);
+  })
+);
+
+router.post(
+  "/targets",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const { employee_id, period_type, period_year, period_index, target_amount } = req.body || {};
+    if (!employee_id || !period_type || !period_year || target_amount === undefined) {
+      return res.status(400).json({ error: "employee_id, period_type, period_year and target_amount are required" });
     }
-  }
-
-  const rows = employeeIds.map((id) => {
-    const employee = db.prepare("SELECT first_name, last_name FROM employees WHERE id = ?").get(id);
-    const actual = (wonByOwner[id] || 0) + (orderByOwner[id] || 0);
-    const target = targets[id]?.target_amount || 0;
-    const leadSummary = leadSummaryByOwner[id] || {
-      monthly: emptyBucket(),
-      quarterly: emptyBucket(),
-      annually: emptyBucket(),
-      total: emptyBucket(),
-    };
-    return {
-      employee_id: id,
-      employee_name: employee ? `${employee.first_name} ${employee.last_name}` : "Unknown",
-      target_id: targets[id]?.id || null,
-      target_amount: target,
-      actual_amount: actual,
-      percent: target > 0 ? Math.round((actual / target) * 100) : null,
-      monthly_leads: leadSummary.monthly.count,
-      monthly_lead_value: leadSummary.monthly.value,
-      quarterly_leads: leadSummary.quarterly.count,
-      quarterly_lead_value: leadSummary.quarterly.value,
-      annual_leads: leadSummary.annually.count,
-      annual_lead_value: leadSummary.annually.value,
-      total_leads: leadSummary.total.count,
-      total_lead_value: leadSummary.total.value,
-    };
-  });
-
-  rows.sort((a, b) => a.employee_name.localeCompare(b.employee_name));
-  res.json(rows);
-});
-
-router.post("/targets", requireAuth, requireRole("admin", "hr"), (req, res) => {
-  const { employee_id, period_type, period_year, period_index, target_amount } = req.body || {};
-  if (!employee_id || !period_type || !period_year || target_amount === undefined) {
-    return res.status(400).json({ error: "employee_id, period_type, period_year and target_amount are required" });
-  }
-  if (!["monthly", "quarterly", "yearly"].includes(period_type)) {
-    return res.status(400).json({ error: "period_type must be monthly, quarterly or yearly" });
-  }
-  const index = period_type === "yearly" ? 0 : Number(period_index) || 0;
-  db.prepare(
-    `INSERT INTO sales_targets (employee_id, period_type, period_year, period_index, target_amount)
+    if (!["monthly", "quarterly", "yearly"].includes(period_type)) {
+      return res.status(400).json({ error: "period_type must be monthly, quarterly or yearly" });
+    }
+    const index = period_type === "yearly" ? 0 : Number(period_index) || 0;
+    await db
+      .prepare(
+        `INSERT INTO sales_targets (employee_id, period_type, period_year, period_index, target_amount)
      VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(employee_id, period_type, period_year, period_index) DO UPDATE SET target_amount = excluded.target_amount`
-  ).run(employee_id, period_type, period_year, index, Number(target_amount) || 0);
-  res.status(201).json(
-    db
-      .prepare("SELECT * FROM sales_targets WHERE employee_id = ? AND period_type = ? AND period_year = ? AND period_index = ?")
-      .get(employee_id, period_type, period_year, index)
-  );
-});
+      )
+      .run(employee_id, period_type, period_year, index, Number(target_amount) || 0);
+    res
+      .status(201)
+      .json(
+        await db
+          .prepare("SELECT * FROM sales_targets WHERE employee_id = ? AND period_type = ? AND period_year = ? AND period_index = ?")
+          .get(employee_id, period_type, period_year, index)
+      );
+  })
+);
 
-router.delete("/targets/:id", requireAuth, requireRole("admin", "hr"), (req, res) => {
-  db.prepare("DELETE FROM sales_targets WHERE id = ?").run(req.params.id);
-  res.status(204).end();
-});
+router.delete(
+  "/targets/:id",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    await db.prepare("DELETE FROM sales_targets WHERE id = ?").run(req.params.id);
+    res.status(204).end();
+  })
+);
 
 module.exports = router;

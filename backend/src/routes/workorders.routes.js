@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { notifyWorkOrderAssigned } = require("../notifications");
+const asyncHandler = require("../middleware/asyncHandler");
 
 const router = express.Router();
 
@@ -14,7 +15,7 @@ const SELECT_BASE = `
   LEFT JOIN orders o ON o.id = w.order_id
 `;
 
-router.get("/", requireAuth, (req, res) => {
+router.get("/", requireAuth, asyncHandler(async (req, res) => {
   let sql = `${SELECT_BASE} WHERE 1=1`;
   const params = [];
 
@@ -33,10 +34,10 @@ router.get("/", requireAuth, (req, res) => {
   }
 
   sql += " ORDER BY CASE w.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, w.created_at DESC";
-  res.json(db.prepare(sql).all(...params));
-});
+  res.json(await db.prepare(sql).all(...params));
+}));
 
-router.post("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
+router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
   const { work_order_number, title, customer_name, description, address, order_id, assigned_to, priority, scheduled_date, notes } =
     req.body || {};
   if (!work_order_number || !title || !customer_name) {
@@ -44,7 +45,7 @@ router.post("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
   }
   const status = assigned_to ? "assigned" : "open";
   try {
-    const info = db
+    const info = await db
       .prepare(
         `INSERT INTO work_orders (work_order_number, title, customer_name, description, address, order_id, assigned_to, priority, status, scheduled_date, notes)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -63,14 +64,14 @@ router.post("/", requireAuth, requireRole("admin", "hr"), (req, res) => {
         notes || null
       );
     if (assigned_to) notifyWorkOrderAssigned({ employee_id: assigned_to, title });
-    res.status(201).json(db.prepare(`${SELECT_BASE} WHERE w.id = ?`).get(info.lastInsertRowid));
+    res.status(201).json(await db.prepare(`${SELECT_BASE} WHERE w.id = ?`).get(info.lastInsertRowid));
   } catch (err) {
     res.status(400).json({ error: "A work order with that number already exists" });
   }
-});
+}));
 
-router.put("/:id", requireAuth, (req, res) => {
-  const existing = db.prepare("SELECT * FROM work_orders WHERE id = ?").get(req.params.id);
+router.put("/:id", requireAuth, asyncHandler(async (req, res) => {
+  const existing = await db.prepare("SELECT * FROM work_orders WHERE id = ?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "Work order not found" });
 
   const isHr = ["admin", "hr"].includes(req.user.role);
@@ -97,7 +98,7 @@ router.put("/:id", requireAuth, (req, res) => {
   const status = body.status || existing.status;
   const completed_at = status === "completed" && existing.status !== "completed" ? new Date().toISOString() : existing.completed_at;
 
-  db.prepare(
+  await db.prepare(
     `UPDATE work_orders SET title = ?, customer_name = ?, description = ?, address = ?, order_id = ?, assigned_to = ?,
      priority = ?, status = ?, scheduled_date = ?, notes = ?, completed_at = ? WHERE id = ?`
   ).run(title, customer_name, description, address, order_id, assigned_to, priority, status, scheduled_date, notes, completed_at, req.params.id);
@@ -106,14 +107,14 @@ router.put("/:id", requireAuth, (req, res) => {
     notifyWorkOrderAssigned({ employee_id: assigned_to, title });
   }
 
-  res.json(db.prepare(`${SELECT_BASE} WHERE w.id = ?`).get(req.params.id));
-});
+  res.json(await db.prepare(`${SELECT_BASE} WHERE w.id = ?`).get(req.params.id));
+}));
 
-router.delete("/:id", requireAuth, requireRole("admin", "hr"), (req, res) => {
-  const existing = db.prepare("SELECT * FROM work_orders WHERE id = ?").get(req.params.id);
+router.delete("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
+  const existing = await db.prepare("SELECT * FROM work_orders WHERE id = ?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "Work order not found" });
-  db.prepare("DELETE FROM work_orders WHERE id = ?").run(req.params.id);
+  await db.prepare("DELETE FROM work_orders WHERE id = ?").run(req.params.id);
   res.status(204).end();
-});
+}));
 
 module.exports = router;
