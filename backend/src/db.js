@@ -2,7 +2,11 @@ const path = require("path");
 const fs = require("fs");
 const { DatabaseSync } = require("node:sqlite");
 
-const dataDir = path.join(__dirname, "..", "data");
+// DATA_DIR lets a deploy point the SQLite file at a mounted persistent disk
+// (e.g. Render's disk add-on) instead of the container's ephemeral local
+// filesystem, which is wiped on every redeploy/restart on the free tier.
+// Falls back to the local ./data folder for dev, matching prior behavior.
+const dataDir = process.env.DATA_DIR || path.join(__dirname, "..", "data");
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 
 const db = new DatabaseSync(path.join(dataDir, "hr.db"));

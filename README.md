@@ -151,11 +151,22 @@ like Vercel functions (their filesystem is wiped between invocations). The split
 5. After it deploys, run the seed script once from Render's **Shell** tab: `npm run seed`.
 6. Copy the service's URL (e.g. `https://marca-hr-backend.onrender.com`).
 
-**Free-tier caveat**: Render's free web services don't include a persistent disk — the
-SQLite file survives while the service stays up, but resets on redeploy, and free
-services spin down after 15 minutes of inactivity and lose data on the next wake-up.
-Fine for testing; for anything real, add Render's paid persistent disk add-on or move
-to a hosted database.
+**Persistent disk (required for real use)**: Render's free web services have no
+persistent disk — the SQLite file resets on every redeploy and on wake-up after the
+free tier's 15-minute idle spin-down, silently discarding any real data entered in
+between. `render.yaml` now declares a 1GB disk mounted at `/var/data`, and `DATA_DIR`
+points the app at it — but **persistent disks require a paid instance type** (Render's
+free plan can't attach one). To actually get persistent storage:
+
+1. In the Render dashboard, change the service's plan from Free to **Starter** (or
+   higher) — this is a billing change only you can approve.
+2. If the service was created before this disk was added, add it manually: service
+   settings → **Disks** → **Add Disk**, mount path `/var/data`, then set the `DATA_DIR`
+   env var to `/var/data` (both already automatic if you (re)deploy the Blueprint fresh).
+3. Redeploy. From then on, the database survives deploys, restarts, and idle spin-down.
+
+Without this, treat any data entered on the free tier as temporary — expect it to be
+gone after the next code deploy.
 
 ### Frontend on Vercel
 

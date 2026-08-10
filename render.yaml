@@ -2,15 +2,24 @@ services:
   - type: web
     name: marca-hr-backend
     runtime: node
-    plan: free
+    # Persistent disks require a paid instance type — Render's free plan can't
+    # attach one, so this must be changed (e.g. to "starter") before the disk
+    # below actually takes effect. See README's "Deploying" section.
+    plan: starter
     rootDir: backend
     buildCommand: npm install
     startCommand: npm start
+    disk:
+      name: marca-hr-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: JWT_SECRET
         generateValue: true
       - key: PORT
         value: 10000
+      - key: DATA_DIR
+        value: /var/data
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
