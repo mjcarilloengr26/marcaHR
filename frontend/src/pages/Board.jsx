@@ -59,6 +59,20 @@ export default function Board() {
     }
   };
 
+  // Mobile touch browsers don't fire native HTML5 drag events at all, so
+  // dragging cards between columns silently does nothing there — this select
+  // is a tap-only alternative that works everywhere drag-and-drop doesn't.
+  const moveCardTo = async (card, columnId) => {
+    const targetColumn = columns.find((c) => c.id === Number(columnId));
+    if (!targetColumn) return;
+    try {
+      await api.put(`/board/cards/${card.id}/move`, { column_id: targetColumn.id, position: targetColumn.cards.length });
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const addCard = async (e, columnId) => {
     e.preventDefault();
     setSaving(true);
@@ -159,9 +173,24 @@ export default function Board() {
                   {card.employee_name && <span>{card.employee_name}</span>}
                   {card.due_date && <span>Due {card.due_date}</span>}
                 </div>
-                <button className="link-btn board-card-delete" onClick={() => deleteCard(card.id)}>
-                  Remove
-                </button>
+                <div className="board-card-actions">
+                  <select
+                    className="board-card-move"
+                    value=""
+                    onChange={(e) => e.target.value && moveCardTo(card, e.target.value)}
+                    aria-label={`Move "${card.title}" to another column`}
+                  >
+                    <option value="">Move to…</option>
+                    {columns
+                      .filter((c) => c.id !== card.column_id)
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                  </select>
+                  <button className="link-btn board-card-delete" onClick={() => deleteCard(card.id)}>
+                    Remove
+                  </button>
+                </div>
               </div>
             ))}
 

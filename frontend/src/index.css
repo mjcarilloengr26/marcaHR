@@ -431,9 +431,25 @@ tbody tr:last-child td { border-bottom: none; }
   color: var(--text-muted);
   margin-bottom: 4px;
 }
+.board-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.board-card-move {
+  font-size: 11px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-muted);
+  max-width: 60%;
+}
 .board-card-delete {
   font-size: 11px;
   color: var(--danger);
+  flex-shrink: 0;
 }
 .board-add-card {
   width: 100%;
