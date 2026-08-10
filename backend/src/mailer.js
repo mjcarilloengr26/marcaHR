@@ -9,24 +9,8 @@ let warnedMissingConfig = false;
 // instead, which uses port 443 like every other outbound request this app makes.
 const RESEND_API_URL = "https://api.resend.com/emails";
 
-// Fire-and-forget: never throws, so a broken/missing email config can't break the request that triggered it.
-async function sendMail({ to, subject, text }) {
-  const recipients = Array.isArray(to) ? to.filter(Boolean) : to;
-  if (!recipients || (Array.isArray(recipients) && recipients.length === 0)) return;
-
-  const recipientList = Array.isArray(recipients) ? recipients.join(", ") : recipients;
-
+async function sendOne(recipient, subject, text) {
   const { RESEND_API_KEY, RESEND_FROM } = process.env;
-  if (!RESEND_API_KEY) {
-    if (!warnedMissingConfig) {
-      console.log("[mailer] Resend not configured (set RESEND_API_KEY in .env) — emails will be skipped.");
-      warnedMissingConfig = true;
-    }
-    console.log(`[mailer] Skipped "${subject}" to ${recipientList}`);
-    await logEvent({ action: "email_skipped", entityType: "email", details: { to: recipientList, subject, reason: "Resend not configured" } });
-    return;
-  }
-
   try {
     const res = await fetch(RESEND_API_URL, {
       method: "POST",
@@ -36,7 +20,7 @@ async function sendMail({ to, subject, text }) {
       },
       body: JSON.stringify({
         from: RESEND_FROM || "onboarding@resend.dev",
-        to: Array.isArray(recipients) ? recipients : [recipients],
+        to: [recipient],
         subject,
         text,
       }),
@@ -47,12 +31,35 @@ async function sendMail({ to, subject, text }) {
       throw new Error(`Resend API ${res.status}: ${body.slice(0, 300)}`);
     }
 
-    console.log(`[mailer] Sent "${subject}" to ${recipientList}`);
-    await logEvent({ action: "email_sent", entityType: "email", details: { to: recipientList, subject } });
+    console.log(`[mailer] Sent "${subject}" to ${recipient}`);
+    await logEvent({ action: "email_sent", entityType: "email", details: { to: recipient, subject } });
   } catch (err) {
-    console.error(`[mailer] Failed to send "${subject}":`, err.message);
-    await logEvent({ action: "email_failed", entityType: "email", details: { to: recipientList, subject, error: err.message } });
+    console.error(`[mailer] Failed to send "${subject}" to ${recipient}:`, err.message);
+    await logEvent({ action: "email_failed", entityType: "email", details: { to: recipient, subject, error: err.message } });
   }
+}
+
+// Fire-and-forget: never throws, so a broken/missing email config can't break the request that
+// triggered it. Sends to each recipient in its own API call — a broadcast (e.g. every HR/admin
+// user) must not let one bad/blocklisted address (Resend rejects reserved domains like
+// example.com) sink delivery to everyone else, and it keeps recipients from seeing each other's
+// addresses in a shared To: header.
+async function sendMail({ to, subject, text }) {
+  const recipients = Array.isArray(to) ? to.filter(Boolean) : [to].filter(Boolean);
+  if (recipients.length === 0) return;
+
+  const { RESEND_API_KEY } = process.env;
+  if (!RESEND_API_KEY) {
+    if (!warnedMissingConfig) {
+      console.log("[mailer] Resend not configured (set RESEND_API_KEY in .env) — emails will be skipped.");
+      warnedMissingConfig = true;
+    }
+    console.log(`[mailer] Skipped "${subject}" to ${recipients.join(", ")}`);
+    await logEvent({ action: "email_skipped", entityType: "email", details: { to: recipients.join(", "), subject, reason: "Resend not configured" } });
+    return;
+  }
+
+  await Promise.all(recipients.map((r) => sendOne(r, subject, text)));
 }
 
 module.exports = { sendMail };
