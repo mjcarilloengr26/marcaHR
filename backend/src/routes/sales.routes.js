@@ -137,6 +137,18 @@ router.get("/targets", requireAuth, requireRole("admin", "hr"), (req, res) => {
     .all(period_type, period_year, period_index)
     .reduce((acc, r) => ({ ...acc, [r.employee_id]: r }), {});
 
+  // Total pipeline load per rep — every opportunity they own, any stage,
+  // all-time (not period-scoped like actual_amount, since "how many leads is
+  // this rep carrying right now" isn't a per-period achievement metric).
+  // Live off the deals table, so it's always wired to current data.
+  const leadsByOwner = db
+    .prepare(
+      `SELECT owner_id, COUNT(*) AS c, COALESCE(SUM(value), 0) AS v FROM deals
+       WHERE owner_id IS NOT NULL GROUP BY owner_id`
+    )
+    .all()
+    .reduce((acc, r) => ({ ...acc, [r.owner_id]: { count: r.c, value: r.v } }), {});
+
   const rows = employeeIds.map((id) => {
     const employee = db.prepare("SELECT first_name, last_name FROM employees WHERE id = ?").get(id);
     const actual = (wonByOwner[id] || 0) + (orderByOwner[id] || 0);
@@ -148,6 +160,8 @@ router.get("/targets", requireAuth, requireRole("admin", "hr"), (req, res) => {
       target_amount: target,
       actual_amount: actual,
       percent: target > 0 ? Math.round((actual / target) * 100) : null,
+      total_leads: leadsByOwner[id]?.count || 0,
+      total_lead_value: leadsByOwner[id]?.value || 0,
     };
   });
 
