@@ -3,6 +3,8 @@ import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { compressImageFile } from "../utils/image";
 import { compareFaces } from "../faceRecognition";
+import { useSort } from "../hooks/useSort";
+import SortTh from "../components/SortTh";
 
 // Wraps browser geolocation in a promise; resolves null if unavailable/denied/slow.
 function getPosition() {
@@ -70,7 +72,6 @@ export default function Attendance() {
   const [busy, setBusy] = useState(false);
   const [busyLabel, setBusyLabel] = useState("");
   const [search, setSearch] = useState("");
-  const [nameSort, setNameSort] = useState(null); // null = default order, "asc" | "desc"
   const [pendingPhoto, setPendingPhoto] = useState(null);
   const [pendingPhotoName, setPendingPhotoName] = useState("");
   const [lightbox, setLightbox] = useState(null);
@@ -103,19 +104,12 @@ export default function Attendance() {
   const today = manilaToday();
   const todayRecord = records.find((r) => r.date === today && r.employee_id === user.employee_id);
 
-  let displayed = records;
+  let filtered = records;
   if (isHr && search.trim()) {
     const q = search.trim().toLowerCase();
-    displayed = displayed.filter((r) => (r.employee_name || "").toLowerCase().includes(q));
+    filtered = filtered.filter((r) => (r.employee_name || "").toLowerCase().includes(q));
   }
-  if (isHr && nameSort) {
-    displayed = [...displayed].sort((a, b) => {
-      const cmp = (a.employee_name || "").localeCompare(b.employee_name || "");
-      return nameSort === "asc" ? cmp : -cmp;
-    });
-  }
-
-  const toggleNameSort = () => setNameSort((prev) => (prev === "asc" ? "desc" : "asc"));
+  const { sorted: displayed, toggleSort, arrow } = useSort(filtered, "date", "desc");
 
   const handlePhotoPick = async (e) => {
     const file = e.target.files?.[0];
@@ -251,9 +245,6 @@ export default function Attendance() {
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <button type="button" className="btn btn-secondary" onClick={toggleNameSort}>
-            Sort by name {nameSort === "asc" ? "▲" : nameSort === "desc" ? "▼" : ""}
-          </button>
         </div>
       )}
 
@@ -261,9 +252,9 @@ export default function Attendance() {
         <table>
           <thead>
             <tr>
-              {isHr && <th>Employee</th>}
-              <th>Date</th>
-              <th>Status</th>
+              {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
+              <SortTh label="Date" sortKey="date" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
               <th>Clock in</th>
               <th>In location</th>
               <th>In photo</th>

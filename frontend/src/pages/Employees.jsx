@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
+import { useSort } from "../hooks/useSort";
+import SortTh from "../components/SortTh";
 
 const emptyForm = {
   first_name: "",
@@ -42,6 +44,8 @@ export default function Employees() {
   }, [q]);
 
   const handleChange = (field) => (e) => setForm({ ...form, [field]: e.target.value });
+
+  const { sorted, toggleSort, arrow } = useSort(employees, "last_name", "asc");
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -87,16 +91,16 @@ export default function Employees() {
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Department</th>
-              <th>Position</th>
-              <th>Status</th>
+              <SortTh label="Name" sortKey="last_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Email" sortKey="email" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Department" sortKey="department_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Position" sortKey="position" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {employees.map((e) => (
+            {sorted.map((e) => (
               <tr key={e.id}>
                 <td>
                   <Link to={`/employees/${e.id}`}>

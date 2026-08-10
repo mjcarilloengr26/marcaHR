@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { compressImageFile, readFileAsDataUrl } from "../utils/image";
+import { useSort } from "../hooks/useSort";
+import SortTh from "../components/SortTh";
 
 const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -20,6 +22,8 @@ export default function Expenses() {
   useEffect(() => {
     load();
   }, []);
+
+  const { sorted, toggleSort, arrow } = useSort(reports, "created_at", "desc");
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -59,18 +63,18 @@ export default function Expenses() {
         <table>
           <thead>
             <tr>
-              {isHr && <th>Employee</th>}
-              <th>Title</th>
+              {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
+              <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} />
               <th>Cost center</th>
-              <th>Cash advance</th>
-              <th>Expenses</th>
-              <th>Balance</th>
-              <th>Status</th>
+              <SortTh label="Cash advance" sortKey="cash_advance_amount" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Expenses" sortKey="total_expenses" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Balance" sortKey="balance" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {reports.map((r) => (
+            {sorted.map((r) => (
               <tr key={r.id}>
                 {isHr && <td>{r.employee_name}</td>}
                 <td>{r.title}</td>

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { useSort } from "../hooks/useSort";
+import SortTh from "../components/SortTh";
 
 const MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -120,6 +122,12 @@ export default function Payroll() {
     }
   };
 
+  const recordsWithSortKey = records.map((r) => ({
+    ...r,
+    period_sort: r.period_year * 10000 + r.period_month * 100 + r.period_half,
+  }));
+  const { sorted, toggleSort, arrow } = useSort(recordsWithSortKey, "period_sort", "desc");
+
   return (
     <div>
       <div className="page-header">
@@ -163,19 +171,19 @@ export default function Payroll() {
         <table>
           <thead>
             <tr>
-              {isHr && <th>Employee</th>}
-              <th>Period</th>
-              <th>Base</th>
-              <th>Bonuses</th>
-              <th>Overtime</th>
-              <th>Deductions</th>
-              <th>Net pay</th>
-              <th>Status</th>
+              {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
+              <SortTh label="Period" sortKey="period_sort" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Base" sortKey="base_salary" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Bonuses" sortKey="bonuses" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Overtime" sortKey="overtime_pay" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Deductions" sortKey="deductions" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Net pay" sortKey="net_pay" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
               {isHr && <th></th>}
             </tr>
           </thead>
           <tbody>
-            {records.map((r) => (
+            {sorted.map((r) => (
               <tr key={r.id}>
                 {isHr && <td>{r.employee_name}</td>}
                 <td>{periodLabel(r)}</td>

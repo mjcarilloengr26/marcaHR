@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { compressImageFile, readFileAsDataUrl } from "../utils/image";
+import { useSort } from "../hooks/useSort";
+import SortTh from "../components/SortTh";
 
 const emptyForm = { employee_id: "", leave_type_id: "", start_date: "", end_date: "", reason: "" };
 
@@ -161,6 +163,8 @@ export default function Leave() {
     }
   };
 
+  const { sorted, toggleSort, arrow } = useSort(requests, "created_at", "desc");
+
   return (
     <div>
       <div className="page-header">
@@ -239,19 +243,19 @@ export default function Leave() {
         <table>
           <thead>
             <tr>
-              {isHr && <th>Employee</th>}
-              <th>Type</th>
-              <th>Dates</th>
-              <th>Days</th>
+              {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
+              <SortTh label="Type" sortKey="leave_type_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Dates" sortKey="start_date" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Days" sortKey="days" toggleSort={toggleSort} arrow={arrow} />
               <th>Reason</th>
               <th>Attachment</th>
-              <th>Status</th>
+              <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
               <th>Review note</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {requests.map((r) => (
+            {sorted.map((r) => (
               <tr key={r.id}>
                 {isHr && <td>{r.employee_name}</td>}
                 <td>{r.leave_type_name}</td>

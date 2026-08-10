@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { useSort } from "../hooks/useSort";
+import SortTh from "../components/SortTh";
 
 const emptyForm = { title: "", customer_name: "", value: "", stage: "lead", owner_id: "", expected_close_date: "", notes: "" };
 const STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"];
@@ -95,6 +97,8 @@ export default function Deals() {
     }
   };
 
+  const { sorted, toggleSort, arrow } = useSort(deals, "created_at", "desc");
+
   return (
     <div>
       <div className="page-header">
@@ -120,18 +124,18 @@ export default function Deals() {
         <table>
           <thead>
             <tr>
-              <th>Title</th>
-              <th>Customer</th>
-              <th>Value</th>
-              <th>Owner</th>
-              <th>Expected close</th>
+              <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Customer" sortKey="customer_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Value" sortKey="value" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Owner" sortKey="owner_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Expected close" sortKey="expected_close_date" toggleSort={toggleSort} arrow={arrow} />
               <th>Order</th>
-              <th>Stage</th>
+              <SortTh label="Stage" sortKey="stage" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {deals.map((d) => (
+            {sorted.map((d) => (
               <tr key={d.id}>
                 <td>{d.title}</td>
                 <td>{d.customer_name}</td>

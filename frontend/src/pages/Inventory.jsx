@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useSort } from "../hooks/useSort";
+import SortTh from "../components/SortTh";
 
 const emptyForm = { sku: "", name: "", category: "", unit: "pcs", reorder_level: "", unit_cost: "", unit_price: "", location_id: "", notes: "" };
 const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -168,6 +170,7 @@ export default function Inventory() {
   };
 
   const criticalItems = summary?.lowStockItems?.filter((i) => i.stock_status === "critical") || [];
+  const { sorted, toggleSort, arrow } = useSort(items, null, "asc");
 
   return (
     <div>
@@ -229,20 +232,20 @@ export default function Inventory() {
         <table>
           <thead>
             <tr>
-              <th>SKU</th>
-              <th>Name</th>
-              <th>Category</th>
-              <th>On hand</th>
-              <th>Reorder level</th>
-              <th>Unit cost</th>
-              <th>Stock value</th>
-              <th>Location</th>
-              <th>Status</th>
+              <SortTh label="SKU" sortKey="sku" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Name" sortKey="name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Category" sortKey="category" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="On hand" sortKey="quantity_on_hand" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Reorder level" sortKey="reorder_level" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Unit cost" sortKey="unit_cost" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Stock value" sortKey="total_value" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Location" sortKey="location_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Status" sortKey="stock_status" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {items.map((i) => (
+            {sorted.map((i) => (
               <tr key={i.id}>
                 <td>{i.sku}</td>
                 <td>{i.name}</td>

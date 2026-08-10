@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useSort } from "../hooks/useSort";
+import SortTh from "../components/SortTh";
 
 const emptyForm = { order_number: "", customer_name: "", amount: "", status: "placed", owner_id: "", order_date: "", notes: "" };
 const STATUSES = ["placed", "processing", "shipped", "delivered", "cancelled"];
@@ -80,6 +82,8 @@ export default function Orders() {
     }
   };
 
+  const { sorted, toggleSort, arrow } = useSort(orders, "order_date", "desc");
+
   return (
     <div>
       <div className="page-header">
@@ -96,18 +100,18 @@ export default function Orders() {
         <table>
           <thead>
             <tr>
-              <th>Order #</th>
-              <th>Customer</th>
-              <th>Amount</th>
-              <th>Owner</th>
+              <SortTh label="Order #" sortKey="order_number" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Customer" sortKey="customer_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Amount" sortKey="amount" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Owner" sortKey="owner_name" toggleSort={toggleSort} arrow={arrow} />
               <th>From opportunity</th>
-              <th>Order date</th>
-              <th>Status</th>
+              <SortTh label="Order date" sortKey="order_date" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {orders.map((o) => (
+            {sorted.map((o) => (
               <tr key={o.id}>
                 <td>{o.order_number}</td>
                 <td>{o.customer_name}</td>

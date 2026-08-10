@@ -29,6 +29,27 @@ function actionLabel(action) {
   return ACTION_LABELS[action] || action;
 }
 
+function formatManilaTime(dbTimestamp) {
+  if (!dbTimestamp) return "—";
+  // Stored as "YYYY-MM-DD HH24:MI:SS" in UTC (no timezone marker) — normalize to
+  // ISO-8601 UTC before parsing so the browser doesn't assume it's already local time.
+  const iso = `${dbTimestamp.replace(" ", "T")}${dbTimestamp.endsWith("Z") ? "" : "Z"}`;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return dbTimestamp;
+  return d
+    .toLocaleString("en-CA", {
+      timeZone: "Asia/Manila",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    })
+    .replace(",", "");
+}
+
 function formatDetails(detailsJson) {
   if (!detailsJson) return "—";
   try {
@@ -49,6 +70,7 @@ export default function Events() {
   const [q, setQ] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [sortOrder, setSortOrder] = useState("desc"); // "desc" = newest first, "asc" = oldest first
 
   useEffect(() => {
     api.get("/events/actions").then(setActions).catch(() => {});
@@ -76,12 +98,17 @@ export default function Events() {
     load();
   };
 
+  const sortedEvents = [...events].sort((a, b) => {
+    const cmp = a.created_at.localeCompare(b.created_at);
+    return sortOrder === "asc" ? cmp : -cmp;
+  });
+
   return (
     <div>
       <div className="page-header">
         <div>
           <h1>Events</h1>
-          <p className="subtitle">Audit trail — logins, logouts, and record changes across the app</p>
+          <p className="subtitle">Audit trail — logins, logouts, and record changes across the app (times in GMT+8, Philippine time)</p>
         </div>
       </div>
 
@@ -116,7 +143,16 @@ export default function Events() {
           <table>
             <thead>
               <tr>
-                <th>Time</th>
+                <th>
+                  <button
+                    type="button"
+                    className="link-btn"
+                    onClick={() => setSortOrder((prev) => (prev === "desc" ? "asc" : "desc"))}
+                    title="Click to sort by time"
+                  >
+                    Time {sortOrder === "desc" ? "▼" : "▲"}
+                  </button>
+                </th>
                 <th>User</th>
                 <th>Action</th>
                 <th>Entity</th>
@@ -124,9 +160,9 @@ export default function Events() {
               </tr>
             </thead>
             <tbody>
-              {events.map((e) => (
+              {sortedEvents.map((e) => (
                 <tr key={e.id}>
-                  <td>{e.created_at}</td>
+                  <td>{formatManilaTime(e.created_at)}</td>
                   <td>{e.user_email || "—"}</td>
                   <td>{actionLabel(e.action)}</td>
                   <td>{e.entity_type ? `${e.entity_type}${e.entity_id ? ` #${e.entity_id}` : ""}` : "—"}</td>
