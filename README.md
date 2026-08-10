@@ -115,13 +115,15 @@ logged to the backend console — nothing breaks. To send real emails:
 2. In `backend/.env`, set:
    ```
    RESEND_API_KEY=re_your_api_key
-   RESEND_FROM=onboarding@resend.dev
+   RESEND_FROM=notifications@marca-group.online
    ```
 3. Restart the backend (`npm run dev`).
 
-On a new Resend account, `onboarding@resend.dev` can only send to the email address you signed
-up with — verify a custom sending domain (a few DNS records on marca-group.online) to send to
-everyone else. Deliverability uses Resend's HTTPS API rather than raw SMTP because most PaaS
+`marca-group.online` is already verified as a sending domain in Resend (DKIM/SPF/MX/DMARC
+records live in Vercel DNS, since the domain's nameservers point there), so `RESEND_FROM` can
+use any address on that domain — no need to fall back to the sandbox `onboarding@resend.dev`
+address, which can only send to the account's own signup email. Deliverability uses Resend's
+HTTPS API rather than raw SMTP because most PaaS
 hosts (including Render's free/starter plans) block outbound SMTP ports entirely; the HTTPS API
 goes out over port 443 like every other request this app makes.
 
