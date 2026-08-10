@@ -65,14 +65,25 @@ export default function Billing() {
     }
   };
 
-  const billOrder = async (orderId) => {
-    setError("");
-    try {
-      await api.post(`/invoices/from-order/${orderId}`, {});
-      load();
-    } catch (err) {
-      setError(err.message);
-    }
+  // Pre-fills the invoice form from an order's remaining balance rather than
+  // creating the invoice outright, so the amount (and everything else) is
+  // editable before it's saved — billing the full remainder isn't always what's
+  // wanted (e.g. a further partial payment, a discount, a different due date).
+  const openBillOrder = (order) => {
+    const priorCount = invoices.filter((inv) => inv.order_id === order.id).length;
+    const suggestedNumber = priorCount === 0 ? `INV-${order.order_number}` : `INV-${order.order_number}-${priorCount + 1}`;
+    setEditingId(null);
+    setForm({
+      invoice_number: suggestedNumber,
+      order_id: order.id,
+      customer_name: order.customer_name,
+      amount: order.remaining,
+      status: "draft",
+      issue_date: "",
+      due_date: "",
+      notes: "",
+    });
+    setShowForm(true);
   };
 
   const quickSetStatus = async (id, status) => {
@@ -94,7 +105,35 @@ export default function Billing() {
     }
   };
 
-  const unbilledOrders = orders.filter((o) => !invoices.some((inv) => inv.order_id === o.id));
+  // An order can carry more than one invoice (e.g. a partial invoice now, another
+  // for the remainder later), so "not yet billed" must compare the order's amount
+  // against the sum of its non-cancelled invoices, not just whether any invoice
+  // exists — otherwise a partially-billed order (billed for less than its full
+  // amount) would vanish from this list entirely, leaving its remaining balance
+  // untracked and unbillable.
+  const billedByOrder = invoices.reduce((acc, inv) => {
+    if (inv.status === "cancelled" || !inv.order_id) return acc;
+    acc[inv.order_id] = (acc[inv.order_id] || 0) + Number(inv.amount || 0);
+    return acc;
+  }, {});
+  const unbilledOrders = orders
+    .map((o) => ({ ...o, billed: billedByOrder[o.id] || 0, remaining: Math.max(o.amount - (billedByOrder[o.id] || 0), 0) }))
+    .filter((o) => o.remaining > 0);
+
+  // The cap for whatever order is currently selected in the form — mirrors the
+  // backend's own check (server-side is what actually enforces the limit; this
+  // is just so the field gives immediate feedback instead of a round-trip).
+  // Excludes the invoice being edited from "already billed" so editing an
+  // invoice's own amount doesn't count it against itself.
+  const formOrderRemaining = (() => {
+    if (!form.order_id) return null;
+    const order = orders.find((o) => o.id === Number(form.order_id));
+    if (!order) return null;
+    const billedByOthers = invoices
+      .filter((inv) => inv.order_id === Number(form.order_id) && inv.status !== "cancelled" && inv.id !== editingId)
+      .reduce((sum, inv) => sum + Number(inv.amount || 0), 0);
+    return Math.max(order.amount - billedByOthers, 0);
+  })();
 
   const filteredInvoices = invoices.filter((inv) => {
     const q = search.trim().toLowerCase();
@@ -117,13 +156,15 @@ export default function Billing() {
 
       {unbilledOrders.length > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
-          <h2>Orders not yet billed</h2>
+          <h2>Orders not yet fully billed</h2>
           <table>
             <thead>
               <tr>
                 <th>Order #</th>
                 <th>Customer</th>
-                <th>Amount</th>
+                <th>Order amount</th>
+                <th>Billed so far</th>
+                <th>Remaining</th>
                 <th></th>
               </tr>
             </thead>
@@ -133,8 +174,12 @@ export default function Billing() {
                   <td>{o.order_number}</td>
                   <td>{o.customer_name}</td>
                   <td>{money(o.amount)}</td>
+                  <td>{o.billed > 0 ? money(o.billed) : "—"}</td>
+                  <td>{money(o.remaining)}</td>
                   <td>
-                    <button className="btn btn-sm" onClick={() => billOrder(o.id)}>+ Bill this order</button>
+                    <button className="btn btn-sm" onClick={() => openBillOrder(o)}>
+                      {o.billed > 0 ? `+ Bill remaining ${money(o.remaining)}` : "+ Bill this order"}
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -217,8 +262,13 @@ export default function Billing() {
                 </select>
               </div>
               <div className="form-row">
-                <label>Amount</label>
-                <input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+                <label>Amount{formOrderRemaining !== null && ` (up to ${money(formOrderRemaining)} remaining on this order)`}</label>
+                <input
+                  type="number"
+                  value={form.amount}
+                  max={formOrderRemaining !== null ? formOrderRemaining : undefined}
+                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                />
               </div>
               <div className="form-row">
                 <label>Issue date</label>
