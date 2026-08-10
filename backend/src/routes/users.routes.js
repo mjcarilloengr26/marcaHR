@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
+const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
 
@@ -40,6 +41,11 @@ router.post(
       const info = await db
         .prepare("INSERT INTO users (email, password_hash, role, employee_id) VALUES (?, ?, ?, ?)")
         .run(email.toLowerCase().trim(), password_hash, role, employee_id || null);
+      await logRequestEvent(req, "create_user", {
+        entityType: "user",
+        entityId: info.lastInsertRowid,
+        details: { email: email.toLowerCase().trim(), role },
+      });
       res.status(201).json(
         await db.prepare("SELECT id, email, role, employee_id FROM users WHERE id = ?").get(info.lastInsertRowid)
       );
@@ -83,6 +89,12 @@ router.put(
       await db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(bcrypt.hashSync(password, 10), req.params.id);
     }
 
+    await logRequestEvent(req, "update_user", {
+      entityType: "user",
+      entityId: Number(req.params.id),
+      details: { email: email || undefined, role: role || undefined, password_changed: Boolean(password) },
+    });
+
     res.json(
       await db
         .prepare(
@@ -114,7 +126,13 @@ router.delete(
   requireAuth,
   requireRole("admin"),
   asyncHandler(async (req, res) => {
+    const existing = await db.prepare("SELECT email, role FROM users WHERE id = ?").get(req.params.id);
     await db.prepare("DELETE FROM users WHERE id = ?").run(req.params.id);
+    await logRequestEvent(req, "delete_user", {
+      entityType: "user",
+      entityId: Number(req.params.id),
+      details: existing ? { email: existing.email, role: existing.role } : undefined,
+    });
     res.status(204).end();
   })
 );

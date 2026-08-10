@@ -22,6 +22,7 @@ import PurchaseOrders from "./pages/PurchaseOrders";
 import Inventory from "./pages/Inventory";
 import Users from "./pages/Users";
 import Reports from "./pages/Reports";
+import Events from "./pages/Events";
 
 function Protected({ children, roles }) {
   return (
@@ -54,6 +55,7 @@ export default function App() {
       <Route path="/purchase-orders" element={<Protected roles={["admin", "hr"]}><PurchaseOrders /></Protected>} />
       <Route path="/inventory" element={<Protected roles={["admin", "hr"]}><Inventory /></Protected>} />
       <Route path="/users" element={<Protected roles={["admin"]}><Users /></Protected>} />
+      <Route path="/events" element={<Protected roles={["admin"]}><Events /></Protected>} />
       <Route path="/reports" element={<Protected><Reports /></Protected>} />
     </Routes>
   );

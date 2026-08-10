@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const db = require("../db");
 const { signToken, requireAuth } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
+const { logEvent, logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
 
@@ -29,11 +30,25 @@ router.post(
           .get(user.employee_id)
       : null;
 
+    await logEvent({ userId: user.id, userEmail: user.email, action: "login", ip: req.ip });
+
     res.json({
       token,
       user: { id: user.id, email: user.email, role: user.role, employee_id: user.employee_id },
       employee,
     });
+  })
+);
+
+// JWTs are stateless — there's no session to invalidate server-side — so this
+// endpoint exists purely to record the logout event before the frontend
+// discards its token.
+router.post(
+  "/logout",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    await logRequestEvent(req, "logout");
+    res.status(204).end();
   })
 );
 

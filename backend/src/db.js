@@ -389,6 +389,23 @@ CREATE TABLE IF NOT EXISTS attendance_settings (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_deal_id ON orders(deal_id) WHERE deal_id IS NOT NULL;
+
+-- Audit trail: who did what, when. user_email is denormalized (kept even if the
+-- user row is later deleted) so log rows stay readable forever, which a hard FK
+-- alone can't guarantee — ON DELETE SET NULL only protects the row from being
+-- deleted, not from losing its human-readable identity.
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  user_email TEXT,
+  action TEXT NOT NULL,
+  entity_type TEXT,
+  entity_id INTEGER,
+  details TEXT,
+  ip_address TEXT,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
 `;
 
 let migrated = null;

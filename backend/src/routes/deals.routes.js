@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
+const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
 
@@ -155,6 +156,14 @@ router.put(
     let autoCreatedOrder = null;
     if (updated.stage === "won" && existing.stage !== "won") {
       autoCreatedOrder = await autoCreateOrderForWonDeal(updated);
+    }
+
+    if (updated.stage !== existing.stage) {
+      await logRequestEvent(req, "deal_stage_change", {
+        entityType: "deal",
+        entityId: updated.id,
+        details: { title: updated.title, from: existing.stage, to: updated.stage },
+      });
     }
 
     res.json({ ...updated, autoCreatedOrder });

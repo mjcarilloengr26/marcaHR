@@ -5,6 +5,7 @@ const { requireAuth } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { getSalesTargetsReport, parsePeriod } = require("../services/salesTargets");
 const { getExpenseSummary } = require("../services/expenseSummary");
+const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
 
@@ -123,6 +124,11 @@ router.get(
       ],
       expenseSummary
     );
+
+    await logRequestEvent(req, "export_excel", {
+      entityType: "report",
+      details: { report: "sales-finance", period_type, period_year, period_index },
+    });
 
     const filename = `marca-group-sales-finance-report-${period_year}-${period_type}-${period_index}.xlsx`;
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

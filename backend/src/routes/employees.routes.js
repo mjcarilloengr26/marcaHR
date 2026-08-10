@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole, requireSelfOrRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
+const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
 
@@ -112,6 +113,11 @@ router.post(
         .run(...values);
       const employee = await db.prepare("SELECT * FROM employees WHERE id = ?").get(info.lastInsertRowid);
       await backfillCurrentPayrollIfGenerated(employee);
+      await logRequestEvent(req, "create_employee", {
+        entityType: "employee",
+        entityId: employee.id,
+        details: { name: `${employee.first_name} ${employee.last_name}`, email: employee.email },
+      });
       res.status(201).json(employee);
     } catch (err) {
       if (err.code === "23505") {
@@ -155,6 +161,11 @@ router.put(
       }
       return res.status(400).json({ error: "Could not update employee" });
     }
+    await logRequestEvent(req, "update_employee", {
+      entityType: "employee",
+      entityId: Number(req.params.id),
+      details: { fields: cols },
+    });
     res.json(await db.prepare("SELECT * FROM employees WHERE id = ?").get(req.params.id));
   })
 );
@@ -167,6 +178,11 @@ router.delete(
     const existing = await db.prepare("SELECT * FROM employees WHERE id = ?").get(req.params.id);
     if (!existing) return res.status(404).json({ error: "Employee not found" });
     await db.prepare("DELETE FROM employees WHERE id = ?").run(req.params.id);
+    await logRequestEvent(req, "delete_employee", {
+      entityType: "employee",
+      entityId: Number(req.params.id),
+      details: { name: `${existing.first_name} ${existing.last_name}`, email: existing.email },
+    });
     res.status(204).end();
   })
 );

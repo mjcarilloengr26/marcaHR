@@ -65,6 +65,7 @@ const NAV_ITEMS = [
 
   { section: "Administration", icon: "⚙️", roles: ["admin"] },
   { to: "/users", label: "Users", icon: "👤", roles: ["admin"] },
+  { to: "/events", label: "Events", icon: "📜", roles: ["admin"] },
 
   { section: "Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true },
   { to: "/reports", label: "Export Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true },

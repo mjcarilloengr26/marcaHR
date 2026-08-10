@@ -39,6 +39,9 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    // Best-effort — record the event, but never let a failed request block
+    // the user from actually logging out.
+    api.post("/auth/logout").catch(() => {});
     setToken(null);
     setUser(null);
     setEmployee(null);

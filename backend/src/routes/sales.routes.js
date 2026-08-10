@@ -3,6 +3,7 @@ const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { getSalesTargetsReport, parsePeriod } = require("../services/salesTargets");
+const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
 
@@ -138,6 +139,11 @@ router.post(
      ON CONFLICT(employee_id, period_type, period_year, period_index) DO UPDATE SET target_amount = excluded.target_amount`
       )
       .run(employee_id, period_type, period_year, index, Number(target_amount) || 0);
+    await logRequestEvent(req, "update_sales_target", {
+      entityType: "sales_target",
+      entityId: Number(employee_id),
+      details: { period_type, period_year, period_index: index, target_amount: Number(target_amount) || 0 },
+    });
     res
       .status(201)
       .json(
