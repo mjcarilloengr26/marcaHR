@@ -18,7 +18,12 @@ router.post("/login", (req, res) => {
 
   const token = signToken(user);
   const employee = user.employee_id
-    ? db.prepare("SELECT * FROM employees WHERE id = ?").get(user.employee_id)
+    ? db
+        .prepare(
+          `SELECT e.*, d.name AS department_name FROM employees e
+           LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?`
+        )
+        .get(user.employee_id)
     : null;
 
   res.json({
@@ -32,7 +37,12 @@ router.get("/me", requireAuth, (req, res) => {
   const user = db.prepare("SELECT id, email, role, employee_id FROM users WHERE id = ?").get(req.user.id);
   if (!user) return res.status(404).json({ error: "User not found" });
   const employee = user.employee_id
-    ? db.prepare("SELECT * FROM employees WHERE id = ?").get(user.employee_id)
+    ? db
+        .prepare(
+          `SELECT e.*, d.name AS department_name FROM employees e
+           LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?`
+        )
+        .get(user.employee_id)
     : null;
   res.json({ user, employee });
 });

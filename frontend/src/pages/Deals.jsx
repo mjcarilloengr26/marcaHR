@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useAuth } from "../context/AuthContext";
 
 const emptyForm = { title: "", customer_name: "", value: "", stage: "lead", owner_id: "", expected_close_date: "", notes: "" };
 const STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"];
 const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 export default function Deals() {
+  const { user } = useAuth();
+  const isHr = user.role === "admin" || user.role === "hr";
   const [deals, setDeals] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [error, setError] = useState("");
@@ -19,7 +22,8 @@ export default function Deals() {
 
   useEffect(() => {
     load();
-    api.get("/employees").then(setEmployees).catch(() => {});
+    if (isHr) api.get("/employees").then(setEmployees).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const openAdd = () => {
@@ -96,7 +100,11 @@ export default function Deals() {
       <div className="page-header">
         <div>
           <h1>Sales Opportunities</h1>
-          <p className="subtitle">Pipeline — track opportunities from lead to close. Winning one auto-creates an order.</p>
+          <p className="subtitle">
+            {isHr
+              ? "Pipeline — track opportunities from lead to close. Winning one auto-creates an order."
+              : "Your pipeline — track your opportunities from lead to close. Winning one auto-creates an order."}
+          </p>
         </div>
         <button className="btn" onClick={openAdd}>+ Add opportunity</button>
       </div>
@@ -166,15 +174,17 @@ export default function Deals() {
                 <label>Value</label>
                 <input type="number" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
               </div>
-              <div className="form-row">
-                <label>Owner</label>
-                <select value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}>
-                  <option value="">—</option>
-                  {employees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>
-                  ))}
-                </select>
-              </div>
+              {isHr && (
+                <div className="form-row">
+                  <label>Owner</label>
+                  <select value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}>
+                    <option value="">—</option>
+                    {employees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="form-row">
                 <label>Stage</label>
                 <select value={form.stage} onChange={(e) => setForm({ ...form, stage: e.target.value })}>

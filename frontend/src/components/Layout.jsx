@@ -20,9 +20,9 @@ const NAV_ITEMS = [
   { to: "/board", label: "Task Board", icon: "🗒️", roles: ["admin", "hr", "employee"] },
   { to: "/expenses", label: "Expenses", icon: "🧾", roles: ["admin", "hr", "employee"] },
 
-  { section: "Sales", icon: "💹", roles: ["admin", "hr"] },
+  { section: "Sales", icon: "💹", roles: ["admin", "hr", "employee"], salesOnly: true },
   { to: "/sales", label: "Sales Dashboard", icon: "📊", roles: ["admin", "hr"] },
-  { to: "/deals", label: "Sales Opportunities", icon: "🎯", roles: ["admin", "hr"] },
+  { to: "/deals", label: "Sales Opportunities", icon: "🎯", roles: ["admin", "hr", "employee"], salesOnly: true },
   { to: "/orders", label: "Orders", icon: "🛍️", roles: ["admin", "hr"] },
   { to: "/billing", label: "Billing", icon: "💳", roles: ["admin", "hr"] },
 
@@ -47,6 +47,18 @@ export default function Layout({ children }) {
     navigate("/login");
   };
 
+  // Sales Opportunities is HR/admin territory plus reps who are actually in
+  // Sales (by department or job title) — an employee outside Sales shouldn't
+  // even see the link, matching what the backend will let them access.
+  const isSalesEmployee =
+    user?.role !== "employee" ||
+    (employee?.department_name || "").toLowerCase().includes("sales") ||
+    (employee?.position || "").toLowerCase().includes("sales");
+
+  const visibleNavItems = NAV_ITEMS.filter(
+    (item) => item.roles.includes(user?.role) && (!item.salesOnly || isSalesEmployee)
+  );
+
   return (
     <div className="app-shell">
       <aside className={menuOpen ? "sidebar open" : "sidebar"}>
@@ -55,7 +67,7 @@ export default function Layout({ children }) {
           <span>MARCA GROUP</span>
         </div>
         <nav>
-          {NAV_ITEMS.filter((item) => item.roles.includes(user?.role)).map((item) =>
+          {visibleNavItems.map((item) =>
             item.section ? (
               <div className="nav-section" key={`section-${item.section}`}>
                 <span className="nav-section-icon">{item.icon}</span>

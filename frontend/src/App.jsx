@@ -46,7 +46,7 @@ export default function App() {
       <Route path="/board" element={<Protected><Board /></Protected>} />
       <Route path="/expenses" element={<Protected><Expenses /></Protected>} />
       <Route path="/sales" element={<Protected roles={["admin", "hr"]}><SalesDashboard /></Protected>} />
-      <Route path="/deals" element={<Protected roles={["admin", "hr"]}><Deals /></Protected>} />
+      <Route path="/deals" element={<Protected roles={["admin", "hr", "employee"]}><Deals /></Protected>} />
       <Route path="/orders" element={<Protected roles={["admin", "hr"]}><Orders /></Protected>} />
       <Route path="/work-orders" element={<Protected><WorkOrders /></Protected>} />
       <Route path="/billing" element={<Protected roles={["admin", "hr"]}><Billing /></Protected>} />
