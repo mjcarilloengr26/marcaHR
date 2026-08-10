@@ -17,6 +17,7 @@ function AttachmentCell({ name, data }) {
 export default function Leave() {
   const { user } = useAuth();
   const isHr = user.role === "admin" || user.role === "hr";
+  const currentYear = new Date().getFullYear();
   const [requests, setRequests] = useState([]);
   const [types, setTypes] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -28,15 +29,49 @@ export default function Leave() {
   const [attaching, setAttaching] = useState(false);
   const [resubmitting, setResubmitting] = useState(null); // the request being resubmitted, or null
   const [reviewNoteDrafts, setReviewNoteDrafts] = useState({}); // { [requestId]: text }
+  const [balances, setBalances] = useState([]);
+  const [balanceEmployeeId, setBalanceEmployeeId] = useState(isHr ? "" : user.employee_id);
+  const [editingBalance, setEditingBalance] = useState(null); // the balance row being edited, or null
+  const [balanceAmount, setBalanceAmount] = useState("");
 
   const loadRequests = () => api.get("/leave/requests").then(setRequests).catch((err) => setError(err.message));
+
+  const loadBalances = (employeeId) => {
+    if (!employeeId) {
+      setBalances([]);
+      return;
+    }
+    api.get(`/leave/balances/${employeeId}`).then(setBalances).catch((err) => setError(err.message));
+  };
 
   useEffect(() => {
     loadRequests();
     api.get("/leave/types").then(setTypes).catch(() => {});
     if (isHr) api.get("/employees").then(setEmployees).catch(() => {});
+    if (balanceEmployeeId) loadBalances(balanceEmployeeId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const openEditBalance = (row) => {
+    setEditingBalance(row);
+    setBalanceAmount(row.allocated_days);
+  };
+
+  const saveBalance = async (e) => {
+    e.preventDefault();
+    try {
+      await api.post("/leave/balances", {
+        employee_id: balanceEmployeeId,
+        leave_type_id: editingBalance.leave_type_id,
+        year: currentYear,
+        allocated_days: Number(balanceAmount) || 0,
+      });
+      setEditingBalance(null);
+      loadBalances(balanceEmployeeId);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
 
   const handleFilePick = async (e) => {
     const file = e.target.files?.[0];
@@ -139,6 +174,66 @@ export default function Leave() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="page-header" style={{ marginBottom: 4 }}>
+          <div>
+            <h2>Leave Balances</h2>
+            <p className="subtitle" style={{ margin: 0 }}>
+              Allowed days per year per leave type, {currentYear} — used days are deducted automatically as requests are approved
+            </p>
+          </div>
+          {isHr && (
+            <div className="form-row">
+              <label>Employee</label>
+              <select
+                value={balanceEmployeeId}
+                onChange={(e) => {
+                  setBalanceEmployeeId(e.target.value);
+                  loadBalances(e.target.value);
+                }}
+              >
+                <option value="">Select employee</option>
+                {employees.map((e) => (
+                  <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+        {!balanceEmployeeId && <div className="empty-state">Select an employee to view their leave balances.</div>}
+        {balanceEmployeeId && balances.length === 0 && <div className="empty-state">No leave balances found.</div>}
+        {balanceEmployeeId && balances.length > 0 && (
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Allocated</th>
+                <th>Used</th>
+                <th>Remaining</th>
+                {isHr && <th></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {balances.map((b) => (
+                <tr key={b.leave_type_id}>
+                  <td>{b.leave_type_name}</td>
+                  <td>{b.allocated_days}</td>
+                  <td>{b.used_days}</td>
+                  <td>{Math.max(b.allocated_days - b.used_days, 0)}</td>
+                  {isHr && (
+                    <td>
+                      <button type="button" className="btn btn-sm btn-secondary" onClick={() => openEditBalance(b)}>
+                        Edit
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       <div className="card">
         <table>
@@ -269,6 +364,23 @@ export default function Leave() {
               <button type="submit" className="btn" disabled={saving || attaching}>
                 {saving ? "Submitting…" : resubmitting ? "Resubmit request" : "Submit request"}
               </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editingBalance && (
+        <div className="modal-backdrop" onClick={() => setEditingBalance(null)}>
+          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={saveBalance}>
+            <h2>Edit allocated days — {editingBalance.leave_type_name}</h2>
+            <p className="subtitle" style={{ marginTop: -8 }}>{currentYear}</p>
+            <div className="form-row">
+              <label>Allocated days</label>
+              <input type="number" min="0" value={balanceAmount} onChange={(e) => setBalanceAmount(e.target.value)} autoFocus />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setEditingBalance(null)}>Cancel</button>
+              <button type="submit" className="btn">Save</button>
             </div>
           </form>
         </div>

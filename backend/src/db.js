@@ -408,6 +408,31 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
 `;
 
+// One-time correction from the original 3 ad-hoc demo leave types to the 5
+// company-standard ones, preserving existing leave_requests/leave_balances
+// (which reference these rows by id) via rename rather than delete+recreate.
+// Safe to run on every boot: each rename only ever fires once (the old name
+// stops existing after it fires), and the insert-if-missing step uses
+// ON CONFLICT DO NOTHING so it never clobbers a default_days_per_year that
+// HR has since changed via PUT /leave/types/:id.
+async function ensureLeaveTypeTaxonomy() {
+  const renames = [
+    ["Vacation", "Vacation Leave"],
+    ["Sick", "Sick Leave"],
+    ["Personal", "Emergency Leave"],
+  ];
+  for (const [oldName, newName] of renames) {
+    await pool.query("UPDATE leave_types SET name = $1, default_days_per_year = 5 WHERE name = $2", [newName, oldName]);
+  }
+  const requiredTypes = ["Vacation Leave", "Paternity/Maternity Leave", "Sick Leave", "Emergency Leave", "No Pay Leave"];
+  for (const name of requiredTypes) {
+    await pool.query(
+      "INSERT INTO leave_types (name, default_days_per_year) VALUES ($1, 5) ON CONFLICT (name) DO NOTHING",
+      [name]
+    );
+  }
+}
+
 let migrated = null;
 // Idempotent: safe to call on every boot. Runs the full schema once per
 // process (CREATE TABLE IF NOT EXISTS makes re-running harmless besides).
@@ -424,7 +449,8 @@ db.migrate = function () {
         pool.query(
           "INSERT INTO attendance_settings (id, face_recognition_enabled) VALUES (1, 0) ON CONFLICT (id) DO NOTHING"
         )
-      );
+      )
+      .then(() => ensureLeaveTypeTaxonomy());
   }
   return migrated;
 };

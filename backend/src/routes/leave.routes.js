@@ -3,6 +3,7 @@ const db = require("../db");
 const { requireAuth, requireRole, requireSelfOrRole } = require("../middleware/auth");
 const { notifyLeaveSubmitted, notifyLeaveStatusChanged } = require("../notifications");
 const asyncHandler = require("../middleware/asyncHandler");
+const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
 
@@ -50,18 +51,65 @@ router.post(
   })
 );
 
+// Editing default_days_per_year here only changes what NEW balance rows get
+// allocated (via ensureLeaveBalancesForYear below) — it never retroactively
+// changes an employee's already-allocated balance for a year, since HR may
+// have deliberately customized that.
+router.put(
+  "/types/:id",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const existing = await db.prepare("SELECT * FROM leave_types WHERE id = ?").get(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Leave type not found" });
+    const { name, default_days_per_year } = req.body || {};
+    await db.prepare("UPDATE leave_types SET name = ?, default_days_per_year = ? WHERE id = ?").run(
+      name ?? existing.name,
+      default_days_per_year !== undefined ? default_days_per_year : existing.default_days_per_year,
+      req.params.id
+    );
+    await logRequestEvent(req, "update_leave_type", {
+      entityType: "leave_type",
+      entityId: Number(req.params.id),
+      details: { name: name ?? existing.name, default_days_per_year: default_days_per_year ?? existing.default_days_per_year },
+    });
+    res.json(await db.prepare("SELECT * FROM leave_types WHERE id = ?").get(req.params.id));
+  })
+);
+
 // --- Balances ---
+
+// Lazily provisions this employee's balance row for every leave type for the
+// given year, using each type's default_days_per_year — so "allowed leave
+// per year per employee" exists automatically for both new and pre-existing
+// employees without a bulk migration, and never overwrites a balance HR has
+// already customized (ON CONFLICT DO NOTHING).
+async function ensureLeaveBalancesForYear(employeeId, year) {
+  const types = await db.prepare("SELECT id, default_days_per_year FROM leave_types").all();
+  for (const t of types) {
+    await db
+      .prepare(
+        `INSERT INTO leave_balances (employee_id, leave_type_id, year, allocated_days, used_days)
+         VALUES (?, ?, ?, ?, 0)
+         ON CONFLICT (employee_id, leave_type_id, year) DO NOTHING`
+      )
+      .run(employeeId, t.id, year, t.default_days_per_year);
+  }
+}
+
 router.get(
   "/balances/:employeeId",
   requireAuth,
   requireSelfOrRole((req) => req.params.employeeId, "admin", "hr"),
   asyncHandler(async (req, res) => {
     const year = req.query.year || new Date().getFullYear();
+    await ensureLeaveBalancesForYear(req.params.employeeId, year);
     const balances = await db
       .prepare(
         `SELECT b.*, lt.name AS leave_type_name
          FROM leave_balances b JOIN leave_types lt ON lt.id = b.leave_type_id
-         WHERE b.employee_id = ? AND b.year = ?`
+         WHERE b.employee_id = ? AND b.year = ?
+         ORDER BY lt.name`
       )
       .all(req.params.employeeId, year);
     res.json(balances);
@@ -180,16 +228,28 @@ router.put(
       req.params.id
     );
 
-    if (status === "approved") {
+    // Deduct on approval; restore if a previously-approved request is later
+    // rejected or cancelled — otherwise reversing an approval would leave the
+    // employee's balance permanently short, since nothing else ever gives
+    // those days back.
+    if (status === "approved" && request.status !== "approved") {
       const year = new Date(request.start_date).getFullYear();
       await db
         .prepare(
           `INSERT INTO leave_balances (employee_id, leave_type_id, year, allocated_days, used_days)
        VALUES (?, ?, ?, 0, ?)
        ON CONFLICT(employee_id, leave_type_id, year)
-       DO UPDATE SET used_days = used_days + excluded.used_days`
+       DO UPDATE SET used_days = leave_balances.used_days + excluded.used_days`
         )
         .run(request.employee_id, request.leave_type_id, year, request.days);
+    } else if (status !== "approved" && request.status === "approved") {
+      const year = new Date(request.start_date).getFullYear();
+      await db
+        .prepare(
+          `UPDATE leave_balances SET used_days = GREATEST(used_days - ?, 0)
+           WHERE employee_id = ? AND leave_type_id = ? AND year = ?`
+        )
+        .run(request.days, request.employee_id, request.leave_type_id, year);
     }
 
     if (status === "approved" || status === "rejected") {
@@ -275,6 +335,17 @@ router.delete(
     if (!isOwner && !isHr) return res.status(403).json({ error: "Insufficient permissions" });
     if (request.status !== "pending" && !isHr) {
       return res.status(400).json({ error: "Only pending requests can be cancelled" });
+    }
+    // HR can delete an already-approved request — give the days back so the
+    // balance doesn't stay permanently short.
+    if (request.status === "approved") {
+      const year = new Date(request.start_date).getFullYear();
+      await db
+        .prepare(
+          `UPDATE leave_balances SET used_days = GREATEST(used_days - ?, 0)
+           WHERE employee_id = ? AND leave_type_id = ? AND year = ?`
+        )
+        .run(request.days, request.employee_id, request.leave_type_id, year);
     }
     await db.prepare("DELETE FROM leave_requests WHERE id = ?").run(req.params.id);
     res.status(204).end();
