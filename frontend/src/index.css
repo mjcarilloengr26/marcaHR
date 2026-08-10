@@ -350,10 +350,12 @@ h2 { font-size: 17px; margin: 0 0 12px; }
   gap: 16px;
 }
 .grid-4 { grid-template-columns: repeat(4, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
 .grid-2 { grid-template-columns: repeat(2, 1fr); }
 
 @media (max-width: 900px) {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
   .grid-2 { grid-template-columns: 1fr; }
 }
 
@@ -795,7 +797,7 @@ tbody tr:last-child td { border-bottom: none; }
     gap: 10px;
   }
 
-  .grid-4, .grid-2 { grid-template-columns: 1fr; }
+  .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
 
   .card { overflow-x: auto; }
   .card table { min-width: 560px; }

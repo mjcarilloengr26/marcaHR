@@ -15,7 +15,7 @@ router.get(
          FROM locations l ORDER BY l.name`
       )
       .all();
-    res.json(locations);
+    res.json(locations.map((l) => ({ ...l, employee_count: Number(l.employee_count) })));
   })
 );
 

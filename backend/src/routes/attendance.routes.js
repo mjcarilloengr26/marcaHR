@@ -293,7 +293,8 @@ router.get(
       params.push(from, to);
     }
     sql += " GROUP BY status";
-    res.json(await db.prepare(sql).all(...params));
+    const rows = await db.prepare(sql).all(...params);
+    res.json(rows.map((r) => ({ ...r, count: Number(r.count) })));
   })
 );
 

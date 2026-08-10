@@ -16,7 +16,7 @@ router.get(
          FROM departments d ORDER BY d.name`
       )
       .all();
-    res.json(departments);
+    res.json(departments.map((d) => ({ ...d, employee_count: Number(d.employee_count) })));
   })
 );
 

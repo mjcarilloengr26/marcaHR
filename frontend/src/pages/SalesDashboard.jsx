@@ -126,7 +126,7 @@ export default function SalesDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-2" style={{ marginBottom: 16 }}>
+      <div className="grid grid-3" style={{ marginBottom: 16 }}>
         <div className="stat-card">
           <div className="stat-value">{money(stats.kpis.ordersRevenueYtdThisYear)}</div>
           <div className="stat-label">Order revenue — year to date (as of {stats.kpis.ytdAsOf})</div>
@@ -136,6 +136,13 @@ export default function SalesDashboard() {
           <div className="stat-value">{money(stats.kpis.orderBacklogValue)}</div>
           <div className="stat-label">
             Order backlog — {stats.kpis.orderBacklogCount} order{stats.kpis.orderBacklogCount === 1 ? "" : "s"} not yet delivered
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{stats.kpis.winRate === null ? "—" : `${stats.kpis.winRate.toFixed(0)}%`}</div>
+          <div className="stat-label">
+            Win rate — {stats.kpis.wonDeals} won / {stats.kpis.lostDeals} lost
+            {stats.kpis.winRate === null && " (no closed opportunities yet)"}
           </div>
         </div>
       </div>

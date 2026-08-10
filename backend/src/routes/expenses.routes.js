@@ -209,7 +209,10 @@ router.put(
     if (!isOwner && !isHr) return res.status(403).json({ error: "Insufficient permissions" });
     if (report.status !== "draft") return res.status(400).json({ error: "Only draft reports can be submitted" });
 
-    const itemCount = (await db.prepare("SELECT COUNT(*) AS c FROM expense_items WHERE report_id = ?").get(report.id)).c;
+    // COUNT(*) comes back from Postgres as a string, so this must be coerced to a
+    // Number before comparing — "0" === 0 is false in JS, which meant this check
+    // never actually fired and reports with zero items could always be submitted.
+    const itemCount = Number((await db.prepare("SELECT COUNT(*) AS c FROM expense_items WHERE report_id = ?").get(report.id)).c);
     if (itemCount === 0) return res.status(400).json({ error: "Add at least one expense item before submitting" });
 
     await db
