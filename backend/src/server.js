@@ -31,6 +31,10 @@ app.use(cors());
 // (base64-encoded, compressed client-side) fit in the request body.
 app.use(express.json({ limit: "8mb" }));
 
+app.get("/", (req, res) => {
+  res.json({ message: "MARCA GROUP API is running. See /api/health for status." });
+});
+
 app.use("/api/auth", authRoutes);
 app.use("/api/employees", employeeRoutes);
 app.use("/api/departments", departmentRoutes);
