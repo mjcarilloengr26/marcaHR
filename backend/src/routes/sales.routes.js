@@ -137,22 +137,67 @@ router.get("/targets", requireAuth, requireRole("admin", "hr"), (req, res) => {
     .all(period_type, period_year, period_index)
     .reduce((acc, r) => ({ ...acc, [r.employee_id]: r }), {});
 
-  // Total pipeline load per rep — every opportunity they own, any stage,
-  // all-time (not period-scoped like actual_amount, since "how many leads is
-  // this rep carrying right now" isn't a per-period achievement metric).
-  // Live off the deals table, so it's always wired to current data.
-  const leadsByOwner = db
-    .prepare(
-      `SELECT owner_id, COUNT(*) AS c, COALESCE(SUM(value), 0) AS v FROM deals
-       WHERE owner_id IS NOT NULL GROUP BY owner_id`
-    )
-    .all()
-    .reduce((acc, r) => ({ ...acc, [r.owner_id]: { count: r.c, value: r.v } }), {});
+  // Lead summary per rep — every opportunity they own, any stage, bucketed by
+  // when it was created (not period-scoped like actual_amount, since "how
+  // many leads is this rep carrying" isn't a per-period achievement metric).
+  // created_at is stored as UTC; bucketing uses the Manila wall-clock date so
+  // it agrees with everywhere else in the app that's anchored to GMT+8.
+  const nowParts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+  })
+    .format(new Date())
+    .split("-")
+    .map(Number);
+  const [currentYear, currentMonth] = nowParts;
+  const currentQuarter = Math.floor((currentMonth - 1) / 3) + 1;
+
+  const emptyBucket = () => ({ count: 0, value: 0 });
+  const leadSummaryByOwner = {};
+  for (const d of db.prepare("SELECT owner_id, value, created_at FROM deals WHERE owner_id IS NOT NULL").all()) {
+    const manilaYM = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit" })
+      .format(new Date(`${d.created_at.replace(" ", "T")}Z`))
+      .split("-")
+      .map(Number);
+    const [y, m] = manilaYM;
+    const q = Math.floor((m - 1) / 3) + 1;
+
+    if (!leadSummaryByOwner[d.owner_id]) {
+      leadSummaryByOwner[d.owner_id] = {
+        monthly: emptyBucket(),
+        quarterly: emptyBucket(),
+        annually: emptyBucket(),
+        total: emptyBucket(),
+      };
+    }
+    const s = leadSummaryByOwner[d.owner_id];
+    s.total.count += 1;
+    s.total.value += d.value;
+    if (y === currentYear) {
+      s.annually.count += 1;
+      s.annually.value += d.value;
+      if (q === currentQuarter) {
+        s.quarterly.count += 1;
+        s.quarterly.value += d.value;
+        if (m === currentMonth) {
+          s.monthly.count += 1;
+          s.monthly.value += d.value;
+        }
+      }
+    }
+  }
 
   const rows = employeeIds.map((id) => {
     const employee = db.prepare("SELECT first_name, last_name FROM employees WHERE id = ?").get(id);
     const actual = (wonByOwner[id] || 0) + (orderByOwner[id] || 0);
     const target = targets[id]?.target_amount || 0;
+    const leadSummary = leadSummaryByOwner[id] || {
+      monthly: emptyBucket(),
+      quarterly: emptyBucket(),
+      annually: emptyBucket(),
+      total: emptyBucket(),
+    };
     return {
       employee_id: id,
       employee_name: employee ? `${employee.first_name} ${employee.last_name}` : "Unknown",
@@ -160,8 +205,14 @@ router.get("/targets", requireAuth, requireRole("admin", "hr"), (req, res) => {
       target_amount: target,
       actual_amount: actual,
       percent: target > 0 ? Math.round((actual / target) * 100) : null,
-      total_leads: leadsByOwner[id]?.count || 0,
-      total_lead_value: leadsByOwner[id]?.value || 0,
+      monthly_leads: leadSummary.monthly.count,
+      monthly_lead_value: leadSummary.monthly.value,
+      quarterly_leads: leadSummary.quarterly.count,
+      quarterly_lead_value: leadSummary.quarterly.value,
+      annual_leads: leadSummary.annually.count,
+      annual_lead_value: leadSummary.annually.value,
+      total_leads: leadSummary.total.count,
+      total_lead_value: leadSummary.total.value,
     };
   });
 

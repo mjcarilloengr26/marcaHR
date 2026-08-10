@@ -124,9 +124,9 @@ export default function SalesDashboard() {
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
-        <h2>Total sales leads</h2>
+        <h2>Sales Lead Summary</h2>
         <p className="subtitle" style={{ margin: "0 0 12px" }}>
-          Every opportunity currently owned by each rep, live from Sales Opportunities
+          Every opportunity owned by each rep, bucketed by when it was created — live from Sales Opportunities
         </p>
         {targets.length === 0 && <div className="empty-state">No sales employees found.</div>}
         {targets.length > 0 && (
@@ -134,16 +134,20 @@ export default function SalesDashboard() {
             <thead>
               <tr>
                 <th>Employee</th>
-                <th>Total leads</th>
-                <th>Total value</th>
+                <th>Monthly</th>
+                <th>Quarterly</th>
+                <th>Annually</th>
+                <th>Total</th>
               </tr>
             </thead>
             <tbody>
               {targets.map((row) => (
                 <tr key={row.employee_id}>
                   <td>{row.employee_name}</td>
-                  <td>{row.total_leads}</td>
-                  <td>{money(row.total_lead_value)}</td>
+                  <td>{row.monthly_leads} · {money(row.monthly_lead_value)}</td>
+                  <td>{row.quarterly_leads} · {money(row.quarterly_lead_value)}</td>
+                  <td>{row.annual_leads} · {money(row.annual_lead_value)}</td>
+                  <td>{row.total_leads} · {money(row.total_lead_value)}</td>
                 </tr>
               ))}
             </tbody>
