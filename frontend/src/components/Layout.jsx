@@ -89,19 +89,23 @@ export default function Layout({ children }) {
     (employee?.department_name || "").toLowerCase().includes("sales") ||
     (employee?.position || "").toLowerCase().includes("sales");
 
-  // The Reports export is Admin/Finance territory specifically — unlike Sales
-  // above, HR doesn't get blanket access here, only admin or an employee (of
-  // any role) who's actually in Finance by department or job title.
+  // The Sales & Finance export is Admin/Finance territory specifically —
+  // unlike Sales above, HR doesn't get blanket access here, only admin or an
+  // employee (of any role) who's actually in Finance by department or job
+  // title. The Reports page itself is visible more broadly (also to HR, since
+  // it now hosts the payroll export too) — the page decides section-by-section
+  // which of its exports each visitor can actually use.
   const isFinanceOrAdmin =
     user?.role === "admin" ||
     (employee?.department_name || "").toLowerCase().includes("finance") ||
     (employee?.position || "").toLowerCase().includes("finance");
+  const canSeeReportsPage = isFinanceOrAdmin || user?.role === "hr";
 
   const visibleNavItems = NAV_ITEMS.filter(
     (item) =>
       item.roles.includes(user?.role) &&
       (!item.salesOnly || isSalesEmployee) &&
-      (!item.financeOnly || isFinanceOrAdmin)
+      (!item.financeOnly || canSeeReportsPage)
   );
 
   return (

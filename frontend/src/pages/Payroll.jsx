@@ -4,6 +4,13 @@ import { useAuth } from "../context/AuthContext";
 
 const MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+function periodLabel(record) {
+  const base = `${MONTH_NAMES[record.period_month]} ${record.period_year}`;
+  if (record.period_half === 1) return `${base} (1st half)`;
+  if (record.period_half === 2) return `${base} (2nd half)`;
+  return base;
+}
+
 export default function Payroll() {
   const { user } = useAuth();
   const isHr = user.role === "admin" || user.role === "hr";
@@ -13,21 +20,27 @@ export default function Payroll() {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
+  const [half, setHalf] = useState(now.getDate() <= 15 ? 1 : 2);
   const [editingRecord, setEditingRecord] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [settings, setSettings] = useState(null);
+  const [editingSettings, setEditingSettings] = useState(false);
+  const [settingsForm, setSettingsForm] = useState(null);
 
   const load = () => api.get("/payroll").then(setRecords).catch((err) => setError(err.message));
 
   useEffect(() => {
     load();
+    if (isHr) api.get("/payroll/settings").then(setSettings).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const generate = async () => {
     setGenerating(true);
     setError("");
     try {
-      await api.post("/payroll/generate", { period_month: Number(month), period_year: Number(year) });
+      await api.post("/payroll/generate", { period_month: Number(month), period_year: Number(year), period_half: Number(half) });
       load();
     } catch (err) {
       setError(err.message);
@@ -52,6 +65,7 @@ export default function Payroll() {
       bonuses: record.bonuses,
       overtime_pay: record.overtime_pay,
       deductions: record.deductions,
+      net_pay_override: "",
     });
   };
 
@@ -64,13 +78,41 @@ export default function Payroll() {
         employee_id: editingRecord.employee_id,
         period_month: editingRecord.period_month,
         period_year: editingRecord.period_year,
+        period_half: editingRecord.period_half,
         base_salary: Number(editForm.base_salary) || 0,
         bonuses: Number(editForm.bonuses) || 0,
         overtime_pay: Number(editForm.overtime_pay) || 0,
         deductions: Number(editForm.deductions) || 0,
+        net_pay: editForm.net_pay_override !== "" ? Number(editForm.net_pay_override) : undefined,
       });
       setEditingRecord(null);
       load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openEditSettings = () => {
+    setSettingsForm({
+      standard_hours_per_day: settings.standard_hours_per_day,
+      overtime_multiplier: settings.overtime_multiplier,
+    });
+    setEditingSettings(true);
+  };
+
+  const saveSettings = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const updated = await api.put("/payroll/settings", {
+        standard_hours_per_day: Number(settingsForm.standard_hours_per_day) || 8,
+        overtime_multiplier: Number(settingsForm.overtime_multiplier) || 1,
+      });
+      setSettings(updated);
+      setEditingSettings(false);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -85,6 +127,11 @@ export default function Payroll() {
           <h1>Payroll</h1>
           <p className="subtitle">{isHr ? "Manage payroll runs" : "View your payslips"}</p>
         </div>
+        {isHr && settings && (
+          <button className="btn btn-secondary" onClick={openEditSettings}>
+            Standard hours: {settings.standard_hours_per_day}/day · OT ×{settings.overtime_multiplier}
+          </button>
+        )}
       </div>
 
       {error && <div className="error-banner">{error}</div>}
@@ -98,6 +145,13 @@ export default function Payroll() {
           <div className="form-row">
             <label>Year</label>
             <input type="number" value={year} onChange={(e) => setYear(e.target.value)} />
+          </div>
+          <div className="form-row">
+            <label>Cut-off</label>
+            <select value={half} onChange={(e) => setHalf(e.target.value)}>
+              <option value={1}>1st half (1–15)</option>
+              <option value={2}>2nd half (16–end)</option>
+            </select>
           </div>
           <button className="btn" onClick={generate} disabled={generating}>
             {generating ? "Generating…" : "Generate payroll for period"}
@@ -124,7 +178,7 @@ export default function Payroll() {
             {records.map((r) => (
               <tr key={r.id}>
                 {isHr && <td>{r.employee_name}</td>}
-                <td>{MONTH_NAMES[r.period_month]} {r.period_year}</td>
+                <td>{periodLabel(r)}</td>
                 <td>₱{Number(r.base_salary).toLocaleString()}</td>
                 <td>₱{Number(r.bonuses).toLocaleString()}</td>
                 <td>₱{Number(r.overtime_pay || 0).toLocaleString()}</td>
@@ -155,9 +209,7 @@ export default function Payroll() {
         <div className="modal-backdrop" onClick={() => setEditingRecord(null)}>
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={saveEdit}>
             <h2>Edit payroll — {editingRecord.employee_name}</h2>
-            <p className="subtitle" style={{ marginTop: -8 }}>
-              {MONTH_NAMES[editingRecord.period_month]} {editingRecord.period_year}
-            </p>
+            <p className="subtitle" style={{ marginTop: -8 }}>{periodLabel(editingRecord)}</p>
             <div className="grid grid-2">
               <div className="form-row">
                 <label>Base salary</label>
@@ -192,9 +244,56 @@ export default function Payroll() {
                 />
               </div>
             </div>
+            <div className="form-row">
+              <label>Final pay override (optional)</label>
+              <input
+                type="number"
+                placeholder={`Leave blank to auto-calculate (₱${(
+                  (Number(editForm.base_salary) || 0) +
+                  (Number(editForm.bonuses) || 0) +
+                  (Number(editForm.overtime_pay) || 0) -
+                  (Number(editForm.deductions) || 0)
+                ).toLocaleString()})`}
+                value={editForm.net_pay_override}
+                onChange={(e) => setEditForm({ ...editForm, net_pay_override: e.target.value })}
+              />
+            </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setEditingRecord(null)}>Cancel</button>
               <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : "Save changes"}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editingSettings && (
+        <div className="modal-backdrop" onClick={() => setEditingSettings(false)}>
+          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={saveSettings}>
+            <h2>Payroll calculation settings</h2>
+            <p className="subtitle" style={{ marginTop: -8 }}>
+              Used to auto-calculate base pay and overtime from attendance when generating payroll
+            </p>
+            <div className="form-row">
+              <label>Standard hours per day</label>
+              <input
+                type="number"
+                step="0.5"
+                value={settingsForm.standard_hours_per_day}
+                onChange={(e) => setSettingsForm({ ...settingsForm, standard_hours_per_day: e.target.value })}
+              />
+            </div>
+            <div className="form-row">
+              <label>Overtime pay multiplier</label>
+              <input
+                type="number"
+                step="0.05"
+                value={settingsForm.overtime_multiplier}
+                onChange={(e) => setSettingsForm({ ...settingsForm, overtime_multiplier: e.target.value })}
+              />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setEditingSettings(false)}>Cancel</button>
+              <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : "Save"}</button>
             </div>
           </form>
         </div>

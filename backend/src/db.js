@@ -388,6 +388,16 @@ CREATE TABLE IF NOT EXISTS attendance_settings (
   updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
+-- Inputs to the automatic payroll calculation (base pay proration + overtime),
+-- kept editable rather than hardcoded since neither figure is safe to assume
+-- for every company.
+CREATE TABLE IF NOT EXISTS payroll_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  standard_hours_per_day REAL NOT NULL DEFAULT 8,
+  overtime_multiplier REAL NOT NULL DEFAULT 1.25,
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_deal_id ON orders(deal_id) WHERE deal_id IS NOT NULL;
 
 -- Audit trail: who did what, when. user_email is denormalized (kept even if the
@@ -433,6 +443,30 @@ async function ensureLeaveTypeTaxonomy() {
   }
 }
 
+// Payroll moved from whole-month to semi-monthly (15th / end-of-month) cutoffs.
+// period_half distinguishes the two runs within a month: 0 means a legacy
+// whole-month record from before this change (left as-is, never touched), 1
+// is the 1st-15th run, 2 is the 16th-end run. The original UNIQUE constraint
+// only covered (employee_id, period_month, period_year), which would block
+// two half-month records for the same employee/month from coexisting, so it's
+// replaced with one that also includes period_half. Both steps are safe to
+// repeat: the column add is a no-op after the first run (IF NOT EXISTS), and
+// the constraint add/drop pair is idempotent via IF EXISTS / catching 42P07
+// (duplicate_object) on a re-add.
+async function ensurePayrollPeriodHalf() {
+  await pool.query("ALTER TABLE payroll_records ADD COLUMN IF NOT EXISTS period_half SMALLINT NOT NULL DEFAULT 0");
+  await pool.query(
+    "ALTER TABLE payroll_records DROP CONSTRAINT IF EXISTS payroll_records_employee_id_period_month_period_year_key"
+  );
+  try {
+    await pool.query(
+      "ALTER TABLE payroll_records ADD CONSTRAINT payroll_records_unique_period UNIQUE (employee_id, period_month, period_year, period_half)"
+    );
+  } catch (err) {
+    if (err.code !== "42P07") throw err;
+  }
+}
+
 let migrated = null;
 // Idempotent: safe to call on every boot. Runs the full schema once per
 // process (CREATE TABLE IF NOT EXISTS makes re-running harmless besides).
@@ -450,7 +484,13 @@ db.migrate = function () {
           "INSERT INTO attendance_settings (id, face_recognition_enabled) VALUES (1, 0) ON CONFLICT (id) DO NOTHING"
         )
       )
-      .then(() => ensureLeaveTypeTaxonomy());
+      .then(() =>
+        pool.query(
+          "INSERT INTO payroll_settings (id, standard_hours_per_day, overtime_multiplier) VALUES (1, 8, 1.25) ON CONFLICT (id) DO NOTHING"
+        )
+      )
+      .then(() => ensureLeaveTypeTaxonomy())
+      .then(() => ensurePayrollPeriodHalf());
   }
   return migrated;
 };

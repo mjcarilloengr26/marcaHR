@@ -129,7 +129,9 @@ export default function Board() {
       <div className="page-header">
         <div>
           <h1>HR Task Board</h1>
-          <p className="subtitle">Drag cards between columns to update their status</p>
+          <p className="subtitle">
+            {isHr ? "Drag cards between columns to update their status" : "Track your assigned tasks"}
+          </p>
         </div>
         {isHr && (
           <button className="btn btn-secondary" onClick={() => setShowColumnForm(true)}>
@@ -145,8 +147,8 @@ export default function Board() {
           <div
             key={column.id}
             className="board-column"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleDropOnColumn(column)}
+            onDragOver={isHr ? (e) => e.preventDefault() : undefined}
+            onDrop={isHr ? handleDropOnColumn(column) : undefined}
           >
             <div className="board-column-header">
               <h2>{column.name}</h2>
@@ -162,10 +164,10 @@ export default function Board() {
               <div
                 key={card.id}
                 className="board-card"
-                draggable
-                onDragStart={handleDragStart(card)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={handleDropOnCard(card)}
+                draggable={isHr}
+                onDragStart={isHr ? handleDragStart(card) : undefined}
+                onDragOver={isHr ? (e) => e.preventDefault() : undefined}
+                onDrop={isHr ? handleDropOnCard(card) : undefined}
               >
                 <div className="board-card-title">{card.title}</div>
                 {card.description && <div className="board-card-desc">{card.description}</div>}
@@ -174,19 +176,21 @@ export default function Board() {
                   {card.due_date && <span>Due {card.due_date}</span>}
                 </div>
                 <div className="board-card-actions">
-                  <select
-                    className="board-card-move"
-                    value=""
-                    onChange={(e) => e.target.value && moveCardTo(card, e.target.value)}
-                    aria-label={`Move "${card.title}" to another column`}
-                  >
-                    <option value="">Move to…</option>
-                    {columns
-                      .filter((c) => c.id !== card.column_id)
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                  </select>
+                  {isHr && (
+                    <select
+                      className="board-card-move"
+                      value=""
+                      onChange={(e) => e.target.value && moveCardTo(card, e.target.value)}
+                      aria-label={`Move "${card.title}" to another column`}
+                    >
+                      <option value="">Move to…</option>
+                      {columns
+                        .filter((c) => c.id !== card.column_id)
+                        .map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                    </select>
+                  )}
                   <button className="link-btn board-card-delete" onClick={() => deleteCard(card.id)}>
                     Remove
                   </button>

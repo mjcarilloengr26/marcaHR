@@ -137,7 +137,10 @@ router.put(
     }
     const card = await db.prepare("SELECT * FROM board_cards WHERE id = ?").get(req.params.id);
     if (!card) return res.status(404).json({ error: "Card not found" });
-    if (!canManageCard(req, card)) return res.status(403).json({ error: "Insufficient permissions" });
+    // Moving a card between columns is HR/admin only — unlike editing details
+    // or deleting (canManageCard), an assignee or creator who's a plain
+    // employee can no longer change a card's status themselves.
+    if (!["admin", "hr"].includes(req.user.role)) return res.status(403).json({ error: "Insufficient permissions" });
     const column = await db.prepare("SELECT * FROM board_columns WHERE id = ?").get(column_id);
     if (!column) return res.status(404).json({ error: "Column not found" });
 

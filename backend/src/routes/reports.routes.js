@@ -35,6 +35,76 @@ async function isFinanceOrAdmin(req) {
   return dept.includes("finance") || pos.includes("finance");
 }
 
+// Payroll export has a broader audience than the sales/finance one — HR runs
+// payroll day to day, so unlike isFinanceOrAdmin above, HR gets blanket access
+// here alongside admin, not just employees who happen to be in Finance.
+async function isAdminHrOrFinance(req) {
+  if (["admin", "hr"].includes(req.user.role)) return true;
+  return isFinanceOrAdmin(req);
+}
+
+router.get(
+  "/payroll-export",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!(await isAdminHrOrFinance(req))) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
+    const period_month = Number(req.query.period_month) || new Date().getMonth() + 1;
+    const period_year = Number(req.query.period_year) || new Date().getFullYear();
+    const period_half = req.query.period_half !== undefined ? Number(req.query.period_half) : undefined;
+
+    let sql = `SELECT p.*, (e.first_name || ' ' || e.last_name) AS employee_name, e.position, d.name AS department_name
+               FROM payroll_records p
+               JOIN employees e ON e.id = p.employee_id
+               LEFT JOIN departments d ON d.id = e.department_id
+               WHERE p.period_month = ? AND p.period_year = ?`;
+    const params = [period_month, period_year];
+    if (period_half !== undefined) {
+      sql += " AND p.period_half = ?";
+      params.push(period_half);
+    }
+    sql += " ORDER BY e.last_name, e.first_name, p.period_half";
+    const rows = await db.prepare(sql).all(...params);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "MARCA GROUP";
+    workbook.created = new Date();
+    const sheet = workbook.addWorksheet("Payroll");
+    sheet.columns = [
+      { header: "Employee", key: "employee_name", width: 24 },
+      { header: "Position", key: "position", width: 20 },
+      { header: "Department", key: "department_name", width: 18 },
+      { header: "Period", key: "period_label", width: 18 },
+      { header: "Base Pay", key: "base_salary", width: 14 },
+      { header: "Bonuses", key: "bonuses", width: 12 },
+      { header: "Overtime Pay", key: "overtime_pay", width: 14 },
+      { header: "Deductions", key: "deductions", width: 12 },
+      { header: "Net Pay", key: "net_pay", width: 14 },
+      { header: "Status", key: "status", width: 12 },
+    ];
+    sheet.addRows(
+      rows.map((r) => ({
+        ...r,
+        period_label: `${MONTH_NAMES[r.period_month]} ${r.period_year}${r.period_half === 1 ? " (1st half)" : r.period_half === 2 ? " (2nd half)" : ""}`,
+      }))
+    );
+    sheet.getRow(1).font = { bold: true };
+
+    await logRequestEvent(req, "export_excel", {
+      entityType: "report",
+      details: { report: "payroll", period_month, period_year, period_half },
+    });
+
+    const filename = `marca-group-payroll-report-${period_year}-${period_month}${period_half ? `-half${period_half}` : ""}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  })
+);
+
 router.get(
   "/sales-finance-export",
   requireAuth,
