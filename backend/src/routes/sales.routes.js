@@ -112,6 +112,12 @@ router.get(
 // order_date for orders, since neither table tracks a separate "actually closed
 // on" timestamp. period_index is the month (1-12) for monthly, quarter (1-4) for
 // quarterly, or unused (0) for yearly.
+//
+// Orders auto-created from a won deal (orders.deal_id set — the only place that
+// happens is autoCreateOrderForWonDeal in deals.routes.js) carry the same amount
+// as the deal that spawned them, so they're excluded from the order sum below —
+// otherwise a won opportunity's value would be counted twice (once as the deal,
+// once as its auto-created order).
 function periodDateRange(periodType, year, index) {
   if (periodType === "yearly") {
     return { start: `${year}-01-01`, end: `${year}-12-31` };
@@ -176,7 +182,7 @@ router.get(
       await db
         .prepare(
           `SELECT owner_id, COALESCE(SUM(amount), 0) AS v FROM orders
-       WHERE status != 'cancelled' AND owner_id IS NOT NULL AND order_date BETWEEN ? AND ?
+       WHERE status != 'cancelled' AND owner_id IS NOT NULL AND deal_id IS NULL AND order_date BETWEEN ? AND ?
        GROUP BY owner_id`
         )
         .all(start, end)
