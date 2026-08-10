@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useSort } from "../hooks/useSort";
+import SortTh from "../components/SortTh";
 
 const emptyForm = { invoice_number: "", order_id: "", customer_name: "", amount: "", status: "draft", issue_date: "", due_date: "", notes: "" };
 const STATUSES = ["draft", "sent", "paid", "overdue", "cancelled"];
@@ -13,6 +15,7 @@ export default function Billing() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
 
   const load = () => api.get("/invoices").then(setInvoices).catch((err) => setError(err.message));
 
@@ -93,6 +96,13 @@ export default function Billing() {
 
   const unbilledOrders = orders.filter((o) => !invoices.some((inv) => inv.order_id === o.id));
 
+  const filteredInvoices = invoices.filter((inv) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [inv.invoice_number, inv.order_number, inv.customer_name, inv.status].some((v) => (v || "").toLowerCase().includes(q));
+  });
+  const { sorted, toggleSort, arrow } = useSort(filteredInvoices, "issue_date", "desc");
+
   return (
     <div>
       <div className="page-header">
@@ -133,22 +143,31 @@ export default function Billing() {
         </div>
       )}
 
+      <div className="card" style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search by invoice #, order #, customer, status…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
       <div className="card">
         <table>
           <thead>
             <tr>
-              <th>Invoice #</th>
-              <th>Order</th>
-              <th>Customer</th>
-              <th>Amount</th>
-              <th>Issue date</th>
-              <th>Due date</th>
-              <th>Status</th>
+              <SortTh label="Invoice #" sortKey="invoice_number" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Order" sortKey="order_number" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Customer" sortKey="customer_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Amount" sortKey="amount" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Issue date" sortKey="issue_date" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Due date" sortKey="due_date" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {invoices.map((inv) => (
+            {sorted.map((inv) => (
               <tr key={inv.id}>
                 <td>{inv.invoice_number}</td>
                 <td>{inv.order_number || "—"}</td>
@@ -172,6 +191,7 @@ export default function Billing() {
           </tbody>
         </table>
         {invoices.length === 0 && <div className="empty-state">No invoices yet.</div>}
+        {invoices.length > 0 && sorted.length === 0 && <div className="empty-state">No invoices match your search.</div>}
       </div>
 
       {showForm && (

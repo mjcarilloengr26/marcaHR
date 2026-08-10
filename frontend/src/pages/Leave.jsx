@@ -35,6 +35,7 @@ export default function Leave() {
   const [balanceEmployeeId, setBalanceEmployeeId] = useState(isHr ? "" : user.employee_id);
   const [editingBalance, setEditingBalance] = useState(null); // the balance row being edited, or null
   const [balanceAmount, setBalanceAmount] = useState("");
+  const [search, setSearch] = useState("");
 
   const loadRequests = () => api.get("/leave/requests").then(setRequests).catch((err) => setError(err.message));
 
@@ -163,7 +164,12 @@ export default function Leave() {
     }
   };
 
-  const { sorted, toggleSort, arrow } = useSort(requests, "created_at", "desc");
+  const filteredRequests = requests.filter((r) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [r.employee_name, r.leave_type_name, r.reason, r.status].some((v) => (v || "").toLowerCase().includes(q));
+  });
+  const { sorted, toggleSort, arrow } = useSort(filteredRequests, "created_at", "desc");
 
   return (
     <div>
@@ -239,6 +245,15 @@ export default function Leave() {
         )}
       </div>
 
+      <div className="card" style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search by employee, type, reason, status…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
       <div className="card">
         <table>
           <thead>
@@ -292,6 +307,7 @@ export default function Leave() {
           </tbody>
         </table>
         {requests.length === 0 && <div className="empty-state">No leave requests found.</div>}
+        {requests.length > 0 && sorted.length === 0 && <div className="empty-state">No leave requests match your search.</div>}
       </div>
 
       {showForm && (

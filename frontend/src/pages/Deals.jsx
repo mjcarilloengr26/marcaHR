@@ -19,6 +19,7 @@ export default function Deals() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
 
   const load = () => api.get("/deals").then(setDeals).catch((err) => setError(err.message));
 
@@ -97,7 +98,12 @@ export default function Deals() {
     }
   };
 
-  const { sorted, toggleSort, arrow } = useSort(deals, "created_at", "desc");
+  const filteredDeals = deals.filter((d) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [d.title, d.customer_name, d.owner_name, d.stage, d.linked_order_number].some((v) => (v || "").toLowerCase().includes(q));
+  });
+  const { sorted, toggleSort, arrow } = useSort(filteredDeals, "created_at", "desc");
 
   return (
     <div>
@@ -119,6 +125,15 @@ export default function Deals() {
           ✓ {notice}
         </div>
       )}
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search by title, customer, owner, stage…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
 
       <div className="card">
         <table>
@@ -159,6 +174,7 @@ export default function Deals() {
           </tbody>
         </table>
         {deals.length === 0 && <div className="empty-state">No sales opportunities yet.</div>}
+        {deals.length > 0 && sorted.length === 0 && <div className="empty-state">No opportunities match your search.</div>}
       </div>
 
       {showForm && (

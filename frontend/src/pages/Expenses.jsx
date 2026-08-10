@@ -16,6 +16,7 @@ export default function Expenses() {
   const [form, setForm] = useState({ title: "", cash_advance_amount: "", cost_center: "", notes: "" });
   const [saving, setSaving] = useState(false);
   const [openId, setOpenId] = useState(null);
+  const [search, setSearch] = useState("");
 
   const load = () => api.get("/expenses").then(setReports).catch((err) => setError(err.message));
 
@@ -23,7 +24,12 @@ export default function Expenses() {
     load();
   }, []);
 
-  const { sorted, toggleSort, arrow } = useSort(reports, "created_at", "desc");
+  const filteredReports = reports.filter((r) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [r.employee_name, r.title, r.cost_center, r.status].some((v) => (v || "").toLowerCase().includes(q));
+  });
+  const { sorted, toggleSort, arrow } = useSort(filteredReports, "created_at", "desc");
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -58,6 +64,15 @@ export default function Expenses() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search by employee, title, cost center, status…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
 
       <div className="card">
         <table>
@@ -95,6 +110,7 @@ export default function Expenses() {
           </tbody>
         </table>
         {reports.length === 0 && <div className="empty-state">No expense reports yet.</div>}
+        {reports.length > 0 && sorted.length === 0 && <div className="empty-state">No reports match your search.</div>}
       </div>
 
       {showForm && (

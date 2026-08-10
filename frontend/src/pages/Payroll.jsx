@@ -29,6 +29,7 @@ export default function Payroll() {
   const [settings, setSettings] = useState(null);
   const [editingSettings, setEditingSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState(null);
+  const [search, setSearch] = useState("");
 
   const load = () => api.get("/payroll").then(setRecords).catch((err) => setError(err.message));
 
@@ -125,8 +126,14 @@ export default function Payroll() {
   const recordsWithSortKey = records.map((r) => ({
     ...r,
     period_sort: r.period_year * 10000 + r.period_month * 100 + r.period_half,
+    period_label: periodLabel(r),
   }));
-  const { sorted, toggleSort, arrow } = useSort(recordsWithSortKey, "period_sort", "desc");
+  const filteredRecords = recordsWithSortKey.filter((r) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [r.employee_name, r.period_label, r.status].some((v) => (v || "").toLowerCase().includes(q));
+  });
+  const { sorted, toggleSort, arrow } = useSort(filteredRecords, "period_sort", "desc");
 
   return (
     <div>
@@ -166,6 +173,15 @@ export default function Payroll() {
           </button>
         </div>
       )}
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search by employee, period, status…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
 
       <div className="card">
         <table>
@@ -211,6 +227,7 @@ export default function Payroll() {
           </tbody>
         </table>
         {records.length === 0 && <div className="empty-state">No payroll records yet.</div>}
+        {records.length > 0 && sorted.length === 0 && <div className="empty-state">No payroll records match your search.</div>}
       </div>
 
       {editingRecord && (

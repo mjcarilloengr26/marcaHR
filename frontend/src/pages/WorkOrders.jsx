@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { useSort } from "../hooks/useSort";
+import SortTh from "../components/SortTh";
 
 const emptyForm = {
   work_order_number: "",
@@ -28,6 +30,7 @@ export default function WorkOrders() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
 
   const load = () => api.get("/work-orders").then(setWorkOrders).catch((err) => setError(err.message));
 
@@ -102,6 +105,15 @@ export default function WorkOrders() {
     }
   };
 
+  const filteredWorkOrders = workOrders.filter((w) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [w.work_order_number, w.title, w.customer_name, w.assigned_to_name, w.priority, w.status].some((v) =>
+      (v || "").toLowerCase().includes(q)
+    );
+  });
+  const { sorted, toggleSort, arrow } = useSort(filteredWorkOrders, "scheduled_date", "desc");
+
   return (
     <div>
       <div className="page-header">
@@ -114,22 +126,31 @@ export default function WorkOrders() {
 
       {error && <div className="error-banner">{error}</div>}
 
+      <div className="card" style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search by WO #, title, customer, assignee, status…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
       <div className="card">
         <table>
           <thead>
             <tr>
-              <th>WO #</th>
-              <th>Title</th>
-              <th>Customer</th>
-              <th>Assigned to</th>
-              <th>Priority</th>
-              <th>Scheduled</th>
-              <th>Status</th>
+              <SortTh label="WO #" sortKey="work_order_number" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Customer" sortKey="customer_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Assigned to" sortKey="assigned_to_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Priority" sortKey="priority" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Scheduled" sortKey="scheduled_date" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
               {isHr && <th></th>}
             </tr>
           </thead>
           <tbody>
-            {workOrders.map((w) => (
+            {sorted.map((w) => (
               <tr key={w.id}>
                 <td>{w.work_order_number}</td>
                 <td>{w.title}</td>
@@ -155,6 +176,7 @@ export default function WorkOrders() {
           </tbody>
         </table>
         {workOrders.length === 0 && <div className="empty-state">No work orders yet.</div>}
+        {workOrders.length > 0 && sorted.length === 0 && <div className="empty-state">No work orders match your search.</div>}
       </div>
 
       {showForm && (

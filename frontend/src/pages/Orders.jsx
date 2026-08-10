@@ -15,6 +15,7 @@ export default function Orders() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
 
   const load = () => api.get("/orders").then(setOrders).catch((err) => setError(err.message));
 
@@ -82,7 +83,12 @@ export default function Orders() {
     }
   };
 
-  const { sorted, toggleSort, arrow } = useSort(orders, "order_date", "desc");
+  const filteredOrders = orders.filter((o) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [o.order_number, o.customer_name, o.owner_name, o.deal_title, o.status].some((v) => (v || "").toLowerCase().includes(q));
+  });
+  const { sorted, toggleSort, arrow } = useSort(filteredOrders, "order_date", "desc");
 
   return (
     <div>
@@ -95,6 +101,15 @@ export default function Orders() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search by order #, customer, owner, status…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
 
       <div className="card">
         <table>
@@ -135,6 +150,7 @@ export default function Orders() {
           </tbody>
         </table>
         {orders.length === 0 && <div className="empty-state">No orders yet.</div>}
+        {orders.length > 0 && sorted.length === 0 && <div className="empty-state">No orders match your search.</div>}
       </div>
 
       {showForm && (

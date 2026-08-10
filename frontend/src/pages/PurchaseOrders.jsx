@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useSort } from "../hooks/useSort";
+import SortTh from "../components/SortTh";
 
 const emptyForm = { po_number: "", vendor_name: "", description: "", amount: "", order_date: "", expected_delivery_date: "", notes: "" };
 const STATUSES = ["draft", "submitted", "approved", "received", "cancelled"];
@@ -12,6 +14,7 @@ export default function PurchaseOrders() {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [search, setSearch] = useState("");
 
   const load = () => api.get("/purchase-orders").then(setPos).catch((err) => setError(err.message));
 
@@ -78,6 +81,13 @@ export default function PurchaseOrders() {
     }
   };
 
+  const filteredPos = pos.filter((po) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [po.po_number, po.vendor_name, po.status].some((v) => (v || "").toLowerCase().includes(q));
+  });
+  const { sorted, toggleSort, arrow } = useSort(filteredPos, "order_date", "desc");
+
   return (
     <div>
       <div className="page-header">
@@ -90,21 +100,30 @@ export default function PurchaseOrders() {
 
       {error && <div className="error-banner">{error}</div>}
 
+      <div className="card" style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search by PO #, vendor, status…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
       <div className="card">
         <table>
           <thead>
             <tr>
-              <th>PO #</th>
-              <th>Vendor</th>
-              <th>Amount</th>
-              <th>Order date</th>
-              <th>Expected delivery</th>
-              <th>Status</th>
+              <SortTh label="PO #" sortKey="po_number" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Vendor" sortKey="vendor_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Amount" sortKey="amount" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Order date" sortKey="order_date" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Expected delivery" sortKey="expected_delivery_date" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {pos.map((po) => (
+            {sorted.map((po) => (
               <tr key={po.id}>
                 <td>{po.po_number}</td>
                 <td>{po.vendor_name}</td>
@@ -132,6 +151,7 @@ export default function PurchaseOrders() {
           </tbody>
         </table>
         {pos.length === 0 && <div className="empty-state">No purchase orders yet.</div>}
+        {pos.length > 0 && sorted.length === 0 && <div className="empty-state">No purchase orders match your search.</div>}
       </div>
 
       {showForm && (

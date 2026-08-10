@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useSort } from "../hooks/useSort";
+import SortTh from "../components/SortTh";
 
 const emptyForm = { email: "", password: "", role: "employee", employee_id: "" };
 
@@ -11,6 +13,7 @@ export default function Users() {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(emptyForm);
+  const [search, setSearch] = useState("");
 
   const load = () => api.get("/users").then(setUsers).catch((err) => setError(err.message));
 
@@ -64,6 +67,13 @@ export default function Users() {
     }
   };
 
+  const filteredUsers = users.filter((u) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [u.email, u.role, u.employee_name].some((v) => (v || "").toLowerCase().includes(q));
+  });
+  const { sorted, toggleSort, arrow } = useSort(filteredUsers, "email", "asc");
+
   return (
     <div>
       <div className="page-header">
@@ -76,18 +86,27 @@ export default function Users() {
 
       {error && <div className="error-banner">{error}</div>}
 
+      <div className="card" style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search by email, role, linked employee…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </div>
+
       <div className="card">
         <table>
           <thead>
             <tr>
-              <th>Email</th>
-              <th>Role</th>
-              <th>Linked employee</th>
+              <SortTh label="Email" sortKey="email" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Role" sortKey="role" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Linked employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
+            {sorted.map((u) => (
               <tr key={u.id}>
                 <td>{u.email}</td>
                 <td><span className="badge badge-draft">{u.role}</span></td>
@@ -101,6 +120,7 @@ export default function Users() {
           </tbody>
         </table>
         {users.length === 0 && <div className="empty-state">No users yet.</div>}
+        {users.length > 0 && sorted.length === 0 && <div className="empty-state">No users match your search.</div>}
       </div>
 
       {showForm && (
