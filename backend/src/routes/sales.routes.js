@@ -29,13 +29,8 @@ router.get(
   requireAuth,
   requireRole("admin", "hr"),
   asyncHandler(async (req, res) => {
-    // node-postgres returns COUNT(*) as a string (bigint, to avoid precision loss),
-    // so every raw count here is coerced to a Number — otherwise buildFunnel's
-    // reduce below silently does string concatenation instead of addition (e.g.
-    // "1"+"3" -> "13" rather than 4), which is exactly what was producing the
-    // funnel's garbled "013112"-style counts before this fix.
     const dealCounts = (await db.prepare("SELECT stage, COUNT(*) AS c FROM deals GROUP BY stage").all()).reduce(
-      (acc, row) => ({ ...acc, [row.stage]: Number(row.c) }),
+      (acc, row) => ({ ...acc, [row.stage]: row.c }),
       {}
     );
 
@@ -49,7 +44,7 @@ router.get(
     const dealFunnel = buildFunnel(dealCounts, DEAL_STAGES, dealStageLabels, "lost", "Lost");
 
     const orderCounts = (await db.prepare("SELECT status, COUNT(*) AS c FROM orders GROUP BY status").all()).reduce(
-      (acc, row) => ({ ...acc, [row.status]: Number(row.c) }),
+      (acc, row) => ({ ...acc, [row.status]: row.c }),
       {}
     );
     const orderStatusLabels = { placed: "Placed", processing: "Processing", shipped: "Shipped", delivered: "Delivered" };
@@ -59,7 +54,7 @@ router.get(
       await db.prepare("SELECT COALESCE(SUM(value), 0) AS v FROM deals WHERE stage NOT IN ('won', 'lost')").get()
     ).v;
     const wonValue = (await db.prepare("SELECT COALESCE(SUM(value), 0) AS v FROM deals WHERE stage = 'won'").get()).v;
-    const openDeals = Number((await db.prepare("SELECT COUNT(*) AS c FROM deals WHERE stage NOT IN ('won', 'lost')").get()).c);
+    const openDeals = (await db.prepare("SELECT COUNT(*) AS c FROM deals WHERE stage NOT IN ('won', 'lost')").get()).c;
 
     // Win rate: won opportunities as a share of every opportunity that's actually
     // been decided (won + lost) — open/in-progress deals are excluded since they
@@ -71,23 +66,20 @@ router.get(
 
     const ordersRevenue = (await db.prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled'").get())
       .v;
-    const ordersThisMonth = Number(
-      (
-        await db
-          .prepare(
-            "SELECT COUNT(*) AS c FROM orders WHERE to_char(order_date::date, 'YYYY-MM') = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM')"
-          )
-          .get()
-      ).c
-    );
+    const ordersThisMonth = (
+      await db
+        .prepare(
+          "SELECT COUNT(*) AS c FROM orders WHERE to_char(order_date::date, 'YYYY-MM') = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM')"
+        )
+        .get()
+    ).c;
 
     // Order backlog: value still owed to customers — placed/processing/shipped
     // but not yet delivered (and not cancelled, since that's a dead order, not
     // outstanding work).
-    const orderBacklogRow = await db
+    const orderBacklog = await db
       .prepare("SELECT COUNT(*) AS c, COALESCE(SUM(amount), 0) AS v FROM orders WHERE status NOT IN ('delivered', 'cancelled')")
       .get();
-    const orderBacklog = { count: Number(orderBacklogRow.c), value: orderBacklogRow.v };
 
     // Year-to-date order revenue, this year vs the same Jan-1-through-today
     // window last year — an apples-to-apples YoY comparison, not full-year
@@ -117,8 +109,8 @@ router.get(
         winRate,
         ordersRevenue,
         ordersThisMonth,
-        orderBacklogValue: orderBacklog.value,
-        orderBacklogCount: orderBacklog.count,
+        orderBacklogValue: orderBacklog.v,
+        orderBacklogCount: orderBacklog.c,
         ordersRevenueYtdThisYear,
         ordersRevenueYtdLastYear,
         ytdAsOf: todayManila,

@@ -1,8 +1,22 @@
-const { Pool } = require("pg");
+const { Pool, types } = require("pg");
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL is required (a Postgres connection string, e.g. from Supabase)");
 }
+
+// node-postgres returns BIGINT (COUNT(*), etc.) and NUMERIC/DECIMAL columns as
+// strings by default, to avoid silently losing precision on values too large
+// for a JS double. This app's counts and money amounts never approach that
+// range, and leaving them as strings is far more dangerous in practice: doing
+// arithmetic like `count1 + count2` silently string-concatenates instead of
+// adding ("1" + "3" -> "13"), and `count === 0` is always false against a
+// string. That exact bug class produced garbled funnel totals across the
+// Sales/Overview dashboards and let expense reports with zero items bypass a
+// submit-time validation check. Parsing both types as real numbers globally,
+// once, here — rather than remembering Number(...) at every call site — is
+// what actually prevents this bug from being reintroduced by future code.
+types.setTypeParser(20, (val) => parseInt(val, 10)); // int8 / bigint (COUNT(*), SUM(integer), etc.)
+types.setTypeParser(1700, (val) => parseFloat(val)); // numeric / decimal
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,

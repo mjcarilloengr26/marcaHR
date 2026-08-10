@@ -75,7 +75,7 @@ async function start() {
   // storage is Supabase Postgres (persistent) rather than Render's ephemeral
   // disk, this should only ever fire on a truly first-ever boot.
   const employeeCount = (await db.prepare("SELECT COUNT(*) AS c FROM employees").get()).c;
-  if (Number(employeeCount) === 0) {
+  if (employeeCount === 0) {
     console.log("No employees found — running first-boot seed...");
     await seed();
   }
