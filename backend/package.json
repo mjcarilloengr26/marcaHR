@@ -19,7 +19,6 @@
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
     "jsonwebtoken": "^9.0.2",
-    "nodemailer": "^9.0.4",
     "pg": "^8.23.0"
   }
 }

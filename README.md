@@ -108,25 +108,22 @@ The backend sends email notifications for:
 - **Task board cards** — the assigned employee gets an email when a card is assigned to them.
 - **Performance reviews** — the employee gets an email when a review is submitted for their acknowledgement.
 
-This is off by default: if `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS` in `.env` are blank, emails are
-skipped and just logged to the backend console — nothing breaks. To send real emails, fill in
-those variables. For **Gmail**:
+This is off by default: if `RESEND_API_KEY` in `.env` is blank, emails are skipped and just
+logged to the backend console — nothing breaks. To send real emails:
 
-1. Turn on 2-Step Verification on the Google account: https://myaccount.google.com/security
-2. Create an **App Password**: https://myaccount.google.com/apppasswords (choose "Mail" as the app).
-   Google gives you a 16-character password — this is what goes in `SMTP_PASS`, *not* the account's
-   regular login password.
-3. In `backend/.env`, set:
+1. Sign up free at https://resend.com and create an **API Key** (Sending access is enough).
+2. In `backend/.env`, set:
    ```
-   SMTP_HOST=smtp.gmail.com
-   SMTP_PORT=587
-   SMTP_USER=youraddress@gmail.com
-   SMTP_PASS=the 16-character app password
-   SMTP_FROM=youraddress@gmail.com
+   RESEND_API_KEY=re_your_api_key
+   RESEND_FROM=onboarding@resend.dev
    ```
-4. Restart the backend (`npm run dev`).
+3. Restart the backend (`npm run dev`).
 
-Any other SMTP provider works the same way — just set `SMTP_HOST`/`SMTP_PORT` to that provider's values.
+On a new Resend account, `onboarding@resend.dev` can only send to the email address you signed
+up with — verify a custom sending domain (a few DNS records on marca-group.online) to send to
+everyone else. Deliverability uses Resend's HTTPS API rather than raw SMTP because most PaaS
+hosts (including Render's free/starter plans) block outbound SMTP ports entirely; the HTTPS API
+goes out over port 443 like every other request this app makes.
 
 "HR/admin" recipients are looked up dynamically from every `users` row with role `admin` or `hr`
 (the accounts created via the Users page), so no extra config is needed for that part.
@@ -165,7 +162,7 @@ process (not a serverless platform like Vercel functions). The split that works:
    start command `npm start`.
 4. Set environment variables in the Render dashboard: `JWT_SECRET` (a long random string),
    `DATABASE_URL` (the Supabase session pooler string from above),
-   and optionally `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM` for email notifications.
+   and optionally `RESEND_API_KEY`/`RESEND_FROM` for email notifications.
 5. The service auto-seeds sample data on first boot if the `employees` table is empty
    (see `server.js`), so no manual seed step is needed for a fresh database. To reseed
    deliberately (wipes and repopulates every table), run `npm run seed` from Render's
