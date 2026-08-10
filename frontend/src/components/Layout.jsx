@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import ThemeToggle from "./ThemeToggle";
 
 const MANILA_TZ = "Asia/Manila";
 const clockFormatter = new Intl.DateTimeFormat("en-US", {
@@ -149,6 +150,7 @@ export default function Layout({ children }) {
           </button>
           <TopbarClock />
           <div className="user-info">
+            <ThemeToggle />
             {employee?.photo ? (
               <img className="topbar-avatar" src={employee.photo} alt="" />
             ) : (
