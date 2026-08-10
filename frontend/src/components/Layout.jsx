@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 const NAV_ITEMS = [
-  { to: "/", label: "Dashboard", icon: "🏠", roles: ["admin", "hr", "employee"] },
+  { to: "/", label: "Overview", icon: "🏠", roles: ["admin", "hr", "employee"] },
 
   { section: "Workforce", icon: "👥", roles: ["admin", "hr"] },
   { to: "/employees", label: "Employees", icon: "🧑‍💼", roles: ["admin", "hr"] },
