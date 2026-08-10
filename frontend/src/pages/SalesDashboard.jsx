@@ -12,6 +12,26 @@ function periodLabel(periodType, year, index) {
   return `${MONTH_NAMES[index]} ${year}`;
 }
 
+function YtdComparison({ thisYear, lastYear }) {
+  if (!lastYear) {
+    return (
+      <div className="subtitle" style={{ margin: "6px 0 0" }}>
+        No orders in the same period last year to compare against.
+      </div>
+    );
+  }
+  const change = ((thisYear - lastYear) / lastYear) * 100;
+  const up = change >= 0;
+  return (
+    <div style={{ marginTop: 6, fontSize: 13 }}>
+      <span style={{ color: up ? "var(--success)" : "var(--danger)", fontWeight: 600 }}>
+        {up ? "▲" : "▼"} {Math.abs(change).toFixed(1)}%
+      </span>{" "}
+      <span className="subtitle" style={{ margin: 0 }}>vs {money(lastYear)} same period last year</span>
+    </div>
+  );
+}
+
 export default function SalesDashboard() {
   const [stats, setStats] = useState(null);
   const [targets, setTargets] = useState([]);
@@ -100,6 +120,20 @@ export default function SalesDashboard() {
         <div className="stat-card">
           <div className="stat-value">{money(stats.kpis.ordersRevenue)}</div>
           <div className="stat-label">Orders revenue</div>
+        </div>
+      </div>
+
+      <div className="grid grid-2" style={{ marginBottom: 16 }}>
+        <div className="stat-card">
+          <div className="stat-value">{money(stats.kpis.ordersRevenueYtdThisYear)}</div>
+          <div className="stat-label">Order revenue — year to date (as of {stats.kpis.ytdAsOf})</div>
+          <YtdComparison thisYear={stats.kpis.ordersRevenueYtdThisYear} lastYear={stats.kpis.ordersRevenueYtdLastYear} />
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{money(stats.kpis.orderBacklogValue)}</div>
+          <div className="stat-label">
+            Order backlog — {stats.kpis.orderBacklogCount} order{stats.kpis.orderBacklogCount === 1 ? "" : "s"} not yet delivered
+          </div>
         </div>
       </div>
 

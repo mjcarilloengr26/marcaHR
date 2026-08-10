@@ -56,10 +56,42 @@ router.get("/stats", requireAuth, requireRole("admin", "hr"), (req, res) => {
     .prepare("SELECT COUNT(*) AS c FROM orders WHERE strftime('%Y-%m', order_date) = strftime('%Y-%m', 'now')")
     .get().c;
 
+  // Order backlog: value still owed to customers — placed/processing/shipped
+  // but not yet delivered (and not cancelled, since that's a dead order, not
+  // outstanding work).
+  const orderBacklog = db
+    .prepare("SELECT COUNT(*) AS c, COALESCE(SUM(amount), 0) AS v FROM orders WHERE status NOT IN ('delivered', 'cancelled')")
+    .get();
+
+  // Year-to-date order revenue, this year vs the same Jan-1-through-today
+  // window last year — an apples-to-apples YoY comparison, not full-year
+  // totals (which would unfairly compare a partial year to a complete one).
+  // Anchored to Manila "today" like the rest of the app's date logic.
+  const todayManila = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+  const [todayYear, todayMonth, todayDay] = todayManila.split("-");
+  const lastYear = String(Number(todayYear) - 1);
+  const ytdRevenue = (year, end) =>
+    db
+      .prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled' AND order_date BETWEEN ? AND ?")
+      .get(`${year}-01-01`, end).v;
+  const ordersRevenueYtdThisYear = ytdRevenue(todayYear, todayManila);
+  const ordersRevenueYtdLastYear = ytdRevenue(lastYear, `${lastYear}-${todayMonth}-${todayDay}`);
+
   res.json({
     dealFunnel,
     orderFunnel,
-    kpis: { pipelineValue, wonValue, openDeals, ordersRevenue, ordersThisMonth },
+    kpis: {
+      pipelineValue,
+      wonValue,
+      openDeals,
+      ordersRevenue,
+      ordersThisMonth,
+      orderBacklogValue: orderBacklog.v,
+      orderBacklogCount: orderBacklog.c,
+      ordersRevenueYtdThisYear,
+      ordersRevenueYtdLastYear,
+      ytdAsOf: todayManila,
+    },
   });
 });
 
