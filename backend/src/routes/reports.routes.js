@@ -123,6 +123,14 @@ router.get(
          ORDER BY o.created_at DESC`
       )
       .all();
+    const opportunities = await db
+      .prepare(
+        `SELECT d.title, d.customer_name, d.value, d.stage, d.expected_close_date,
+                (e.first_name || ' ' || e.last_name) AS owner_name, o.order_number AS linked_order_number
+         FROM deals d LEFT JOIN employees e ON e.id = d.owner_id LEFT JOIN orders o ON o.deal_id = d.id
+         ORDER BY e.last_name, e.first_name, d.created_at DESC`
+      )
+      .all();
     const expenseSummary = await getExpenseSummary();
     const period = periodLabel(period_type, period_year, period_index);
 
@@ -177,6 +185,20 @@ router.get(
         { header: "Status", key: "status", width: 12 },
       ],
       orders
+    );
+
+    addSheet(
+      "Sales Opportunities",
+      [
+        { header: "Owner", key: "owner_name", width: 24 },
+        { header: "Title", key: "title", width: 26 },
+        { header: "Customer", key: "customer_name", width: 22 },
+        { header: "Value", key: "value", width: 14 },
+        { header: "Expected Close", key: "expected_close_date", width: 16 },
+        { header: "Order #", key: "linked_order_number", width: 14 },
+        { header: "Stage", key: "stage", width: 14 },
+      ],
+      opportunities.map((r) => ({ ...r, owner_name: r.owner_name || "Unassigned" }))
     );
 
     addSheet(

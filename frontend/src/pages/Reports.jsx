@@ -95,7 +95,7 @@ export default function Reports() {
         <div className="card" style={{ marginBottom: 16 }}>
           <h2>Sales &amp; Finance Report</h2>
           <p className="subtitle" style={{ margin: "0 0 12px" }}>
-            Downloads one Excel workbook with Sales Lead Summary, Sales Targets, Orders, and Expense Summary as separate sheets.
+            Downloads one Excel workbook with Sales Lead Summary, Sales Targets, Orders, Sales Opportunities (per employee), and Expense Summary as separate sheets.
           </p>
           <div className="form-inline" style={{ marginBottom: 16 }}>
             <div className="form-row">
