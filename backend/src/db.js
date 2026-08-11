@@ -255,6 +255,16 @@ CREATE TABLE IF NOT EXISTS board_cards (
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
+-- A card can be assigned to multiple employees (or all of them) at once, so
+-- assignment is many-to-many rather than the single employee_id column above
+-- (kept in place, unused going forward, rather than dropped).
+CREATE TABLE IF NOT EXISTS board_card_assignees (
+  id SERIAL PRIMARY KEY,
+  card_id INTEGER NOT NULL REFERENCES board_cards(id) ON DELETE CASCADE,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  UNIQUE (card_id, employee_id)
+);
+
 CREATE TABLE IF NOT EXISTS expense_reports (
   id SERIAL PRIMARY KEY,
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
@@ -481,6 +491,18 @@ async function ensurePayrollPeriodHalf() {
   }
 }
 
+// Backfills each card's pre-existing single employee_id assignee into the new
+// board_card_assignees join table, so cards created before multi-assignee
+// support still show their original assignee. Safe to repeat: ON CONFLICT DO
+// NOTHING means a card already backfilled (or since reassigned) is untouched.
+async function ensureBoardCardAssignees() {
+  await pool.query(
+    `INSERT INTO board_card_assignees (card_id, employee_id)
+     SELECT id, employee_id FROM board_cards WHERE employee_id IS NOT NULL
+     ON CONFLICT (card_id, employee_id) DO NOTHING`
+  );
+}
+
 let migrated = null;
 // Idempotent: safe to call on every boot. Runs the full schema once per
 // process (CREATE TABLE IF NOT EXISTS makes re-running harmless besides).
@@ -504,7 +526,8 @@ db.migrate = function () {
         )
       )
       .then(() => ensureLeaveTypeTaxonomy())
-      .then(() => ensurePayrollPeriodHalf());
+      .then(() => ensurePayrollPeriodHalf())
+      .then(() => ensureBoardCardAssignees());
   }
   return migrated;
 };

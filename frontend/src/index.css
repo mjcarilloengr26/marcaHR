@@ -438,6 +438,23 @@ tbody tr:last-child td { border-bottom: none; }
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--primary-light);
 }
+
+/* A native <input type="date">'s day/month/year placeholder segments and the
+   calendar icon live in their own WebKit shadow-DOM parts, which don't always
+   inherit a page's `color` — under the dark theme this made the "dd/mm/yyyy"
+   placeholder invisible (dark-on-dark) until a value was picked. Applies
+   everywhere, not just board-card-form, since every date field in the app
+   shares this input type. */
+input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+input[type="date"]::-webkit-datetime-edit-text,
+input[type="date"]::-webkit-datetime-edit-month-field,
+input[type="date"]::-webkit-datetime-edit-day-field,
+input[type="date"]::-webkit-datetime-edit-year-field {
+  color: var(--text);
+}
+[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+}
 .form-inline {
   display: flex;
   gap: 12px;
@@ -575,7 +592,41 @@ tbody tr:last-child td { border-bottom: none; }
   border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 13px;
+  background: var(--input-bg);
+  color: var(--text);
 }
+
+.multi-select {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--input-bg);
+  overflow: hidden;
+}
+.multi-select-all {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+.multi-select-list {
+  max-height: 140px;
+  overflow-y: auto;
+  padding: 4px;
+}
+.multi-select-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  font-size: 13px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.multi-select-item:hover { background: var(--hover-bg); }
 .board-card-form-actions {
   display: flex;
   justify-content: flex-end;

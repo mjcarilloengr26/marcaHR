@@ -11,11 +11,36 @@ const router = express.Router();
 // created it — otherwise any authenticated employee could reassign or delete
 // someone else's card, which is the one write-path in this codebase that lacked an
 // ownership check that every comparable module (leave, expenses, work orders) has.
-function canManageCard(req, card) {
+function canManageCard(req, card, assigneeIds) {
   const isHr = ["admin", "hr"].includes(req.user.role);
-  const isAssignee = req.user.employee_id && req.user.employee_id === card.employee_id;
+  const isAssignee = req.user.employee_id && assigneeIds.includes(req.user.employee_id);
   const isCreator = req.user.employee_id && req.user.employee_id === card.created_by;
   return isHr || isAssignee || isCreator;
+}
+
+async function getAssignees(cardId) {
+  return db
+    .prepare(
+      `SELECT e.id AS employee_id, (e.first_name || ' ' || e.last_name) AS employee_name
+       FROM board_card_assignees ca JOIN employees e ON e.id = ca.employee_id
+       WHERE ca.card_id = ? ORDER BY e.first_name, e.last_name`
+    )
+    .all(cardId);
+}
+
+async function setAssignees(cardId, employeeIds) {
+  const priorIds = (await db.prepare("SELECT employee_id FROM board_card_assignees WHERE card_id = ?").all(cardId)).map(
+    (r) => r.employee_id
+  );
+  await db.prepare("DELETE FROM board_card_assignees WHERE card_id = ?").run(cardId);
+  const ids = Array.isArray(employeeIds) ? [...new Set(employeeIds.filter(Boolean))] : [];
+  for (const empId of ids) {
+    await db.prepare("INSERT INTO board_card_assignees (card_id, employee_id) VALUES (?, ?) ON CONFLICT (card_id, employee_id) DO NOTHING").run(
+      cardId,
+      empId
+    );
+  }
+  return { ids, newlyAssigned: ids.filter((id) => !priorIds.includes(id)) };
 }
 
 router.get(
@@ -23,16 +48,24 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const columns = await db.prepare("SELECT * FROM board_columns ORDER BY position, id").all();
-    const cards = await db
+    const cards = await db.prepare("SELECT * FROM board_cards ORDER BY position, id").all();
+    const assigneeRows = await db
       .prepare(
-        `SELECT c.*, (e.first_name || ' ' || e.last_name) AS employee_name
-       FROM board_cards c LEFT JOIN employees e ON e.id = c.employee_id
-       ORDER BY c.position, c.id`
+        `SELECT ca.card_id, e.id AS employee_id, (e.first_name || ' ' || e.last_name) AS employee_name
+         FROM board_card_assignees ca JOIN employees e ON e.id = ca.employee_id
+         ORDER BY e.first_name, e.last_name`
       )
       .all();
+    const assigneesByCard = new Map();
+    for (const row of assigneeRows) {
+      if (!assigneesByCard.has(row.card_id)) assigneesByCard.set(row.card_id, []);
+      assigneesByCard.get(row.card_id).push({ employee_id: row.employee_id, employee_name: row.employee_name });
+    }
     const byColumn = new Map(columns.map((col) => [col.id, { ...col, cards: [] }]));
     for (const card of cards) {
-      if (byColumn.has(card.column_id)) byColumn.get(card.column_id).cards.push(card);
+      if (byColumn.has(card.column_id)) {
+        byColumn.get(card.column_id).cards.push({ ...card, assignees: assigneesByCard.get(card.id) || [] });
+      }
     }
     res.json(Array.from(byColumn.values()));
   })
@@ -84,7 +117,7 @@ router.post(
   "/cards",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { column_id, title, description, employee_id, due_date } = req.body || {};
+    const { column_id, title, description, employee_ids, due_date } = req.body || {};
     if (!column_id || !title) return res.status(400).json({ error: "column_id and title are required" });
     const column = await db.prepare("SELECT * FROM board_columns WHERE id = ?").get(column_id);
     if (!column) return res.status(404).json({ error: "Column not found" });
@@ -92,12 +125,19 @@ router.post(
     const maxPos = (await db.prepare("SELECT COALESCE(MAX(position), -1) AS m FROM board_cards WHERE column_id = ?").get(column_id)).m;
     const info = await db
       .prepare(
-        `INSERT INTO board_cards (column_id, title, description, employee_id, due_date, position, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO board_cards (column_id, title, description, due_date, position, created_by)
+       VALUES (?, ?, ?, ?, ?, ?)`
       )
-      .run(column_id, title, description || null, employee_id || null, due_date || null, maxPos + 1, req.user.employee_id || null);
-    if (employee_id) notifyCardAssigned({ employee_id, title });
-    res.status(201).json(await db.prepare("SELECT * FROM board_cards WHERE id = ?").get(info.lastInsertRowid));
+      .run(column_id, title, description || null, due_date || null, maxPos + 1, req.user.employee_id || null);
+    const cardId = info.lastInsertRowid;
+
+    const { ids } = await setAssignees(cardId, employee_ids);
+    for (const empId of ids) {
+      notifyCardAssigned({ employee_id: empId, title });
+    }
+
+    const created = await db.prepare("SELECT * FROM board_cards WHERE id = ?").get(cardId);
+    res.status(201).json({ ...created, assignees: await getAssignees(cardId) });
   })
 );
 
@@ -107,22 +147,30 @@ router.put(
   asyncHandler(async (req, res) => {
     const existing = await db.prepare("SELECT * FROM board_cards WHERE id = ?").get(req.params.id);
     if (!existing) return res.status(404).json({ error: "Card not found" });
-    if (!canManageCard(req, existing)) return res.status(403).json({ error: "Insufficient permissions" });
-    const { title, description, employee_id, due_date } = req.body || {};
-    const nextEmployeeId = employee_id !== undefined ? employee_id : existing.employee_id;
+    const currentAssigneeIds = (await getAssignees(req.params.id)).map((a) => a.employee_id);
+    if (!canManageCard(req, existing, currentAssigneeIds)) return res.status(403).json({ error: "Insufficient permissions" });
+
+    const { title, description, employee_ids, due_date } = req.body || {};
     await db
-      .prepare("UPDATE board_cards SET title = ?, description = ?, employee_id = ?, due_date = ? WHERE id = ?")
+      .prepare("UPDATE board_cards SET title = ?, description = ?, due_date = ? WHERE id = ?")
       .run(
         title ?? existing.title,
         description !== undefined ? description : existing.description,
-        nextEmployeeId,
         due_date !== undefined ? due_date : existing.due_date,
         req.params.id
       );
-    if (nextEmployeeId && nextEmployeeId !== existing.employee_id) {
-      notifyCardAssigned({ employee_id: nextEmployeeId, title: title ?? existing.title });
+
+    let assignees = await getAssignees(req.params.id);
+    if (employee_ids !== undefined) {
+      const { newlyAssigned } = await setAssignees(req.params.id, employee_ids);
+      for (const empId of newlyAssigned) {
+        notifyCardAssigned({ employee_id: empId, title: title ?? existing.title });
+      }
+      assignees = await getAssignees(req.params.id);
     }
-    res.json(await db.prepare("SELECT * FROM board_cards WHERE id = ?").get(req.params.id));
+
+    const updated = await db.prepare("SELECT * FROM board_cards WHERE id = ?").get(req.params.id);
+    res.json({ ...updated, assignees });
   })
 );
 
@@ -175,7 +223,8 @@ router.put(
     });
     await move();
 
-    res.json(await db.prepare("SELECT * FROM board_cards WHERE id = ?").get(req.params.id));
+    const updated = await db.prepare("SELECT * FROM board_cards WHERE id = ?").get(req.params.id);
+    res.json({ ...updated, assignees: await getAssignees(req.params.id) });
   })
 );
 
@@ -185,7 +234,8 @@ router.delete(
   asyncHandler(async (req, res) => {
     const existing = await db.prepare("SELECT * FROM board_cards WHERE id = ?").get(req.params.id);
     if (!existing) return res.status(404).json({ error: "Card not found" });
-    if (!canManageCard(req, existing)) return res.status(403).json({ error: "Insufficient permissions" });
+    const assigneeIds = (await getAssignees(req.params.id)).map((a) => a.employee_id);
+    if (!canManageCard(req, existing, assigneeIds)) return res.status(403).json({ error: "Insufficient permissions" });
     await db.prepare("DELETE FROM board_cards WHERE id = ?").run(req.params.id);
     res.status(204).end();
   })

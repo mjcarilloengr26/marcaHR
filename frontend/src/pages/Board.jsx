@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import EmployeeMultiSelect from "../components/EmployeeMultiSelect";
+
+const emptyCardForm = { title: "", description: "", employee_ids: [], due_date: "" };
 
 export default function Board() {
   const { user } = useAuth();
@@ -11,9 +14,17 @@ export default function Board() {
   const [dragCard, setDragCard] = useState(null); // { id, fromColumnId }
   const [showCardForm, setShowCardForm] = useState(null); // columnId or null
   const [showColumnForm, setShowColumnForm] = useState(false);
-  const [cardForm, setCardForm] = useState({ title: "", description: "", employee_id: "", due_date: "" });
+  const [cardForm, setCardForm] = useState(emptyCardForm);
   const [columnName, setColumnName] = useState("");
   const [saving, setSaving] = useState(false);
+  const [editingCard, setEditingCard] = useState(null); // the card being edited, or null
+
+  // Mirrors the backend's canManageCard check, so the Edit button only shows up
+  // where the request would actually be allowed to succeed.
+  const canManageCard = (card) =>
+    isHr ||
+    (user.employee_id && (card.assignees || []).some((a) => a.employee_id === user.employee_id)) ||
+    (user.employee_id && user.employee_id === card.created_by);
 
   const load = () => api.get("/board").then(setColumns).catch((err) => setError(err.message));
 
@@ -78,9 +89,35 @@ export default function Board() {
     setSaving(true);
     setError("");
     try {
-      await api.post("/board/cards", { ...cardForm, column_id: columnId, employee_id: cardForm.employee_id || null });
+      await api.post("/board/cards", { ...cardForm, column_id: columnId });
       setShowCardForm(null);
-      setCardForm({ title: "", description: "", employee_id: "", due_date: "" });
+      setCardForm(emptyCardForm);
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openEditCard = (card) => {
+    setEditingCard(card);
+    setCardForm({
+      title: card.title,
+      description: card.description || "",
+      employee_ids: (card.assignees || []).map((a) => a.employee_id),
+      due_date: card.due_date || "",
+    });
+  };
+
+  const saveCardEdit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await api.put(`/board/cards/${editingCard.id}`, cardForm);
+      setEditingCard(null);
+      setCardForm(emptyCardForm);
       load();
     } catch (err) {
       setError(err.message);
@@ -172,7 +209,9 @@ export default function Board() {
                 <div className="board-card-title">{card.title}</div>
                 {card.description && <div className="board-card-desc">{card.description}</div>}
                 <div className="board-card-meta">
-                  {card.employee_name && <span>{card.employee_name}</span>}
+                  {card.assignees && card.assignees.length > 0 && (
+                    <span>{card.assignees.map((a) => a.employee_name).join(", ")}</span>
+                  )}
                   {card.due_date && <span>Due {card.due_date}</span>}
                 </div>
                 <div className="board-card-actions">
@@ -190,6 +229,11 @@ export default function Board() {
                           <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
                     </select>
+                  )}
+                  {canManageCard(card) && (
+                    <button className="link-btn" onClick={() => openEditCard(card)}>
+                      Edit
+                    </button>
                   )}
                   <button className="link-btn board-card-delete" onClick={() => deleteCard(card.id)}>
                     Remove
@@ -214,17 +258,11 @@ export default function Board() {
                   onChange={(e) => setCardForm({ ...cardForm, description: e.target.value })}
                 />
                 {isHr && (
-                  <select
-                    value={cardForm.employee_id}
-                    onChange={(e) => setCardForm({ ...cardForm, employee_id: e.target.value })}
-                  >
-                    <option value="">Unassigned</option>
-                    {employees.map((emp) => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.first_name} {emp.last_name}
-                      </option>
-                    ))}
-                  </select>
+                  <EmployeeMultiSelect
+                    employees={employees}
+                    selectedIds={cardForm.employee_ids}
+                    onChange={(ids) => setCardForm({ ...cardForm, employee_ids: ids })}
+                  />
                 )}
                 <input
                   type="date"
@@ -265,6 +303,48 @@ export default function Board() {
               </button>
               <button type="submit" className="btn" disabled={saving}>
                 {saving ? "Adding…" : "Add column"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {editingCard && (
+        <div className="modal-backdrop" onClick={() => setEditingCard(null)}>
+          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={saveCardEdit}>
+            <h2>Edit card</h2>
+            <div className="form-row">
+              <label>Title</label>
+              <input value={cardForm.title} onChange={(e) => setCardForm({ ...cardForm, title: e.target.value })} required autoFocus />
+            </div>
+            <div className="form-row">
+              <label>Description</label>
+              <textarea
+                rows={2}
+                value={cardForm.description}
+                onChange={(e) => setCardForm({ ...cardForm, description: e.target.value })}
+              />
+            </div>
+            {isHr && (
+              <div className="form-row">
+                <label>Assigned to</label>
+                <EmployeeMultiSelect
+                  employees={employees}
+                  selectedIds={cardForm.employee_ids}
+                  onChange={(ids) => setCardForm({ ...cardForm, employee_ids: ids })}
+                />
+              </div>
+            )}
+            <div className="form-row">
+              <label>Due date</label>
+              <input type="date" value={cardForm.due_date} onChange={(e) => setCardForm({ ...cardForm, due_date: e.target.value })} />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setEditingCard(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn" disabled={saving}>
+                {saving ? "Saving…" : "Save changes"}
               </button>
             </div>
           </form>
