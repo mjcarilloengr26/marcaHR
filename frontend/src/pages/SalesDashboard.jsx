@@ -410,15 +410,16 @@ export default function SalesDashboard() {
                           bar charts match and line up. The pie column is pinned to a
                           fixed basis rather than allowed to grow — letting it grow
                           pushed the bar chart to the far right of wide screens with a
-                          large empty gap. The bar then takes the remaining space, up
-                          to a cap so a handful of categories don't end up scattered
-                          across a very wide plot. `0 1`/`minWidth: 0` plus wrap keeps
-                          both stacking full-width on narrow screens. */}
+                          large empty gap. The bar then takes all remaining width, so
+                          on a wide screen it runs to the right edge and more
+                          categories fit before the plot has to scroll at all.
+                          `0 1`/`minWidth: 0` plus wrap keeps both stacking
+                          full-width on narrow screens. */}
                       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
                         <div style={{ flex: "0 1 460px", minWidth: 0 }}>
                           <PieChart data={byTypePieData} />
                         </div>
-                        <div style={{ flex: "1 1 300px", minWidth: 0, maxWidth: 560 }}>
+                        <div style={{ flex: "1 1 300px", minWidth: 0 }}>
                           <BarChart
                             data={expensesReport.byType}
                             currentLabel={currentYearLabel}
@@ -435,7 +436,7 @@ export default function SalesDashboard() {
                         <div style={{ flex: "0 1 460px", minWidth: 0 }}>
                           <PieChart data={byTitlePieData} />
                         </div>
-                        <div style={{ flex: "1 1 300px", minWidth: 0, maxWidth: 560 }}>
+                        <div style={{ flex: "1 1 300px", minWidth: 0 }}>
                           <BarChart
                             data={expensesReport.byTitle}
                             currentLabel={currentYearLabel}
