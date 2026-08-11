@@ -29,6 +29,7 @@ const eventsRoutes = require("./routes/events.routes");
 const termsRoutes = require("./routes/terms.routes");
 const securityRoutes = require("./routes/security.routes");
 const brandingRoutes = require("./routes/branding.routes");
+const pageAccessRoutes = require("./routes/pageaccess.routes");
 
 const app = express();
 app.use(cors());
@@ -64,6 +65,7 @@ app.use("/api/events", eventsRoutes);
 app.use("/api/terms", termsRoutes);
 app.use("/api/security-settings", securityRoutes);
 app.use("/api/branding", brandingRoutes);
+app.use("/api/page-access", pageAccessRoutes);
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 

@@ -38,9 +38,9 @@ const NAV_ITEMS = [
   { to: "/", label: "Overview", icon: "🏠", roles: ["admin", "hr", "employee"] },
 
   { section: "Workforce", icon: "👥", roles: ["admin", "hr"] },
-  { to: "/employees", label: "Employees", icon: "🧑‍💼", roles: ["admin", "hr"] },
-  { to: "/departments", label: "Departments", icon: "🏢", roles: ["admin", "hr"] },
-  { to: "/locations", label: "Locations", icon: "📍", roles: ["admin", "hr"] },
+  { to: "/employees", label: "Employees", icon: "🧑‍💼", roles: ["admin", "hr"], pageKey: "employees" },
+  { to: "/departments", label: "Departments", icon: "🏢", roles: ["admin", "hr"], pageKey: "departments" },
+  { to: "/locations", label: "Locations", icon: "📍", roles: ["admin", "hr"], pageKey: "locations" },
 
   { section: "HR Operations", icon: "🗂️", roles: ["admin", "hr", "employee"] },
   { to: "/leave", label: "Leave", icon: "🌴", roles: ["admin", "hr", "employee"] },
@@ -53,24 +53,25 @@ const NAV_ITEMS = [
   { to: "/expenses", label: "Expenses", icon: "🧾", roles: ["admin", "hr", "employee"] },
 
   { section: "Sales", icon: "💹", roles: ["admin", "hr", "employee"], salesOnly: true },
-  { to: "/sales", label: "Dashboard", icon: "📊", roles: ["admin", "hr"] },
-  { to: "/deals", label: "Opportunities", icon: "🎯", roles: ["admin", "hr", "employee"], salesOnly: true },
-  { to: "/billing", label: "Billing", icon: "💳", roles: ["admin", "hr"] },
-  { to: "/orders", label: "Orders", icon: "🛍️", roles: ["admin", "hr"] },
+  { to: "/sales", label: "Dashboard", icon: "📊", roles: ["admin", "hr"], pageKey: "sales" },
+  { to: "/deals", label: "Opportunities", icon: "🎯", roles: ["admin", "hr", "employee"], salesOnly: true, pageKey: "deals" },
+  { to: "/billing", label: "Billing", icon: "💳", roles: ["admin", "hr"], pageKey: "billing" },
+  { to: "/orders", label: "Orders", icon: "🛍️", roles: ["admin", "hr"], pageKey: "orders" },
 
   { section: "Fulfillment", icon: "🚚", roles: ["admin", "hr", "employee"] },
-  { to: "/work-orders", label: "Work Orders", icon: "🔧", roles: ["admin", "hr", "employee"] },
+  { to: "/work-orders", label: "Work Orders", icon: "🔧", roles: ["admin", "hr", "employee"], pageKey: "work-orders" },
 
   { section: "Procurement", icon: "🛒", roles: ["admin", "hr"] },
-  { to: "/purchase-orders", label: "Purchase Orders", icon: "📝", roles: ["admin", "hr"] },
-  { to: "/inventory", label: "Inventory", icon: "📦", roles: ["admin", "hr"] },
+  { to: "/purchase-orders", label: "Purchase Orders", icon: "📝", roles: ["admin", "hr"], pageKey: "purchase-orders" },
+  { to: "/inventory", label: "Inventory", icon: "📦", roles: ["admin", "hr"], pageKey: "inventory" },
 
   { section: "Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true },
-  { to: "/reports", label: "Export Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true },
+  { to: "/reports", label: "Export Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true, pageKey: "reports" },
 
   { section: "Administration", icon: "⚙️", roles: ["admin"] },
   { to: "/users", label: "Users", icon: "👤", roles: ["admin"] },
   { to: "/events", label: "Events", icon: "📜", roles: ["admin"] },
+  { to: "/page-access", label: "Page Access", icon: "🕒", roles: ["admin"] },
   { to: "/terms-settings", label: "Terms & Conditions", icon: "📄", roles: ["admin"] },
   { to: "/security-settings", label: "Security", icon: "🔒", roles: ["admin"] },
   { to: "/branding-settings", label: "Branding", icon: "🖼️", roles: ["admin"] },
@@ -118,11 +119,38 @@ export default function Layout({ children }) {
     (employee?.position || "").toLowerCase().includes("finance");
   const canSeeReportsPage = isFinanceOrAdmin || user?.role === "hr";
 
-  const visibleNavItems = NAV_ITEMS.filter(
-    (item) =>
-      item.roles.includes(user?.role) &&
+  // A temporary page-access grant (Administration > Page Access) surfaces the
+  // link even when role/department rules would hide it, and stops surfacing it
+  // the moment the grant expires — page_grants only ever holds active ones.
+  const pageGrants = user?.page_grants || [];
+  const grantedLinks = NAV_ITEMS.filter((i) => i.pageKey && pageGrants.includes(i.pageKey));
+
+  const linkIsVisible = (item) =>
+    (item.roles.includes(user?.role) &&
       (!item.salesOnly || isSalesEmployee) &&
-      (!item.financeOnly || canSeeReportsPage)
+      (!item.financeOnly || canSeeReportsPage)) ||
+    (item.pageKey && pageGrants.includes(item.pageKey));
+
+  // Section headers are pure labels with no route of their own, so they follow
+  // their own role rules — except that a section must also appear when a grant
+  // has unlocked one of the links beneath it, or that link would render with
+  // no heading above it.
+  const sectionHasGrantedLink = (sectionName) => {
+    const startIdx = NAV_ITEMS.findIndex((i) => i.section === sectionName);
+    if (startIdx === -1) return false;
+    for (let i = startIdx + 1; i < NAV_ITEMS.length && !NAV_ITEMS[i].section; i++) {
+      if (grantedLinks.includes(NAV_ITEMS[i])) return true;
+    }
+    return false;
+  };
+
+  const visibleNavItems = NAV_ITEMS.filter((item) =>
+    item.section
+      ? (item.roles.includes(user?.role) &&
+          (!item.salesOnly || isSalesEmployee) &&
+          (!item.financeOnly || canSeeReportsPage)) ||
+        sectionHasGrantedLink(item.section)
+      : linkIsVisible(item)
   );
 
   return (

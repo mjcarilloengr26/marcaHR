@@ -4,6 +4,7 @@ const db = require("../db");
 const { signToken, requireAuth } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logEvent, logRequestEvent } = require("../services/auditLog");
+const { activeGrantsForUser } = require("../services/pageAccess");
 
 const router = express.Router();
 
@@ -40,6 +41,7 @@ router.post(
           .get(user.employee_id)
       : null;
     const termsVersion = await currentTermsVersion();
+    const pageGrants = await activeGrantsForUser(user.id);
 
     await logEvent({ userId: user.id, userEmail: user.email, action: "login", ip: req.ip });
 
@@ -51,6 +53,7 @@ router.post(
         role: user.role,
         employee_id: user.employee_id,
         terms_accepted: user.terms_version === termsVersion,
+        page_grants: pageGrants.map((g) => g.page_key),
       },
       employee,
     });
@@ -102,6 +105,7 @@ router.get(
           .get(user.employee_id)
       : null;
     const termsVersion = await currentTermsVersion();
+    const pageGrants = await activeGrantsForUser(user.id);
     res.json({
       user: {
         id: user.id,
@@ -109,6 +113,7 @@ router.get(
         role: user.role,
         employee_id: user.employee_id,
         terms_accepted: user.terms_version === termsVersion,
+        page_grants: pageGrants.map((g) => g.page_key),
       },
       employee,
     });

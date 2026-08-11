@@ -428,6 +428,24 @@ CREATE TABLE IF NOT EXISTS attendance_settings (
   updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
+-- Time-boxed page access: lets an admin give one user access to one page
+-- (e.g. Inventory) until expires_at, after which it simply stops matching the
+-- "active grant" query and access reverts to whatever their role allows.
+-- Nothing needs to run on a schedule to revoke it. role_label is a free-text
+-- name for the arrangement ("Inventory Staff") shown in the admin list.
+-- Enforced server-side in middleware/auth.js, not just in the UI.
+CREATE TABLE IF NOT EXISTS page_access_grants (
+  id SERIAL PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  page_key TEXT NOT NULL,
+  role_label TEXT,
+  expires_at TEXT NOT NULL,
+  revoked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  created_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_page_access_grants_user ON page_access_grants(user_id);
+
 -- Company logo shown on the login screen and sidebar header. logo_data is a
 -- base64 data URL (client-compressed to PNG before upload, image.js) or NULL
 -- to fall back to the default "M" mark — same storage pattern as attendance

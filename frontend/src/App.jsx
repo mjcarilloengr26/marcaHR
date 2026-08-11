@@ -33,10 +33,13 @@ const Events = lazy(() => import("./pages/Events"));
 const TermsSettings = lazy(() => import("./pages/TermsSettings"));
 const SecuritySettings = lazy(() => import("./pages/SecuritySettings"));
 const BrandingSettings = lazy(() => import("./pages/BrandingSettings"));
+const PageAccess = lazy(() => import("./pages/PageAccess"));
 
-function Protected({ children, roles }) {
+// pageKey marks a route as eligible for a temporary access grant — it must
+// match a key in backend/src/services/pageAccess.js GRANTABLE_PAGES.
+function Protected({ children, roles, pageKey }) {
   return (
-    <ProtectedRoute roles={roles}>
+    <ProtectedRoute roles={roles} pageKey={pageKey}>
       <Layout>{children}</Layout>
     </ProtectedRoute>
   );
@@ -48,29 +51,30 @@ export default function App() {
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<Protected><Dashboard /></Protected>} />
-        <Route path="/employees" element={<Protected roles={["admin", "hr"]}><Employees /></Protected>} />
-        <Route path="/employees/:id" element={<Protected roles={["admin", "hr"]}><EmployeeDetail /></Protected>} />
-        <Route path="/departments" element={<Protected roles={["admin", "hr"]}><Departments /></Protected>} />
-        <Route path="/locations" element={<Protected roles={["admin", "hr"]}><Locations /></Protected>} />
+        <Route path="/employees" element={<Protected roles={["admin", "hr"]} pageKey="employees"><Employees /></Protected>} />
+        <Route path="/employees/:id" element={<Protected roles={["admin", "hr"]} pageKey="employees"><EmployeeDetail /></Protected>} />
+        <Route path="/departments" element={<Protected roles={["admin", "hr"]} pageKey="departments"><Departments /></Protected>} />
+        <Route path="/locations" element={<Protected roles={["admin", "hr"]} pageKey="locations"><Locations /></Protected>} />
         <Route path="/leave" element={<Protected><Leave /></Protected>} />
         <Route path="/attendance" element={<Protected><Attendance /></Protected>} />
         <Route path="/payroll" element={<Protected><Payroll /></Protected>} />
         <Route path="/performance" element={<Protected><Performance /></Protected>} />
         <Route path="/board" element={<Protected><Board /></Protected>} />
-        <Route path="/expenses" element={<Protected><Expenses /></Protected>} />
-        <Route path="/sales" element={<Protected roles={["admin", "hr"]}><SalesDashboard /></Protected>} />
-        <Route path="/deals" element={<Protected roles={["admin", "hr", "employee"]}><Deals /></Protected>} />
-        <Route path="/orders" element={<Protected roles={["admin", "hr"]}><Orders /></Protected>} />
-        <Route path="/work-orders" element={<Protected><WorkOrders /></Protected>} />
-        <Route path="/billing" element={<Protected roles={["admin", "hr"]}><Billing /></Protected>} />
-        <Route path="/purchase-orders" element={<Protected roles={["admin", "hr"]}><PurchaseOrders /></Protected>} />
-        <Route path="/inventory" element={<Protected roles={["admin", "hr"]}><Inventory /></Protected>} />
+        <Route path="/expenses" element={<Protected pageKey="expenses"><Expenses /></Protected>} />
+        <Route path="/sales" element={<Protected roles={["admin", "hr"]} pageKey="sales"><SalesDashboard /></Protected>} />
+        <Route path="/deals" element={<Protected roles={["admin", "hr", "employee"]} pageKey="deals"><Deals /></Protected>} />
+        <Route path="/orders" element={<Protected roles={["admin", "hr"]} pageKey="orders"><Orders /></Protected>} />
+        <Route path="/work-orders" element={<Protected pageKey="work-orders"><WorkOrders /></Protected>} />
+        <Route path="/billing" element={<Protected roles={["admin", "hr"]} pageKey="billing"><Billing /></Protected>} />
+        <Route path="/purchase-orders" element={<Protected roles={["admin", "hr"]} pageKey="purchase-orders"><PurchaseOrders /></Protected>} />
+        <Route path="/inventory" element={<Protected roles={["admin", "hr"]} pageKey="inventory"><Inventory /></Protected>} />
         <Route path="/users" element={<Protected roles={["admin"]}><Users /></Protected>} />
         <Route path="/events" element={<Protected roles={["admin"]}><Events /></Protected>} />
         <Route path="/terms-settings" element={<Protected roles={["admin"]}><TermsSettings /></Protected>} />
         <Route path="/security-settings" element={<Protected roles={["admin"]}><SecuritySettings /></Protected>} />
         <Route path="/branding-settings" element={<Protected roles={["admin"]}><BrandingSettings /></Protected>} />
-        <Route path="/reports" element={<Protected><Reports /></Protected>} />
+        <Route path="/page-access" element={<Protected roles={["admin"]}><PageAccess /></Protected>} />
+        <Route path="/reports" element={<Protected pageKey="reports"><Reports /></Protected>} />
       </Routes>
     </Suspense>
   );
