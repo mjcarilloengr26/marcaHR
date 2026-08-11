@@ -70,6 +70,7 @@ const NAV_ITEMS = [
   { section: "Administration", icon: "⚙️", roles: ["admin"] },
   { to: "/users", label: "Users", icon: "👤", roles: ["admin"] },
   { to: "/events", label: "Events", icon: "📜", roles: ["admin"] },
+  { to: "/terms-settings", label: "Terms & Conditions", icon: "📄", roles: ["admin"] },
 ];
 
 export default function Layout({ children }) {

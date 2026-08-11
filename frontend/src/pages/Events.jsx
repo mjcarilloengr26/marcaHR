@@ -4,6 +4,9 @@ import { api } from "../api/client";
 const ACTION_LABELS = {
   login: "Login",
   logout: "Logout",
+  accept_terms: "Accepted Terms & Conditions",
+  update_terms: "Updated Terms & Conditions",
+  update_login_notice: "Updated sign-in screen notice",
   create_user: "Create user",
   update_user: "Update user",
   delete_user: "Delete user",

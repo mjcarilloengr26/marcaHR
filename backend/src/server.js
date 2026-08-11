@@ -26,6 +26,7 @@ const purchaseOrdersRoutes = require("./routes/purchaseorders.routes");
 const inventoryRoutes = require("./routes/inventory.routes");
 const reportsRoutes = require("./routes/reports.routes");
 const eventsRoutes = require("./routes/events.routes");
+const termsRoutes = require("./routes/terms.routes");
 
 const app = express();
 app.use(cors());
@@ -58,6 +59,7 @@ app.use("/api/purchase-orders", purchaseOrdersRoutes);
 app.use("/api/inventory", inventoryRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/events", eventsRoutes);
+app.use("/api/terms", termsRoutes);
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 

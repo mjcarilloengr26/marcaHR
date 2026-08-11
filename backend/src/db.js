@@ -443,6 +443,24 @@ CREATE TABLE IF NOT EXISTS payroll_settings (
   updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
+-- Single editable row holding the post-login Terms and Conditions / Data
+-- Privacy / Cybersecurity notice shown by TermsGate. version is bumped on
+-- every save (see PUT /api/terms) so editing the text automatically makes
+-- every user — even ones who already accepted an earlier version — see and
+-- re-accept the notice on their next login.
+CREATE TABLE IF NOT EXISTS terms_content (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  content TEXT NOT NULL,
+  version TEXT NOT NULL,
+  -- Short footer notice shown on the (pre-login, unauthenticated) sign-in
+  -- screen — editable separately from the content column above since it
+  -- isn't a consent document, just a pointer to one, so changing it doesn't
+  -- need to force every user to re-accept anything.
+  login_notice TEXT NOT NULL DEFAULT 'Use of this application is subject to MARCA Group''s Terms and Conditions.',
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_deal_id ON orders(deal_id) WHERE deal_id IS NOT NULL;
 
 -- Audit trail: who did what, when. user_email is denormalized (kept even if the
@@ -564,12 +582,6 @@ async function ensurePayrollDeductionBreakdown() {
   await pool.query("ALTER TABLE payroll_records ADD COLUMN IF NOT EXISTS deduction_cash_advances REAL NOT NULL DEFAULT 0");
 }
 
-// Standing per-employee deduction amounts (SSS, HDMF, PhilHealth, taxes,
-// loans, cash advances). These typically don't change cut-off to cut-off, so
-// each payroll record's deduction breakdown defaults to whatever is here
-// instead of resetting to 0 every period; editing the breakdown on a payroll
-// record (POST /payroll) writes the new amounts back here too, so the change
-// carries forward into future cut-offs until HR/admin edits it again.
 // Existing deployed accounts predate the mandatory post-login Terms and
 // Conditions / Data Privacy / Cybersecurity acknowledgment — both columns
 // come in NULL for them, which is exactly what should make every existing
@@ -577,6 +589,20 @@ async function ensurePayrollDeductionBreakdown() {
 async function ensureUserTermsAcceptance() {
   await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_version TEXT");
   await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TEXT");
+}
+
+// Standing per-employee deduction amounts (SSS, HDMF, PhilHealth, taxes,
+// loans, cash advances). These typically don't change cut-off to cut-off, so
+// each payroll record's deduction breakdown defaults to whatever is here
+// instead of resetting to 0 every period; editing the breakdown on a payroll
+// record (POST /payroll) writes the new amounts back here too, so the change
+// carries forward into future cut-offs until HR/admin edits it again.
+// terms_content predates the login-screen notice field — existing deployed
+// rows need it added explicitly, same default the fresh-install schema uses.
+async function ensureLoginNotice() {
+  await pool.query(
+    "ALTER TABLE terms_content ADD COLUMN IF NOT EXISTS login_notice TEXT NOT NULL DEFAULT 'Use of this application is subject to MARCA Group''s Terms and Conditions.'"
+  );
 }
 
 async function ensureEmployeeStandingDeductions() {
@@ -587,6 +613,23 @@ async function ensureEmployeeStandingDeductions() {
   await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_loans REAL NOT NULL DEFAULT 0");
   await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_cash_advances REAL NOT NULL DEFAULT 0");
 }
+
+// Seeded once on first boot only (ON CONFLICT DO NOTHING) — after that this
+// row is entirely owned by admins via PUT /api/terms, so re-running migrate
+// never overwrites edits. version matches what the login gate has always
+// checked for, so this migration alone doesn't force existing users to
+// re-accept; only an actual edit through the admin page does.
+const DEFAULT_TERMS_CONTENT = `By continuing to use this application, you acknowledge and agree to the following terms governing your access to MARCA Group's Human Resources system.
+
+1. Data Privacy
+This system collects and processes personal information necessary for employment administration, including your name, contact details, employment records, attendance and time logs, GPS location at clock-in/out, photographs captured for attendance verification, performance records, and payroll and compensation data. This information is collected solely for legitimate HR, payroll, and business operations purposes, is accessible only to authorized personnel, and will not be shared with third parties except as required by law or company policy. You have the right to request access to, correction of, or clarification about your personal data held in this system.
+
+2. Cybersecurity & Acceptable Use
+You are responsible for keeping your login credentials confidential and must not share your account with anyone else. Any activity performed under your account is presumed to be yours. Attempting to access data, records, or accounts you are not authorized to view is strictly prohibited. All access and changes made within this system are logged for security and audit purposes. Suspected security incidents, unauthorized access, or lost/compromised credentials must be reported to HR or IT administration immediately.
+
+3. Acknowledgment
+Misuse of this system, including unauthorized data access, sharing of credentials, or circumvention of security controls, may result in disciplinary action up to and including termination, and may carry legal liability under applicable data privacy law. Use of this application is further subject to MARCA Group's Terms and Conditions.`;
+const DEFAULT_TERMS_VERSION = "2026-08-11";
 
 let migrated = null;
 // Idempotent: safe to call on every boot. Runs the full schema once per
@@ -599,6 +642,12 @@ db.migrate = function () {
         pool.query(
           "INSERT INTO inventory_settings (id, alarm_threshold_percent) VALUES (1, 20) ON CONFLICT (id) DO NOTHING"
         )
+      )
+      .then(() =>
+        pool.query("INSERT INTO terms_content (id, content, version) VALUES (1, $1, $2) ON CONFLICT (id) DO NOTHING", [
+          DEFAULT_TERMS_CONTENT,
+          DEFAULT_TERMS_VERSION,
+        ])
       )
       .then(() =>
         pool.query(
@@ -618,7 +667,8 @@ db.migrate = function () {
       .then(() => ensurePayrollNightDifferential())
       .then(() => ensurePayrollDeductionBreakdown())
       .then(() => ensureEmployeeStandingDeductions())
-      .then(() => ensureUserTermsAcceptance());
+      .then(() => ensureUserTermsAcceptance())
+      .then(() => ensureLoginNotice());
   }
   return migrated;
 };

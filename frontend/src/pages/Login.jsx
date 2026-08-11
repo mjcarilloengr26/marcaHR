@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { api } from "../api/client";
 
 export default function Login() {
   const { user, login } = useAuth();
@@ -9,6 +10,13 @@ export default function Login() {
   const [password, setPassword] = useState("admin123");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loginNotice, setLoginNotice] = useState("");
+
+  // Public, unauthenticated endpoint — editable at Administration > Terms &
+  // Conditions (frontend/src/pages/TermsSettings.jsx) rather than hardcoded here.
+  useEffect(() => {
+    api.get("/terms/login-notice").then((data) => setLoginNotice(data.login_notice)).catch(() => {});
+  }, []);
 
   if (user) return <Navigate to="/" replace />;
 
@@ -44,9 +52,7 @@ export default function Login() {
         <button className="btn" type="submit" disabled={loading} style={{ width: "100%" }}>
           {loading ? "Signing in…" : "Sign in"}
         </button>
-        <div className="login-hint">
-          Use of this application is subject to MARCA Group's Terms and Conditions.
-        </div>
+        {loginNotice && <div className="login-hint">{loginNotice}</div>}
       </form>
     </div>
   );
