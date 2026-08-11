@@ -400,18 +400,19 @@ export default function SalesDashboard() {
                   <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
                     <div>
                       <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>By Expenses Type</h3>
-                      {/* Both expense sections use the identical column sizing below:
-                          the bar chart is pinned to a fixed basis and the pie takes
-                          the rest. Letting both flex instead made the two bar charts
-                          different widths, because this section's pie legend is
-                          narrower than Title/Purpose's longer labels and so left more
-                          room over. `0 1` (not `0 0`) plus wrap keeps them stacking
-                          full-width on narrow screens. */}
+                      {/* Both expense sections use identical column sizing so the two
+                          bar charts match and line up. The pie column is pinned to a
+                          fixed basis rather than allowed to grow — letting it grow
+                          pushed the bar chart to the far right of wide screens with a
+                          large empty gap. The bar then takes the remaining space, up
+                          to a cap so a handful of categories don't end up scattered
+                          across a very wide plot. `0 1`/`minWidth: 0` plus wrap keeps
+                          both stacking full-width on narrow screens. */}
                       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-                        <div style={{ flex: "1 1 300px", minWidth: 0 }}>
+                        <div style={{ flex: "0 1 460px", minWidth: 0 }}>
                           <PieChart data={byTypePieData} />
                         </div>
-                        <div style={{ flex: "0 1 300px", minWidth: 0 }}>
+                        <div style={{ flex: "1 1 300px", minWidth: 0, maxWidth: 560 }}>
                           <BarChart
                             data={expensesReport.byType}
                             currentLabel={currentYearLabel}
@@ -425,10 +426,10 @@ export default function SalesDashboard() {
                     <div>
                       <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>By Title / Purpose</h3>
                       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-                        <div style={{ flex: "1 1 300px", minWidth: 0 }}>
+                        <div style={{ flex: "0 1 460px", minWidth: 0 }}>
                           <PieChart data={byTitlePieData} />
                         </div>
-                        <div style={{ flex: "0 1 300px", minWidth: 0 }}>
+                        <div style={{ flex: "1 1 300px", minWidth: 0, maxWidth: 560 }}>
                           <BarChart
                             data={expensesReport.byTitle}
                             currentLabel={currentYearLabel}
