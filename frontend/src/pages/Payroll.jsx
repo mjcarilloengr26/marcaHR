@@ -68,7 +68,12 @@ export default function Payroll() {
       bonuses: record.bonuses,
       overtime_pay: record.overtime_pay,
       night_differential_pay: record.night_differential_pay || 0,
-      deductions: record.deductions,
+      deduction_sss: record.deduction_sss || 0,
+      deduction_hdmf: record.deduction_hdmf || 0,
+      deduction_philhealth: record.deduction_philhealth || 0,
+      deduction_taxes: record.deduction_taxes || 0,
+      deduction_loans: record.deduction_loans || 0,
+      deduction_cash_advances: record.deduction_cash_advances || 0,
       net_pay_override: "",
     });
   };
@@ -87,7 +92,12 @@ export default function Payroll() {
         bonuses: Number(editForm.bonuses) || 0,
         overtime_pay: Number(editForm.overtime_pay) || 0,
         night_differential_pay: Number(editForm.night_differential_pay) || 0,
-        deductions: Number(editForm.deductions) || 0,
+        deduction_sss: Number(editForm.deduction_sss) || 0,
+        deduction_hdmf: Number(editForm.deduction_hdmf) || 0,
+        deduction_philhealth: Number(editForm.deduction_philhealth) || 0,
+        deduction_taxes: Number(editForm.deduction_taxes) || 0,
+        deduction_loans: Number(editForm.deduction_loans) || 0,
+        deduction_cash_advances: Number(editForm.deduction_cash_advances) || 0,
         net_pay: editForm.net_pay_override !== "" ? Number(editForm.net_pay_override) : undefined,
       });
       setEditingRecord(null);
@@ -282,15 +292,70 @@ export default function Payroll() {
                   onChange={(e) => setEditForm({ ...editForm, night_differential_pay: e.target.value })}
                 />
               </div>
+            </div>
+            <p className="subtitle" style={{ margin: "12px 0 4px" }}>
+              Deductions — carries forward to future cut-offs until changed here
+            </p>
+            <div className="grid grid-2">
               <div className="form-row">
-                <label>Deductions</label>
+                <label>SSS</label>
                 <input
                   type="number"
-                  value={editForm.deductions}
-                  onChange={(e) => setEditForm({ ...editForm, deductions: e.target.value })}
+                  value={editForm.deduction_sss}
+                  onChange={(e) => setEditForm({ ...editForm, deduction_sss: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
+                <label>HDMF (Pag-IBIG)</label>
+                <input
+                  type="number"
+                  value={editForm.deduction_hdmf}
+                  onChange={(e) => setEditForm({ ...editForm, deduction_hdmf: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
+                <label>PhilHealth</label>
+                <input
+                  type="number"
+                  value={editForm.deduction_philhealth}
+                  onChange={(e) => setEditForm({ ...editForm, deduction_philhealth: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
+                <label>Taxes</label>
+                <input
+                  type="number"
+                  value={editForm.deduction_taxes}
+                  onChange={(e) => setEditForm({ ...editForm, deduction_taxes: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
+                <label>Loans</label>
+                <input
+                  type="number"
+                  value={editForm.deduction_loans}
+                  onChange={(e) => setEditForm({ ...editForm, deduction_loans: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
+                <label>Cash advances</label>
+                <input
+                  type="number"
+                  value={editForm.deduction_cash_advances}
+                  onChange={(e) => setEditForm({ ...editForm, deduction_cash_advances: e.target.value })}
                 />
               </div>
             </div>
+            <p className="subtitle" style={{ margin: "0 0 12px" }}>
+              Total deductions: ₱{(
+                (Number(editForm.deduction_sss) || 0) +
+                (Number(editForm.deduction_hdmf) || 0) +
+                (Number(editForm.deduction_philhealth) || 0) +
+                (Number(editForm.deduction_taxes) || 0) +
+                (Number(editForm.deduction_loans) || 0) +
+                (Number(editForm.deduction_cash_advances) || 0)
+              ).toLocaleString()}
+            </p>
             <div className="form-row">
               <label>Final pay override (optional)</label>
               <input
@@ -300,7 +365,12 @@ export default function Payroll() {
                   (Number(editForm.bonuses) || 0) +
                   (Number(editForm.overtime_pay) || 0) +
                   (Number(editForm.night_differential_pay) || 0) -
-                  (Number(editForm.deductions) || 0)
+                  ((Number(editForm.deduction_sss) || 0) +
+                    (Number(editForm.deduction_hdmf) || 0) +
+                    (Number(editForm.deduction_philhealth) || 0) +
+                    (Number(editForm.deduction_taxes) || 0) +
+                    (Number(editForm.deduction_loans) || 0) +
+                    (Number(editForm.deduction_cash_advances) || 0))
                 ).toLocaleString()})`}
                 value={editForm.net_pay_override}
                 onChange={(e) => setEditForm({ ...editForm, net_pay_override: e.target.value })}

@@ -21,6 +21,12 @@ const EMPLOYEE_FIELDS = [
   "base_salary",
   "address",
   "photo",
+  "deduction_sss",
+  "deduction_hdmf",
+  "deduction_philhealth",
+  "deduction_taxes",
+  "deduction_loans",
+  "deduction_cash_advances",
 ];
 
 // If payroll has already been generated for the current half-month period, a
@@ -55,19 +61,42 @@ async function backfillCurrentPayrollIfGenerated(employee) {
     .prepare("SELECT 1 FROM payroll_records WHERE period_month = ? AND period_year = ? AND period_half = ? LIMIT 1")
     .get(period_month, period_year, period_half);
   if (!alreadyGenerated) return;
+  const sss = employee.deduction_sss || 0;
+  const hdmf = employee.deduction_hdmf || 0;
+  const philhealth = employee.deduction_philhealth || 0;
+  const taxes = employee.deduction_taxes || 0;
+  const loans = employee.deduction_loans || 0;
+  const cashAdvances = employee.deduction_cash_advances || 0;
+  const deductions = sss + hdmf + philhealth + taxes + loans + cashAdvances;
   const pay = {
     base_salary: Math.round(((employee.base_salary || 0) / 2) * 100) / 100,
     overtime_pay: 0,
     night_differential_pay: 0,
   };
-  pay.net_pay = pay.base_salary;
+  pay.net_pay = Math.round((pay.base_salary - deductions) * 100) / 100;
   await db
     .prepare(
-      `INSERT INTO payroll_records (employee_id, period_month, period_year, period_half, base_salary, bonuses, overtime_pay, night_differential_pay, deductions, net_pay, status)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0, ?, 'draft')
+      `INSERT INTO payroll_records (employee_id, period_month, period_year, period_half, base_salary, bonuses, overtime_pay, night_differential_pay, deductions, deduction_sss, deduction_hdmf, deduction_philhealth, deduction_taxes, deduction_loans, deduction_cash_advances, net_pay, status)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
        ON CONFLICT(employee_id, period_month, period_year, period_half) DO NOTHING`
     )
-    .run(employee.id, period_month, period_year, period_half, pay.base_salary, pay.overtime_pay, pay.night_differential_pay, pay.net_pay);
+    .run(
+      employee.id,
+      period_month,
+      period_year,
+      period_half,
+      pay.base_salary,
+      pay.overtime_pay,
+      pay.night_differential_pay,
+      deductions,
+      sss,
+      hdmf,
+      philhealth,
+      taxes,
+      loans,
+      cashAdvances,
+      pay.net_pay
+    );
 }
 
 router.get(

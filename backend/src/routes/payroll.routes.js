@@ -135,7 +135,22 @@ router.post(
   requireAuth,
   requireRole("admin", "hr"),
   asyncHandler(async (req, res) => {
-    const { employee_id, period_month, period_year, base_salary, bonuses, overtime_pay, night_differential_pay, deductions, notes } = req.body || {};
+    const {
+      employee_id,
+      period_month,
+      period_year,
+      base_salary,
+      bonuses,
+      overtime_pay,
+      night_differential_pay,
+      deduction_sss,
+      deduction_hdmf,
+      deduction_philhealth,
+      deduction_taxes,
+      deduction_loans,
+      deduction_cash_advances,
+      notes,
+    } = req.body || {};
     if (!employee_id || !period_month || !period_year) {
       return res.status(400).json({ error: "employee_id, period_month and period_year are required" });
     }
@@ -156,23 +171,84 @@ router.post(
     const bonus = bonuses || 0;
     const overtime = overtime_pay || 0;
     const nightDiff = night_differential_pay || 0;
-    const deduction = deductions || 0;
+    // Deductions are entered per-category (SSS, HDMF, PhilHealth, taxes, loans,
+    // cash advances) rather than as one lump sum — `deductions` is derived as
+    // their total, kept as a stored column so existing readers (payroll table,
+    // Excel export) don't need to know about the breakdown.
+    const sss = deduction_sss || 0;
+    const hdmf = deduction_hdmf || 0;
+    const philhealth = deduction_philhealth || 0;
+    const taxes = deduction_taxes || 0;
+    const loans = deduction_loans || 0;
+    const cashAdvances = deduction_cash_advances || 0;
+    const deduction = sss + hdmf + philhealth + taxes + loans + cashAdvances;
     // Manual final-pay override: if net_pay is explicitly sent, trust it as-is
     // (e.g. HR reconciling to an exact bank transfer figure) instead of always
     // recomputing it from the components.
     const netOverride = req.body?.net_pay;
     const net = netOverride !== undefined && netOverride !== null && netOverride !== "" ? Number(netOverride) : base + bonus + overtime + nightDiff - deduction;
 
+    // Persist the edited deduction breakdown onto the employee as their new
+    // standing amounts, so /payroll/generate and the new-employee backfill
+    // carry it into every future cut-off automatically instead of resetting
+    // to 0 — deductions like SSS/HDMF/PhilHealth/loan amortization are
+    // normally unchanged period to period until HR edits them again here.
+    const deductionFieldsTouched = [
+      deduction_sss,
+      deduction_hdmf,
+      deduction_philhealth,
+      deduction_taxes,
+      deduction_loans,
+      deduction_cash_advances,
+    ].some((v) => v !== undefined);
+    if (deductionFieldsTouched) {
+      await db
+        .prepare(
+          `UPDATE employees SET deduction_sss = ?, deduction_hdmf = ?, deduction_philhealth = ?,
+           deduction_taxes = ?, deduction_loans = ?, deduction_cash_advances = ? WHERE id = ?`
+        )
+        .run(
+          deduction_sss !== undefined ? sss : employee.deduction_sss,
+          deduction_hdmf !== undefined ? hdmf : employee.deduction_hdmf,
+          deduction_philhealth !== undefined ? philhealth : employee.deduction_philhealth,
+          deduction_taxes !== undefined ? taxes : employee.deduction_taxes,
+          deduction_loans !== undefined ? loans : employee.deduction_loans,
+          deduction_cash_advances !== undefined ? cashAdvances : employee.deduction_cash_advances,
+          employee_id
+        );
+    }
+
     await db
       .prepare(
-        `INSERT INTO payroll_records (employee_id, period_month, period_year, period_half, base_salary, bonuses, overtime_pay, night_differential_pay, deductions, net_pay, status, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?)
+        `INSERT INTO payroll_records (employee_id, period_month, period_year, period_half, base_salary, bonuses, overtime_pay, night_differential_pay, deductions, deduction_sss, deduction_hdmf, deduction_philhealth, deduction_taxes, deduction_loans, deduction_cash_advances, net_pay, status, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?)
        ON CONFLICT(employee_id, period_month, period_year, period_half)
        DO UPDATE SET base_salary = excluded.base_salary, bonuses = excluded.bonuses,
          overtime_pay = excluded.overtime_pay, night_differential_pay = excluded.night_differential_pay,
-         deductions = excluded.deductions, net_pay = excluded.net_pay, notes = excluded.notes`
+         deductions = excluded.deductions, deduction_sss = excluded.deduction_sss, deduction_hdmf = excluded.deduction_hdmf,
+         deduction_philhealth = excluded.deduction_philhealth, deduction_taxes = excluded.deduction_taxes,
+         deduction_loans = excluded.deduction_loans, deduction_cash_advances = excluded.deduction_cash_advances,
+         net_pay = excluded.net_pay, notes = excluded.notes`
       )
-      .run(employee_id, period_month, period_year, half, base, bonus, overtime, nightDiff, deduction, net, notes || null);
+      .run(
+        employee_id,
+        period_month,
+        period_year,
+        half,
+        base,
+        bonus,
+        overtime,
+        nightDiff,
+        deduction,
+        sss,
+        hdmf,
+        philhealth,
+        taxes,
+        loans,
+        cashAdvances,
+        net,
+        notes || null
+      );
 
     // lastInsertRowid is unreliable on the UPDATE path of an upsert, so look the row up by its natural key.
     const record = await db
@@ -217,15 +293,43 @@ router.post(
 
     const employees = await db.prepare("SELECT * FROM employees WHERE status = 'active'").all();
     const insert = db.prepare(
-      `INSERT INTO payroll_records (employee_id, period_month, period_year, period_half, base_salary, bonuses, overtime_pay, night_differential_pay, deductions, net_pay, status)
-     VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0, ?, 'draft')
+      `INSERT INTO payroll_records (employee_id, period_month, period_year, period_half, base_salary, bonuses, overtime_pay, night_differential_pay, deductions, deduction_sss, deduction_hdmf, deduction_philhealth, deduction_taxes, deduction_loans, deduction_cash_advances, net_pay, status)
+     VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
      ON CONFLICT(employee_id, period_month, period_year, period_half) DO NOTHING`
     );
     const generated = [];
+    // Deductions carry forward from each employee's standing amounts (set the
+    // last time HR edited a payroll record — see POST /) rather than starting
+    // at 0 every cut-off, since SSS/HDMF/PhilHealth/loan amortization etc.
+    // are normally the same period to period until HR changes them.
     const runAll = db.transaction(async (rows) => {
       for (const e of rows) {
         const pay = await computeEmployeePayroll(e, period_month, period_year, half, settings);
-        await insert.run(e.id, period_month, period_year, half, pay.base_salary, pay.overtime_pay, pay.night_differential_pay, pay.net_pay);
+        const sss = e.deduction_sss || 0;
+        const hdmf = e.deduction_hdmf || 0;
+        const philhealth = e.deduction_philhealth || 0;
+        const taxes = e.deduction_taxes || 0;
+        const loans = e.deduction_loans || 0;
+        const cashAdvances = e.deduction_cash_advances || 0;
+        const deductions = sss + hdmf + philhealth + taxes + loans + cashAdvances;
+        const netPay = Math.round((pay.net_pay - deductions) * 100) / 100;
+        await insert.run(
+          e.id,
+          period_month,
+          period_year,
+          half,
+          pay.base_salary,
+          pay.overtime_pay,
+          pay.night_differential_pay,
+          deductions,
+          sss,
+          hdmf,
+          philhealth,
+          taxes,
+          loans,
+          cashAdvances,
+          netPay
+        );
         generated.push(e.id);
       }
     });

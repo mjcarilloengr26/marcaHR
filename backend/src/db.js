@@ -132,6 +132,12 @@ CREATE TABLE IF NOT EXISTS employees (
   base_salary REAL DEFAULT 0,
   address TEXT,
   photo TEXT,
+  deduction_sss REAL NOT NULL DEFAULT 0,
+  deduction_hdmf REAL NOT NULL DEFAULT 0,
+  deduction_philhealth REAL NOT NULL DEFAULT 0,
+  deduction_taxes REAL NOT NULL DEFAULT 0,
+  deduction_loans REAL NOT NULL DEFAULT 0,
+  deduction_cash_advances REAL NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
@@ -208,6 +214,12 @@ CREATE TABLE IF NOT EXISTS payroll_records (
   overtime_pay REAL NOT NULL DEFAULT 0,
   night_differential_pay REAL NOT NULL DEFAULT 0,
   deductions REAL NOT NULL DEFAULT 0,
+  deduction_sss REAL NOT NULL DEFAULT 0,
+  deduction_hdmf REAL NOT NULL DEFAULT 0,
+  deduction_philhealth REAL NOT NULL DEFAULT 0,
+  deduction_taxes REAL NOT NULL DEFAULT 0,
+  deduction_loans REAL NOT NULL DEFAULT 0,
+  deduction_cash_advances REAL NOT NULL DEFAULT 0,
   net_pay REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','finalized','paid')),
   notes TEXT,
@@ -536,6 +548,35 @@ async function ensurePayrollNightDifferential() {
   await pool.query("ALTER TABLE payroll_records ADD COLUMN IF NOT EXISTS night_differential_pay REAL NOT NULL DEFAULT 0");
 }
 
+// Deductions used to be one lump number; HR needs to see and edit it broken
+// down into the actual statutory/voluntary categories below. `deductions`
+// itself is kept as the stored total (sum of these six) rather than derived
+// on every read, so existing reads (payroll table, Excel export) keep working
+// unchanged.
+async function ensurePayrollDeductionBreakdown() {
+  await pool.query("ALTER TABLE payroll_records ADD COLUMN IF NOT EXISTS deduction_sss REAL NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE payroll_records ADD COLUMN IF NOT EXISTS deduction_hdmf REAL NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE payroll_records ADD COLUMN IF NOT EXISTS deduction_philhealth REAL NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE payroll_records ADD COLUMN IF NOT EXISTS deduction_taxes REAL NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE payroll_records ADD COLUMN IF NOT EXISTS deduction_loans REAL NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE payroll_records ADD COLUMN IF NOT EXISTS deduction_cash_advances REAL NOT NULL DEFAULT 0");
+}
+
+// Standing per-employee deduction amounts (SSS, HDMF, PhilHealth, taxes,
+// loans, cash advances). These typically don't change cut-off to cut-off, so
+// each payroll record's deduction breakdown defaults to whatever is here
+// instead of resetting to 0 every period; editing the breakdown on a payroll
+// record (POST /payroll) writes the new amounts back here too, so the change
+// carries forward into future cut-offs until HR/admin edits it again.
+async function ensureEmployeeStandingDeductions() {
+  await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_sss REAL NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_hdmf REAL NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_philhealth REAL NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_taxes REAL NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_loans REAL NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_cash_advances REAL NOT NULL DEFAULT 0");
+}
+
 let migrated = null;
 // Idempotent: safe to call on every boot. Runs the full schema once per
 // process (CREATE TABLE IF NOT EXISTS makes re-running harmless besides).
@@ -563,7 +604,9 @@ db.migrate = function () {
       .then(() => ensureBoardCardAssignees())
       .then(() => ensureExpenseType())
       .then(() => ensurePayrollTimeSettings())
-      .then(() => ensurePayrollNightDifferential());
+      .then(() => ensurePayrollNightDifferential())
+      .then(() => ensurePayrollDeductionBreakdown())
+      .then(() => ensureEmployeeStandingDeductions());
   }
   return migrated;
 };
