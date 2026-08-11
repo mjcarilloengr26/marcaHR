@@ -4,6 +4,7 @@ import Funnel from "../components/Funnel";
 import Meter from "../components/Meter";
 import RevenueTrendChart from "../components/RevenueTrendChart";
 import PieChart from "../components/PieChart";
+import BarChart from "../components/BarChart";
 
 const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 const MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -382,28 +383,50 @@ export default function SalesDashboard() {
                 </div>
               </div>
 
-              <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-                <div style={{ flex: "1 1 280px" }}>
-                  <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>By Expenses Type</h3>
-                  <PieChart
-                    data={expensesReport.byType.map((t) => ({
-                      label: t.type,
-                      value: t.amount,
-                      color: EXPENSE_TYPE_COLORS[t.type] || EXPENSE_TYPE_COLORS.Unspecified,
-                    }))}
-                  />
-                </div>
-                <div style={{ flex: "1 1 280px" }}>
-                  <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>By Title / Purpose</h3>
-                  <PieChart
-                    data={expensesReport.byTitle.map((t, i) => ({
-                      label: t.title,
-                      value: t.amount,
-                      color: titleColor(t.title, i),
-                    }))}
-                  />
-                </div>
-              </div>
+              {(() => {
+                const byTypePieData = expensesReport.byType.map((t) => ({
+                  label: t.label,
+                  value: t.current,
+                  color: EXPENSE_TYPE_COLORS[t.label] || EXPENSE_TYPE_COLORS.Unspecified,
+                }));
+                const byTitlePieData = expensesReport.byTitle.map((t, i) => ({
+                  label: t.label,
+                  value: t.current,
+                  color: titleColor(t.label, i),
+                }));
+                const currentYearLabel = `${expensesReport.period.year}`;
+                const previousYearLabel = `${expensesReport.previousPeriod.year}`;
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                    <div>
+                      <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>By Expenses Type</h3>
+                      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+                        <PieChart data={byTypePieData} />
+                        <BarChart
+                          data={expensesReport.byType}
+                          currentLabel={currentYearLabel}
+                          previousLabel={previousYearLabel}
+                          currentColor="#2f6fed"
+                          previousColor="#a9c6fb"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>By Title / Purpose</h3>
+                      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+                        <PieChart data={byTitlePieData} />
+                        <BarChart
+                          data={expensesReport.byTitle}
+                          currentLabel={currentYearLabel}
+                          previousLabel={previousYearLabel}
+                          currentColor="#7c3aed"
+                          previousColor="#cbb6fa"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </>
           )}
         </div>

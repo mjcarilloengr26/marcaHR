@@ -239,11 +239,47 @@ router.get(
   })
 );
 
+async function fetchExpenseRows(start, end) {
+  return db
+    .prepare(
+      `SELECT er.expense_type, er.title, er.cash_advance_amount,
+              COALESCE((SELECT SUM(amount) FROM expense_items WHERE report_id = er.id), 0) AS total_expenses
+       FROM expense_reports er
+       WHERE er.created_at::date BETWEEN ? AND ?`
+    )
+    .all(start, end);
+}
+
+function groupExpenseRows(rows) {
+  const byType = new Map();
+  const byTitle = new Map();
+  for (const r of rows) {
+    const type = r.expense_type || "Unspecified";
+    byType.set(type, (byType.get(type) || 0) + r.total_expenses);
+    const title = r.title || "Unspecified";
+    byTitle.set(title, (byTitle.get(title) || 0) + r.total_expenses);
+  }
+  return { byType, byTitle };
+}
+
+// Merges this period's and the same period last year's breakdown maps into one
+// array keyed by label, so the dashboard can chart both years' bars side by
+// side per category — including categories that only appear in one of the
+// two years (e.g. a brand-new expense type this year shows a 0 previous bar
+// rather than being silently dropped).
+function mergeByLabel(current, previous) {
+  const labels = new Set([...current.keys(), ...previous.keys()]);
+  return Array.from(labels)
+    .map((label) => ({ label, current: current.get(label) || 0, previous: previous.get(label) || 0 }))
+    .sort((a, b) => b.current + b.previous - (a.current + a.previous));
+}
+
 // Expenses Report for a period: cash advances vs. actual spend drawn from the
 // liquidation/expense reports module, broken down by Expenses Type (Operating
-// vs Project). Filtered on the report's created_at like the Reports page's
-// expenses-export, not on individual item dates, since Expenses Type and Cash
-// Advance are report-level attributes.
+// vs Project) and by Title/Purpose — each paired against the same period one
+// year earlier for a YoY comparison. Filtered on the report's created_at like
+// the Reports page's expenses-export, not on individual item dates, since
+// Expenses Type and Cash Advance are report-level attributes.
 router.get(
   "/expenses-report",
   requireAuth,
@@ -251,39 +287,24 @@ router.get(
   asyncHandler(async (req, res) => {
     const { period_type, period_year, period_index } = parsePeriod(req.query);
     const { start, end } = periodDateRange(period_type, period_year, period_index);
+    const { start: prevStart, end: prevEnd } = periodDateRange(period_type, period_year - 1, period_index);
 
-    const rows = await db
-      .prepare(
-        `SELECT er.expense_type, er.title, er.cash_advance_amount,
-                COALESCE((SELECT SUM(amount) FROM expense_items WHERE report_id = er.id), 0) AS total_expenses
-         FROM expense_reports er
-         WHERE er.created_at::date BETWEEN ? AND ?`
-      )
-      .all(start, end);
+    const [rows, prevRows] = await Promise.all([fetchExpenseRows(start, end), fetchExpenseRows(prevStart, prevEnd)]);
 
     const totalCashAdvance = rows.reduce((sum, r) => sum + r.cash_advance_amount, 0);
     const totalExpenses = rows.reduce((sum, r) => sum + r.total_expenses, 0);
     const balance = totalCashAdvance - totalExpenses;
     const liquidationRatePercent = totalCashAdvance > 0 ? (totalExpenses / totalCashAdvance) * 100 : null;
 
-    const byTypeMap = new Map();
-    const byTitleMap = new Map();
-    for (const r of rows) {
-      const type = r.expense_type || "Unspecified";
-      byTypeMap.set(type, (byTypeMap.get(type) || 0) + r.total_expenses);
-      const title = r.title || "Unspecified";
-      byTitleMap.set(title, (byTitleMap.get(title) || 0) + r.total_expenses);
-    }
-    const byType = Array.from(byTypeMap.entries()).map(([type, amount]) => ({ type, amount }));
-    const byTitle = Array.from(byTitleMap.entries())
-      .map(([title, amount]) => ({ title, amount }))
-      .sort((a, b) => b.amount - a.amount);
+    const grouped = groupExpenseRows(rows);
+    const prevGrouped = groupExpenseRows(prevRows);
 
     res.json({
       period: { type: period_type, year: period_year, index: period_index, label: periodLabel(period_type, period_year, period_index) },
+      previousPeriod: { type: period_type, year: period_year - 1, index: period_index, label: periodLabel(period_type, period_year - 1, period_index) },
       totals: { totalCashAdvance, totalExpenses, balance, liquidationRatePercent },
-      byType,
-      byTitle,
+      byType: mergeByLabel(grouped.byType, prevGrouped.byType),
+      byTitle: mergeByLabel(grouped.byTitle, prevGrouped.byTitle),
     });
   })
 );
