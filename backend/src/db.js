@@ -269,6 +269,7 @@ CREATE TABLE IF NOT EXISTS expense_reports (
   id SERIAL PRIMARY KEY,
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
+  expense_type TEXT,
   cash_advance_amount REAL NOT NULL DEFAULT 0,
   cost_center TEXT,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','rejected','reimbursed')),
@@ -503,6 +504,16 @@ async function ensureBoardCardAssignees() {
   );
 }
 
+// expense_reports predates the expense_type (Operating/Project) classification
+// added alongside the Title/Purpose dropdown — existing deployed tables need
+// this column added explicitly since CREATE TABLE IF NOT EXISTS is a no-op on
+// a table that already exists. Existing rows are left with a NULL expense_type
+// rather than backfilled, since there's no reliable way to infer which type an
+// old free-text title belonged to.
+async function ensureExpenseType() {
+  await pool.query("ALTER TABLE expense_reports ADD COLUMN IF NOT EXISTS expense_type TEXT");
+}
+
 let migrated = null;
 // Idempotent: safe to call on every boot. Runs the full schema once per
 // process (CREATE TABLE IF NOT EXISTS makes re-running harmless besides).
@@ -527,7 +538,8 @@ db.migrate = function () {
       )
       .then(() => ensureLeaveTypeTaxonomy())
       .then(() => ensurePayrollPeriodHalf())
-      .then(() => ensureBoardCardAssignees());
+      .then(() => ensureBoardCardAssignees())
+      .then(() => ensureExpenseType());
   }
   return migrated;
 };

@@ -6,6 +6,8 @@ const asyncHandler = require("../middleware/asyncHandler");
 
 const router = express.Router();
 
+const EXPENSE_TYPES = ["Operating Expenses", "Project Expenses"];
+
 // Accepts a base64 data URL (image, PDF, etc.) or null. Caps the stored size
 // defensively even though express.json()'s limit already bounds the whole
 // request — a single field shouldn't be allowed to approach that cap.
@@ -92,14 +94,17 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = req.body || {};
     const employee_id = req.user.role === "employee" ? req.user.employee_id : body.employee_id || req.user.employee_id;
-    const { title, cash_advance_amount, cost_center, notes } = body;
+    const { title, expense_type, cash_advance_amount, cost_center, notes } = body;
     if (!employee_id || !title) return res.status(400).json({ error: "title is required" });
+    if (expense_type && !EXPENSE_TYPES.includes(expense_type)) {
+      return res.status(400).json({ error: `expense_type must be one of: ${EXPENSE_TYPES.join(", ")}` });
+    }
     const info = await db
       .prepare(
-        `INSERT INTO expense_reports (employee_id, title, cash_advance_amount, cost_center, notes, status)
-       VALUES (?, ?, ?, ?, ?, 'draft')`
+        `INSERT INTO expense_reports (employee_id, title, expense_type, cash_advance_amount, cost_center, notes, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'draft')`
       )
-      .run(employee_id, title, cash_advance_amount || 0, cost_center || null, notes || null);
+      .run(employee_id, title, expense_type || null, cash_advance_amount || 0, cost_center || null, notes || null);
     res
       .status(201)
       .json(await withTotals(await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(info.lastInsertRowid)));
@@ -124,12 +129,16 @@ router.put(
   requireAuth,
   asyncHandler(loadEditableReport),
   asyncHandler(async (req, res) => {
-    const { title, cash_advance_amount, cost_center, notes } = req.body || {};
+    const { title, expense_type, cash_advance_amount, cost_center, notes } = req.body || {};
+    if (expense_type && !EXPENSE_TYPES.includes(expense_type)) {
+      return res.status(400).json({ error: `expense_type must be one of: ${EXPENSE_TYPES.join(", ")}` });
+    }
     const report = req.expenseReport;
     await db
-      .prepare("UPDATE expense_reports SET title = ?, cash_advance_amount = ?, cost_center = ?, notes = ? WHERE id = ?")
+      .prepare("UPDATE expense_reports SET title = ?, expense_type = ?, cash_advance_amount = ?, cost_center = ?, notes = ? WHERE id = ?")
       .run(
         title ?? report.title,
+        expense_type !== undefined ? expense_type || null : report.expense_type,
         cash_advance_amount ?? report.cash_advance_amount,
         cost_center !== undefined ? cost_center : report.cost_center,
         notes !== undefined ? notes : report.notes,

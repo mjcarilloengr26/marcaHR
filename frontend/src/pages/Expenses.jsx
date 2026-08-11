@@ -7,13 +7,20 @@ import SortTh from "../components/SortTh";
 
 const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+const EXPENSE_TYPE_OPTIONS = ["Operating Expenses", "Project Expenses"];
+const EXPENSE_TITLE_OPTIONS = [
+  "Fuel", "Parking", "Toll Fees", "Meals", "Maintenance", "Allowance",
+  "Supplies", "Materials", "Labor", "Airfare", "Hotel", "Foods", "Others",
+];
+const EMPTY_FORM = { title: "", title_other: "", expense_type: "", cash_advance_amount: "", cost_center: "", notes: "" };
+
 export default function Expenses() {
   const { user } = useAuth();
   const isHr = user.role === "admin" || user.role === "hr";
   const [reports, setReports] = useState([]);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ title: "", cash_advance_amount: "", cost_center: "", notes: "" });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [openId, setOpenId] = useState(null);
   const [search, setSearch] = useState("");
@@ -27,21 +34,29 @@ export default function Expenses() {
   const filteredReports = reports.filter((r) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
-    return [r.employee_name, r.title, r.cost_center, r.status].some((v) => (v || "").toLowerCase().includes(q));
+    return [r.employee_name, r.title, r.expense_type, r.cost_center, r.status].some((v) => (v || "").toLowerCase().includes(q));
   });
   const { sorted, toggleSort, arrow } = useSort(filteredReports, "created_at", "desc");
 
   const handleCreate = async (e) => {
     e.preventDefault();
+    const resolvedTitle = form.title === "Others" ? form.title_other.trim() : form.title;
+    if (!resolvedTitle) {
+      setError("Please specify a title / purpose");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
       const report = await api.post("/expenses", {
-        ...form,
+        title: resolvedTitle,
+        expense_type: form.expense_type,
         cash_advance_amount: form.cash_advance_amount ? Number(form.cash_advance_amount) : 0,
+        cost_center: form.cost_center,
+        notes: form.notes,
       });
       setShowForm(false);
-      setForm({ title: "", cash_advance_amount: "", cost_center: "", notes: "" });
+      setForm(EMPTY_FORM);
       await load();
       setOpenId(report.id);
     } catch (err) {
@@ -80,6 +95,7 @@ export default function Expenses() {
             <tr>
               {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
               <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Type" sortKey="expense_type" toggleSort={toggleSort} arrow={arrow} />
               <th>Cost center</th>
               <SortTh label="Cash advance" sortKey="cash_advance_amount" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Expenses" sortKey="total_expenses" toggleSort={toggleSort} arrow={arrow} />
@@ -93,6 +109,7 @@ export default function Expenses() {
               <tr key={r.id}>
                 {isHr && <td>{r.employee_name}</td>}
                 <td>{r.title}</td>
+                <td>{r.expense_type || "—"}</td>
                 <td>{r.cost_center || "—"}</td>
                 <td>{money(r.cash_advance_amount)}</td>
                 <td>{money(r.total_expenses)}</td>
@@ -118,9 +135,43 @@ export default function Expenses() {
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleCreate}>
             <h2>New liquidation / expense report</h2>
             <div className="form-row">
-              <label>Title / purpose</label>
-              <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required autoFocus />
+              <label>Expenses type</label>
+              <select
+                value={form.expense_type}
+                onChange={(e) => setForm({ ...form, expense_type: e.target.value })}
+                required
+                autoFocus
+              >
+                <option value="" disabled>Select type</option>
+                {EXPENSE_TYPE_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
             </div>
+            <div className="form-row">
+              <label>Title / purpose</label>
+              <select
+                value={form.title}
+                onChange={(e) => setForm({ ...form, title: e.target.value, title_other: e.target.value === "Others" ? form.title_other : "" })}
+                required
+              >
+                <option value="" disabled>Select purpose</option>
+                {EXPENSE_TITLE_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>{opt}</option>
+                ))}
+              </select>
+            </div>
+            {form.title === "Others" && (
+              <div className="form-row">
+                <label>Please specify</label>
+                <input
+                  value={form.title_other}
+                  onChange={(e) => setForm({ ...form, title_other: e.target.value })}
+                  placeholder="Describe the purpose"
+                  required
+                />
+              </div>
+            )}
             <div className="form-row">
               <label>Cash advance amount</label>
               <input
@@ -292,6 +343,7 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
             <div className="grid grid-2" style={{ marginBottom: 16 }}>
               <div><strong>Cash advance</strong><div>{money(report.cash_advance_amount)}</div></div>
               <div><strong>Total expenses</strong><div>{money(report.total_expenses)}</div></div>
+              <div><strong>Expenses type</strong><div>{report.expense_type || "—"}</div></div>
               <div><strong>Cost center</strong><div>{report.cost_center || "—"}</div></div>
               <div>
                 <strong>Balance</strong>

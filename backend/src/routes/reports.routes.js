@@ -287,4 +287,109 @@ router.get(
   })
 );
 
+// Expense reports are HR/day-to-day territory (employees submit them, HR
+// approves them) rather than pure finance data, so this uses the broader
+// isAdminHrOrFinance gate like the payroll export, not the finance-only one
+// purchase orders/sales-finance use.
+router.get(
+  "/expenses-export",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!(await isAdminHrOrFinance(req))) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
+    const { period_type, period_year, period_index } = parsePeriod(req.query);
+    const { start, end } = periodDateRange(period_type, period_year, period_index);
+
+    const rows = await db
+      .prepare(
+        `SELECT er.title, er.expense_type, er.cost_center, er.cash_advance_amount, er.status,
+                er.created_at, er.submitted_at,
+                (e.first_name || ' ' || e.last_name) AS employee_name,
+                COALESCE((SELECT SUM(ei.amount) FROM expense_items ei WHERE ei.report_id = er.id), 0) AS total_expenses
+         FROM expense_reports er
+         JOIN employees e ON e.id = er.employee_id
+         WHERE er.created_at::date BETWEEN ? AND ?
+         ORDER BY er.created_at DESC`
+      )
+      .all(start, end);
+
+    const withBalance = rows.map((r) => ({
+      ...r,
+      expense_type: r.expense_type || "Unspecified",
+      balance: Number((r.cash_advance_amount - r.total_expenses).toFixed(2)),
+    }));
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "MARCA GROUP";
+    workbook.created = new Date();
+
+    const addSheet = (name, columns, sheetRows) => {
+      const sheet = workbook.addWorksheet(name);
+      sheet.columns = columns;
+      sheet.addRows(sheetRows);
+      sheet.getRow(1).font = { bold: true };
+      return sheet;
+    };
+
+    addSheet(
+      "Detail",
+      [
+        { header: "Employee", key: "employee_name", width: 24 },
+        { header: "Title / Purpose", key: "title", width: 20 },
+        { header: "Expenses Type", key: "expense_type", width: 18 },
+        { header: "Cost Center", key: "cost_center", width: 18 },
+        { header: "Cash Advance", key: "cash_advance_amount", width: 14 },
+        { header: "Total Expenses", key: "total_expenses", width: 15 },
+        { header: "Balance", key: "balance", width: 14 },
+        { header: "Status", key: "status", width: 12 },
+        { header: "Created", key: "created_at", width: 18 },
+      ],
+      withBalance.map((r) => ({ ...r, cost_center: r.cost_center || "—" }))
+    );
+
+    // Two independent breakdowns of the same rows, one per "type" grouping the
+    // Reports page dropdowns support: the broad Operating/Project classification,
+    // and the specific per-title purpose (Fuel, Parking, Meals, ...).
+    const sumBy = (keyFn) => {
+      const totals = new Map();
+      for (const r of withBalance) {
+        const key = keyFn(r);
+        totals.set(key, (totals.get(key) || 0) + r.total_expenses);
+      }
+      return Array.from(totals.entries()).map(([label, total]) => ({ label, total }));
+    };
+
+    addSheet(
+      "By Expenses Type",
+      [
+        { header: "Expenses Type", key: "label", width: 20 },
+        { header: "Total Expenses", key: "total", width: 16 },
+      ],
+      sumBy((r) => r.expense_type)
+    );
+
+    addSheet(
+      "By Title-Purpose",
+      [
+        { header: "Title / Purpose", key: "label", width: 20 },
+        { header: "Total Expenses", key: "total", width: 16 },
+      ],
+      sumBy((r) => r.title)
+    );
+
+    await logRequestEvent(req, "export_excel", {
+      entityType: "report",
+      details: { report: "expenses", period_type, period_year, period_index },
+    });
+
+    const filename = `marca-group-expense-report-${period_year}-${period_type}-${period_index}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  })
+);
+
 module.exports = router;

@@ -23,6 +23,11 @@ export default function Reports() {
   const [payrollHalf, setPayrollHalf] = useState(""); // "" = both halves
   const [exportingPayroll, setExportingPayroll] = useState(false);
 
+  const [expPeriodType, setExpPeriodType] = useState("monthly");
+  const [expPeriodIndex, setExpPeriodIndex] = useState(now.getMonth() + 1);
+  const [expYear, setExpYear] = useState(now.getFullYear());
+  const [exportingExpenses, setExportingExpenses] = useState(false);
+
   const [error, setError] = useState("");
 
   // Client-side checks just control what's shown here — the backend enforces
@@ -32,7 +37,8 @@ export default function Reports() {
   const canExportSalesFinance = user?.role === "admin" || isFinance;
   const canExportPurchaseOrders = user?.role === "admin" || isFinance;
   const canExportPayroll = ["admin", "hr"].includes(user?.role) || isFinance;
-  const canSeePage = canExportSalesFinance || canExportPurchaseOrders || canExportPayroll;
+  const canExportExpenses = ["admin", "hr"].includes(user?.role) || isFinance;
+  const canSeePage = canExportSalesFinance || canExportPurchaseOrders || canExportPayroll || canExportExpenses;
 
   const changePeriodType = (type) => {
     setPeriodType(type);
@@ -46,6 +52,13 @@ export default function Reports() {
     if (type === "monthly") setPoPeriodIndex(now.getMonth() + 1);
     else if (type === "quarterly") setPoPeriodIndex(Math.floor(now.getMonth() / 3) + 1);
     else setPoPeriodIndex(0);
+  };
+
+  const changeExpPeriodType = (type) => {
+    setExpPeriodType(type);
+    if (type === "monthly") setExpPeriodIndex(now.getMonth() + 1);
+    else if (type === "quarterly") setExpPeriodIndex(Math.floor(now.getMonth() / 3) + 1);
+    else setExpPeriodIndex(0);
   };
 
   const exportSalesFinance = async () => {
@@ -94,13 +107,28 @@ export default function Reports() {
     }
   };
 
+  const exportExpenses = async () => {
+    setExportingExpenses(true);
+    setError("");
+    try {
+      await downloadFile(
+        `/reports/expenses-export?period_type=${expPeriodType}&year=${expYear}&index=${expPeriodIndex}`,
+        "marca-group-expense-report.xlsx"
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setExportingExpenses(false);
+    }
+  };
+
   if (!canSeePage) {
     return (
       <div>
         <div className="page-header">
           <div>
             <h1>Reports</h1>
-            <p className="subtitle">Export sales, finance, purchase orders, and payroll data to Excel</p>
+            <p className="subtitle">Export sales, finance, purchase orders, payroll, and expense data to Excel</p>
           </div>
         </div>
         <div className="empty-state">This page is available to Admin, HR, and Finance only.</div>
@@ -113,7 +141,7 @@ export default function Reports() {
       <div className="page-header">
         <div>
           <h1>Reports</h1>
-          <p className="subtitle">Export sales, finance, purchase orders, and payroll data to Excel</p>
+          <p className="subtitle">Export sales, finance, purchase orders, payroll, and expense data to Excel</p>
         </div>
       </div>
 
@@ -214,10 +242,10 @@ export default function Reports() {
       )}
 
       {canExportPayroll && (
-        <div className="card">
+        <div className="card" style={{ marginBottom: 16 }}>
           <h2>Payroll Report</h2>
           <p className="subtitle" style={{ margin: "0 0 12px" }}>
-            Downloads an Excel workbook of payroll records for the selected period, separate from the reports above.
+            Downloads an Excel workbook of payroll records for the selected period, separate from the reports above and below.
           </p>
           <div className="form-inline" style={{ marginBottom: 16 }}>
             <div className="form-row">
@@ -243,6 +271,53 @@ export default function Reports() {
           </div>
           <button type="button" className="btn" onClick={exportPayroll} disabled={exportingPayroll}>
             {exportingPayroll ? "Exporting…" : "Export to Excel"}
+          </button>
+        </div>
+      )}
+
+      {canExportExpenses && (
+        <div className="card">
+          <h2>Expense Report</h2>
+          <p className="subtitle" style={{ margin: "0 0 12px" }}>
+            Downloads an Excel workbook of liquidation/expense reports for the selected period, broken down by Expenses Type and by Title/Purpose, separate from the reports above.
+          </p>
+          <div className="form-inline" style={{ marginBottom: 16 }}>
+            <div className="form-row">
+              <label>Period</label>
+              <select value={expPeriodType} onChange={(e) => changeExpPeriodType(e.target.value)}>
+                <option value="monthly">Monthly</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+            {expPeriodType === "monthly" && (
+              <div className="form-row">
+                <label>Month</label>
+                <select value={expPeriodIndex} onChange={(e) => setExpPeriodIndex(Number(e.target.value))}>
+                  {MONTH_NAMES.slice(1).map((name, i) => (
+                    <option key={name} value={i + 1}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {expPeriodType === "quarterly" && (
+              <div className="form-row">
+                <label>Quarter</label>
+                <select value={expPeriodIndex} onChange={(e) => setExpPeriodIndex(Number(e.target.value))}>
+                  <option value={1}>Q1</option>
+                  <option value={2}>Q2</option>
+                  <option value={3}>Q3</option>
+                  <option value={4}>Q4</option>
+                </select>
+              </div>
+            )}
+            <div className="form-row">
+              <label>Year</label>
+              <input type="number" value={expYear} onChange={(e) => setExpYear(Number(e.target.value))} />
+            </div>
+          </div>
+          <button type="button" className="btn" onClick={exportExpenses} disabled={exportingExpenses}>
+            {exportingExpenses ? "Exporting…" : "Export to Excel"}
           </button>
         </div>
       )}
