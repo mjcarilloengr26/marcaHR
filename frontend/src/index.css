@@ -595,6 +595,17 @@ input[type="date"]::-webkit-datetime-edit-year-field {
   background: var(--input-bg);
   color: var(--text);
 }
+/* A plain "dd/mm/yyyy" placeholder inside the narrow card-form date field gets
+   clipped on mobile before it's even legible, so the field carries its own
+   visible text label instead of relying on that placeholder to explain itself. */
+.board-card-form-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
 
 .multi-select {
   border: 1px solid var(--border);

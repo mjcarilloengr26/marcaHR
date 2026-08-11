@@ -264,11 +264,14 @@ export default function Board() {
                     onChange={(ids) => setCardForm({ ...cardForm, employee_ids: ids })}
                   />
                 )}
-                <input
-                  type="date"
-                  value={cardForm.due_date}
-                  onChange={(e) => setCardForm({ ...cardForm, due_date: e.target.value })}
-                />
+                <label className="board-card-form-label">
+                  Due date
+                  <input
+                    type="date"
+                    value={cardForm.due_date}
+                    onChange={(e) => setCardForm({ ...cardForm, due_date: e.target.value })}
+                  />
+                </label>
                 <div className="board-card-form-actions">
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowCardForm(null)}>
                     Cancel
