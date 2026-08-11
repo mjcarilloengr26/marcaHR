@@ -67,6 +67,9 @@ export default function SalesDashboard() {
   const [periodType, setPeriodType] = useState("monthly");
   const [periodIndex, setPeriodIndex] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
+  const [expPeriodType, setExpPeriodType] = useState("monthly");
+  const [expPeriodIndex, setExpPeriodIndex] = useState(now.getMonth() + 1);
+  const [expYear, setExpYear] = useState(now.getFullYear());
   const [editingTarget, setEditingTarget] = useState(null);
   const [targetAmount, setTargetAmount] = useState("");
   const [saving, setSaving] = useState(false);
@@ -85,7 +88,7 @@ export default function SalesDashboard() {
 
   const loadExpensesReport = () =>
     api
-      .get(`/sales/expenses-report?period_type=${periodType}&year=${year}&index=${periodIndex}`)
+      .get(`/sales/expenses-report?period_type=${expPeriodType}&year=${expYear}&index=${expPeriodIndex}`)
       .then(setExpensesReport)
       .catch((err) => setError(err.message));
 
@@ -97,15 +100,26 @@ export default function SalesDashboard() {
   useEffect(() => {
     loadTargets();
     loadPnl();
-    loadExpensesReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodType, periodIndex, year]);
+
+  useEffect(() => {
+    loadExpensesReport();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expPeriodType, expPeriodIndex, expYear]);
 
   const changePeriodType = (type) => {
     setPeriodType(type);
     if (type === "monthly") setPeriodIndex(now.getMonth() + 1);
     else if (type === "quarterly") setPeriodIndex(Math.floor(now.getMonth() / 3) + 1);
     else setPeriodIndex(0);
+  };
+
+  const changeExpPeriodType = (type) => {
+    setExpPeriodType(type);
+    if (type === "monthly") setExpPeriodIndex(now.getMonth() + 1);
+    else if (type === "quarterly") setExpPeriodIndex(Math.floor(now.getMonth() / 3) + 1);
+    else setExpPeriodIndex(0);
   };
 
   const openEdit = (row) => {
@@ -287,32 +301,32 @@ export default function SalesDashboard() {
             <div>
               <h2>Expenses Report</h2>
               <p className="subtitle" style={{ margin: 0 }}>
-                Liquidation &amp; expense report cash advances vs. actual spend for {periodLabel(periodType, year, periodIndex)}
+                Liquidation &amp; expense report cash advances vs. actual spend for {periodLabel(expPeriodType, expYear, expPeriodIndex)}
               </p>
             </div>
             <div className="form-inline">
               <div className="form-row">
                 <label>Period</label>
-                <select value={periodType} onChange={(e) => changePeriodType(e.target.value)}>
+                <select value={expPeriodType} onChange={(e) => changeExpPeriodType(e.target.value)}>
                   <option value="monthly">Monthly</option>
                   <option value="quarterly">Quarterly</option>
                   <option value="yearly">Yearly</option>
                 </select>
               </div>
-              {periodType === "monthly" && (
+              {expPeriodType === "monthly" && (
                 <div className="form-row">
                   <label>Month</label>
-                  <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
+                  <select value={expPeriodIndex} onChange={(e) => setExpPeriodIndex(Number(e.target.value))}>
                     {MONTH_NAMES.slice(1).map((name, i) => (
                       <option key={name} value={i + 1}>{name}</option>
                     ))}
                   </select>
                 </div>
               )}
-              {periodType === "quarterly" && (
+              {expPeriodType === "quarterly" && (
                 <div className="form-row">
                   <label>Quarter</label>
-                  <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
+                  <select value={expPeriodIndex} onChange={(e) => setExpPeriodIndex(Number(e.target.value))}>
                     <option value={1}>Q1</option>
                     <option value={2}>Q2</option>
                     <option value={3}>Q3</option>
@@ -322,7 +336,7 @@ export default function SalesDashboard() {
               )}
               <div className="form-row">
                 <label>Year</label>
-                <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} />
+                <input type="number" value={expYear} onChange={(e) => setExpYear(Number(e.target.value))} />
               </div>
             </div>
           </div>
