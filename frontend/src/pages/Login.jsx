@@ -6,8 +6,8 @@ import { api } from "../api/client";
 export default function Login() {
   const { user, login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("admin@example.com");
-  const [password, setPassword] = useState("admin123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [loginNotice, setLoginNotice] = useState("");
@@ -43,11 +43,23 @@ export default function Login() {
         {error && <div className="error-banner">{error}</div>}
         <div className="form-row">
           <label>Email</label>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input
+            type="email"
+            placeholder="admin@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
         </div>
         <div className="form-row">
           <label>Password</label>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <input
+            type="password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
         </div>
         <button className="btn" type="submit" disabled={loading} style={{ width: "100%" }}>
           {loading ? "Signing in…" : "Sign in"}
