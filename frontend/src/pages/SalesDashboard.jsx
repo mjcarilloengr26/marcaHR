@@ -400,13 +400,18 @@ export default function SalesDashboard() {
                   <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
                     <div>
                       <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>By Expenses Type</h3>
-                      {/* Only 3 categories here, so the bar chart doesn't need much of
-                          its own width — let it fill whatever space the pie leaves
-                          instead of wrapping below it, unlike Title/Purpose's longer
-                          list. Still wraps to stacked on genuinely narrow screens. */}
+                      {/* Both expense sections use the identical column sizing below:
+                          the bar chart is pinned to a fixed basis and the pie takes
+                          the rest. Letting both flex instead made the two bar charts
+                          different widths, because this section's pie legend is
+                          narrower than Title/Purpose's longer labels and so left more
+                          room over. `0 1` (not `0 0`) plus wrap keeps them stacking
+                          full-width on narrow screens. */}
                       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-                        <PieChart data={byTypePieData} />
-                        <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+                        <div style={{ flex: "1 1 300px", minWidth: 0 }}>
+                          <PieChart data={byTypePieData} />
+                        </div>
+                        <div style={{ flex: "0 1 300px", minWidth: 0 }}>
                           <BarChart
                             data={expensesReport.byType}
                             currentLabel={currentYearLabel}
@@ -420,14 +425,18 @@ export default function SalesDashboard() {
                     <div>
                       <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>By Title / Purpose</h3>
                       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-                        <PieChart data={byTitlePieData} />
-                        <BarChart
-                          data={expensesReport.byTitle}
-                          currentLabel={currentYearLabel}
-                          previousLabel={previousYearLabel}
-                          currentColor="#7c3aed"
-                          previousColor="#cbb6fa"
-                        />
+                        <div style={{ flex: "1 1 300px", minWidth: 0 }}>
+                          <PieChart data={byTitlePieData} />
+                        </div>
+                        <div style={{ flex: "0 1 300px", minWidth: 0 }}>
+                          <BarChart
+                            data={expensesReport.byTitle}
+                            currentLabel={currentYearLabel}
+                            previousLabel={previousYearLabel}
+                            currentColor="#7c3aed"
+                            previousColor="#cbb6fa"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>

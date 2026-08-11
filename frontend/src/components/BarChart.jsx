@@ -17,6 +17,11 @@ const PAD_RIGHT = 12;
 const PAD_TOP = 20;
 const PAD_BOTTOM = 68;
 const MOBILE_BREAKPOINT = 480;
+// Floor on the horizontal space each category gets. Below roughly this, the
+// paired bars and their rotated label stop being readable — so instead of
+// letting more categories squeeze everything thinner, the chart grows past
+// its container and scrolls sideways.
+const MIN_SLOT_WIDTH = 64;
 
 function truncateLabel(label, maxChars) {
   return label.length > maxChars ? `${label.slice(0, maxChars - 1)}…` : label;
@@ -45,8 +50,13 @@ export default function BarChart({
     return <div className="empty-state" style={{ padding: 16 }}>No amounts to chart for this period.</div>;
   }
 
-  const width = measuredWidth || 480;
-  const isMobile = width < MOBILE_BREAKPOINT;
+  const availableWidth = measuredWidth || 480;
+  const isMobile = availableWidth < MOBILE_BREAKPOINT;
+  // Render at whichever is larger: the space we've got, or the space the
+  // categories actually need. When it's the latter the chart overflows its
+  // container and the wrapper below scrolls.
+  const width = Math.max(availableWidth, PAD_LEFT + PAD_RIGHT + rows.length * MIN_SLOT_WIDTH);
+  const isScrollable = width > availableWidth;
   const innerWidth = width - PAD_LEFT - PAD_RIGHT;
   const innerHeight = HEIGHT - PAD_TOP - PAD_BOTTOM;
 
@@ -77,13 +87,41 @@ export default function BarChart({
         </span>
       </div>
 
-      <div ref={containerRef} style={{ position: "relative", minWidth: 220 }}>
+      {/* containerRef measures the space available; the inner div is sized to
+          what the chart actually needs, so the scroller only engages once the
+          categories outgrow the container. The tooltip lives inside that inner
+          div so it stays pinned to its bar while scrolling. */}
+      <div ref={containerRef} style={{ minWidth: 220, position: "relative" }}>
+        {/* When the plot scrolls, the y-axis scale would slide out of view with
+            it and you'd be left reading bars with no reference. This overlay
+            repaints just the axis labels, pinned outside the scroller, so the
+            scale stays put while the bars move underneath it. */}
+        {isScrollable && (
+          <svg
+            width={PAD_LEFT}
+            height={HEIGHT}
+            style={{ position: "absolute", left: 0, top: 0, background: "var(--surface)", zIndex: 2, pointerEvents: "none" }}
+            aria-hidden="true"
+          >
+            {gridLines.map((g) => {
+              const y = PAD_TOP + innerHeight * (1 - g);
+              return (
+                <text key={g} x={PAD_LEFT - 8} y={y + 4} textAnchor="end" fontSize={fontSize} fill="var(--text-muted)">
+                  {moneyCompact(niceMax * g)}
+                </text>
+              );
+            })}
+            <line x1={PAD_LEFT} x2={PAD_LEFT} y1={PAD_TOP} y2={yBase} stroke="var(--text-muted)" strokeWidth="1" opacity="0.5" />
+          </svg>
+        )}
+        <div className="chart-scroll" style={{ overflowX: "auto", overflowY: "hidden" }}>
+          <div style={{ position: "relative", width }}>
         {width > 0 && (
           <svg
             width={width}
             height={HEIGHT}
             viewBox={`0 0 ${width} ${HEIGHT}`}
-            style={{ display: "block", overflow: "visible" }}
+            style={{ display: "block" }}
             role="img"
             aria-label="Year-over-year breakdown bar chart"
           >
@@ -186,6 +224,13 @@ export default function BarChart({
               <span style={{ width: 8, height: 8, borderRadius: 2, background: hover.color, display: "inline-block" }} />
               {hover.year}: <strong style={{ color: "var(--text)" }}>{money(hover.value)}</strong>
             </div>
+          </div>
+        )}
+          </div>
+        </div>
+        {isScrollable && (
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 2 }}>
+            Scroll sideways to see all {rows.length} entries
           </div>
         )}
       </div>

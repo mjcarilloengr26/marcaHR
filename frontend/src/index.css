@@ -494,6 +494,22 @@ input[type="date"]::-webkit-datetime-edit-year-field {
   font-size: 14px;
 }
 
+/* Horizontal scroller for charts whose categories outgrow their container.
+   The scrollbar is styled to always show rather than auto-hide, since an
+   invisible one gives no hint that there's more chart off to the right. */
+.chart-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+  padding-bottom: 2px;
+}
+.chart-scroll::-webkit-scrollbar { height: 8px; }
+.chart-scroll::-webkit-scrollbar-track { background: transparent; }
+.chart-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.chart-scroll::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
 .success-banner {
   background: var(--badge-success-bg);
   color: var(--success);
