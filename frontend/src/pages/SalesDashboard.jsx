@@ -20,6 +20,16 @@ const PNL_COLORS = {
   operatingExpenses: "#8b5cf6",
 };
 
+// Fixed categorical hues for expense types — Unspecified (reports created
+// before the Expenses Type dropdown existed, or left blank) gets a neutral
+// gray rather than a "real" category color, since it isn't an identity so
+// much as an absence of one.
+const EXPENSE_TYPE_COLORS = {
+  "Operating Expenses": "#2f6fed",
+  "Project Expenses": "#e0930b",
+  Unspecified: "#6b7280",
+};
+
 function periodLabel(periodType, year, index) {
   if (periodType === "yearly") return `${year}`;
   if (periodType === "quarterly") return `Q${index} ${year}`;
@@ -51,6 +61,7 @@ export default function SalesDashboard() {
   const [revenueTrend, setRevenueTrend] = useState(null);
   const [targets, setTargets] = useState([]);
   const [pnl, setPnl] = useState(null);
+  const [expensesReport, setExpensesReport] = useState(null);
   const [error, setError] = useState("");
   const now = new Date();
   const [periodType, setPeriodType] = useState("monthly");
@@ -72,6 +83,12 @@ export default function SalesDashboard() {
       .then(setPnl)
       .catch((err) => setError(err.message));
 
+  const loadExpensesReport = () =>
+    api
+      .get(`/sales/expenses-report?period_type=${periodType}&year=${year}&index=${periodIndex}`)
+      .then(setExpensesReport)
+      .catch((err) => setError(err.message));
+
   useEffect(() => {
     api.get("/sales/stats").then(setStats).catch((err) => setError(err.message));
     api.get("/sales/revenue-trend").then(setRevenueTrend).catch((err) => setError(err.message));
@@ -80,6 +97,7 @@ export default function SalesDashboard() {
   useEffect(() => {
     loadTargets();
     loadPnl();
+    loadExpensesReport();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodType, periodIndex, year]);
 
@@ -170,99 +188,181 @@ export default function SalesDashboard() {
 
       {revenueTrend && <RevenueTrendChart thisYear={revenueTrend.thisYear} lastYear={revenueTrend.lastYear} months={revenueTrend.months} />}
 
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div className="page-header" style={{ marginBottom: 4 }}>
-          <div>
-            <h2>Profit &amp; Loss</h2>
-            <p className="subtitle" style={{ margin: 0 }}>
-              Order revenue minus procurement, payroll, and operating expenses for {periodLabel(periodType, year, periodIndex)}
-            </p>
-          </div>
-          <div className="form-inline">
-            <div className="form-row">
-              <label>Period</label>
-              <select value={periodType} onChange={(e) => changePeriodType(e.target.value)}>
-                <option value="monthly">Monthly</option>
-                <option value="quarterly">Quarterly</option>
-                <option value="yearly">Yearly</option>
-              </select>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="page-header" style={{ marginBottom: 4 }}>
+            <div>
+              <h2>Profit &amp; Loss</h2>
+              <p className="subtitle" style={{ margin: 0 }}>
+                Order revenue minus procurement, payroll, and operating expenses for {periodLabel(periodType, year, periodIndex)}
+              </p>
             </div>
-            {periodType === "monthly" && (
+            <div className="form-inline">
               <div className="form-row">
-                <label>Month</label>
-                <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
-                  {MONTH_NAMES.slice(1).map((name, i) => (
-                    <option key={name} value={i + 1}>{name}</option>
-                  ))}
+                <label>Period</label>
+                <select value={periodType} onChange={(e) => changePeriodType(e.target.value)}>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="yearly">Yearly</option>
                 </select>
               </div>
-            )}
-            {periodType === "quarterly" && (
+              {periodType === "monthly" && (
+                <div className="form-row">
+                  <label>Month</label>
+                  <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
+                    {MONTH_NAMES.slice(1).map((name, i) => (
+                      <option key={name} value={i + 1}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {periodType === "quarterly" && (
+                <div className="form-row">
+                  <label>Quarter</label>
+                  <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
+                    <option value={1}>Q1</option>
+                    <option value={2}>Q2</option>
+                    <option value={3}>Q3</option>
+                    <option value={4}>Q4</option>
+                  </select>
+                </div>
+              )}
               <div className="form-row">
-                <label>Quarter</label>
-                <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
-                  <option value={1}>Q1</option>
-                  <option value={2}>Q2</option>
-                  <option value={3}>Q3</option>
-                  <option value={4}>Q4</option>
-                </select>
+                <label>Year</label>
+                <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} />
               </div>
-            )}
-            <div className="form-row">
-              <label>Year</label>
-              <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} />
             </div>
           </div>
+
+          {!pnl && <div className="page-loading">Loading…</div>}
+          {pnl && (
+            <>
+              <div className="grid grid-4" style={{ marginBottom: 20 }}>
+                <div className="stat-card">
+                  <div className="stat-value">{money(pnl.totals.totalRevenue)}</div>
+                  <div className="stat-label">Total revenue</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value">{money(pnl.totals.totalCosts)}</div>
+                  <div className="stat-label">Total costs</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value" style={{ color: pnl.totals.netProfit >= 0 ? "var(--success)" : "var(--danger)" }}>
+                    {pnl.totals.netProfit >= 0 ? money(pnl.totals.netProfit) : `-${money(Math.abs(pnl.totals.netProfit))}`}
+                  </div>
+                  <div className="stat-label">{pnl.totals.netProfit >= 0 ? "Net profit" : "Net loss"}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value">{pnl.totals.profitMarginPercent === null ? "—" : `${pnl.totals.profitMarginPercent.toFixed(1)}%`}</div>
+                  <div className="stat-label">Profit margin</div>
+                </div>
+              </div>
+
+              <PieChart
+                data={
+                  pnl.totals.netProfit >= 0
+                    ? [
+                        { label: "Net Profit", value: pnl.totals.netProfit, color: PNL_COLORS.netProfit },
+                        { label: "Payroll", value: pnl.costs.payroll, color: PNL_COLORS.payroll },
+                        { label: "Procurement", value: pnl.costs.procurement, color: PNL_COLORS.procurement },
+                        { label: "Operating Expenses", value: pnl.costs.operatingExpenses, color: PNL_COLORS.operatingExpenses },
+                      ]
+                    : [
+                        { label: "Payroll", value: pnl.costs.payroll, color: PNL_COLORS.payroll },
+                        { label: "Procurement", value: pnl.costs.procurement, color: PNL_COLORS.procurement },
+                        { label: "Operating Expenses", value: pnl.costs.operatingExpenses, color: PNL_COLORS.operatingExpenses },
+                      ]
+                }
+              />
+              {pnl.totals.netProfit < 0 && (
+                <p className="subtitle" style={{ marginTop: 12, marginBottom: 0 }}>
+                  Costs exceeded revenue this period, so the chart shows cost composition only (no profit slice to draw).
+                </p>
+              )}
+            </>
+          )}
         </div>
 
-        {!pnl && <div className="page-loading">Loading…</div>}
-        {pnl && (
-          <>
-            <div className="grid grid-4" style={{ marginBottom: 20 }}>
-              <div className="stat-card">
-                <div className="stat-value">{money(pnl.totals.totalRevenue)}</div>
-                <div className="stat-label">Total revenue</div>
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="page-header" style={{ marginBottom: 4 }}>
+            <div>
+              <h2>Expenses Report</h2>
+              <p className="subtitle" style={{ margin: 0 }}>
+                Liquidation &amp; expense report cash advances vs. actual spend for {periodLabel(periodType, year, periodIndex)}
+              </p>
+            </div>
+            <div className="form-inline">
+              <div className="form-row">
+                <label>Period</label>
+                <select value={periodType} onChange={(e) => changePeriodType(e.target.value)}>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
               </div>
-              <div className="stat-card">
-                <div className="stat-value">{money(pnl.totals.totalCosts)}</div>
-                <div className="stat-label">Total costs</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-value" style={{ color: pnl.totals.netProfit >= 0 ? "var(--success)" : "var(--danger)" }}>
-                  {pnl.totals.netProfit >= 0 ? money(pnl.totals.netProfit) : `-${money(Math.abs(pnl.totals.netProfit))}`}
+              {periodType === "monthly" && (
+                <div className="form-row">
+                  <label>Month</label>
+                  <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
+                    {MONTH_NAMES.slice(1).map((name, i) => (
+                      <option key={name} value={i + 1}>{name}</option>
+                    ))}
+                  </select>
                 </div>
-                <div className="stat-label">{pnl.totals.netProfit >= 0 ? "Net profit" : "Net loss"}</div>
-              </div>
-              <div className="stat-card">
-                <div className="stat-value">{pnl.totals.profitMarginPercent === null ? "—" : `${pnl.totals.profitMarginPercent.toFixed(1)}%`}</div>
-                <div className="stat-label">Profit margin</div>
+              )}
+              {periodType === "quarterly" && (
+                <div className="form-row">
+                  <label>Quarter</label>
+                  <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
+                    <option value={1}>Q1</option>
+                    <option value={2}>Q2</option>
+                    <option value={3}>Q3</option>
+                    <option value={4}>Q4</option>
+                  </select>
+                </div>
+              )}
+              <div className="form-row">
+                <label>Year</label>
+                <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} />
               </div>
             </div>
+          </div>
 
-            <PieChart
-              data={
-                pnl.totals.netProfit >= 0
-                  ? [
-                      { label: "Net Profit", value: pnl.totals.netProfit, color: PNL_COLORS.netProfit },
-                      { label: "Payroll", value: pnl.costs.payroll, color: PNL_COLORS.payroll },
-                      { label: "Procurement", value: pnl.costs.procurement, color: PNL_COLORS.procurement },
-                      { label: "Operating Expenses", value: pnl.costs.operatingExpenses, color: PNL_COLORS.operatingExpenses },
-                    ]
-                  : [
-                      { label: "Payroll", value: pnl.costs.payroll, color: PNL_COLORS.payroll },
-                      { label: "Procurement", value: pnl.costs.procurement, color: PNL_COLORS.procurement },
-                      { label: "Operating Expenses", value: pnl.costs.operatingExpenses, color: PNL_COLORS.operatingExpenses },
-                    ]
-              }
-            />
-            {pnl.totals.netProfit < 0 && (
-              <p className="subtitle" style={{ marginTop: 12, marginBottom: 0 }}>
-                Costs exceeded revenue this period, so the chart shows cost composition only (no profit slice to draw).
-              </p>
-            )}
-          </>
-        )}
-      </div>
+          {!expensesReport && <div className="page-loading">Loading…</div>}
+          {expensesReport && (
+            <>
+              <div className="grid grid-4" style={{ marginBottom: 20 }}>
+                <div className="stat-card">
+                  <div className="stat-value">{money(expensesReport.totals.totalCashAdvance)}</div>
+                  <div className="stat-label">Total cash advance</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value">{money(expensesReport.totals.totalExpenses)}</div>
+                  <div className="stat-label">Total expenses</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value" style={{ color: expensesReport.totals.balance >= 0 ? "var(--success)" : "var(--danger)" }}>
+                    {money(Math.abs(expensesReport.totals.balance))}
+                  </div>
+                  <div className="stat-label">{expensesReport.totals.balance >= 0 ? "Due to company" : "Due to employees"}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-value">
+                    {expensesReport.totals.liquidationRatePercent === null ? "—" : `${expensesReport.totals.liquidationRatePercent.toFixed(1)}%`}
+                  </div>
+                  <div className="stat-label">Liquidation rate</div>
+                </div>
+              </div>
+
+              <PieChart
+                data={expensesReport.byType.map((t) => ({
+                  label: t.type,
+                  value: t.amount,
+                  color: EXPENSE_TYPE_COLORS[t.type] || EXPENSE_TYPE_COLORS.Unspecified,
+                }))}
+              />
+            </>
+          )}
+        </div>
 
       <div className="grid grid-2" style={{ marginBottom: 16 }}>
         <Funnel

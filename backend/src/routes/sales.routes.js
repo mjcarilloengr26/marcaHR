@@ -239,6 +239,48 @@ router.get(
   })
 );
 
+// Expenses Report for a period: cash advances vs. actual spend drawn from the
+// liquidation/expense reports module, broken down by Expenses Type (Operating
+// vs Project). Filtered on the report's created_at like the Reports page's
+// expenses-export, not on individual item dates, since Expenses Type and Cash
+// Advance are report-level attributes.
+router.get(
+  "/expenses-report",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const { period_type, period_year, period_index } = parsePeriod(req.query);
+    const { start, end } = periodDateRange(period_type, period_year, period_index);
+
+    const rows = await db
+      .prepare(
+        `SELECT er.expense_type, er.cash_advance_amount,
+                COALESCE((SELECT SUM(amount) FROM expense_items WHERE report_id = er.id), 0) AS total_expenses
+         FROM expense_reports er
+         WHERE er.created_at::date BETWEEN ? AND ?`
+      )
+      .all(start, end);
+
+    const totalCashAdvance = rows.reduce((sum, r) => sum + r.cash_advance_amount, 0);
+    const totalExpenses = rows.reduce((sum, r) => sum + r.total_expenses, 0);
+    const balance = totalCashAdvance - totalExpenses;
+    const liquidationRatePercent = totalCashAdvance > 0 ? (totalExpenses / totalCashAdvance) * 100 : null;
+
+    const byTypeMap = new Map();
+    for (const r of rows) {
+      const type = r.expense_type || "Unspecified";
+      byTypeMap.set(type, (byTypeMap.get(type) || 0) + r.total_expenses);
+    }
+    const byType = Array.from(byTypeMap.entries()).map(([type, amount]) => ({ type, amount }));
+
+    res.json({
+      period: { type: period_type, year: period_year, index: period_index, label: periodLabel(period_type, period_year, period_index) },
+      totals: { totalCashAdvance, totalExpenses, balance, liquidationRatePercent },
+      byType,
+    });
+  })
+);
+
 router.post(
   "/targets",
   requireAuth,
