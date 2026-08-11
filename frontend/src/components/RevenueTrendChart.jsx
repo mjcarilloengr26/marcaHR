@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 // Compact form for the y-axis (₱1,200,000 -> ₱1.2M) — the full format is reserved
@@ -30,6 +30,15 @@ function buildPath(values, xFor, yFor) {
   return values.map((v, i) => `${i === 0 ? "M" : "L"} ${xFor(i)} ${yFor(v)}`).join(" ");
 }
 
+// Closes the line path down to the baseline (y = 0) and back to the start,
+// turning it into a fillable area shape without altering the line itself.
+function buildAreaPath(values, xFor, yFor, yBase) {
+  const top = buildPath(values, xFor, yFor);
+  const lastX = xFor(values.length - 1);
+  const firstX = xFor(0);
+  return `${top} L ${lastX} ${yBase} L ${firstX} ${yBase} Z`;
+}
+
 // Measures the container's real rendered width so the SVG's viewBox can be set
 // 1:1 with actual CSS pixels — keeping font-size a true, legible size at any
 // screen width, rather than shrinking proportionally the way a fixed-viewBox
@@ -55,6 +64,7 @@ function useContainerWidth() {
 
 export default function RevenueTrendChart({ thisYear, lastYear, months }) {
   const [containerRef, measuredWidth] = useContainerWidth();
+  const gradientId = useId();
 
   if (!months || months.length === 0) return null;
 
@@ -77,6 +87,9 @@ export default function RevenueTrendChart({ thisYear, lastYear, months }) {
   const fontSize = isMobile ? 10 : 11;
   const thisYearValues = months.map((m) => m.thisYear);
   const lastYearValues = months.map((m) => m.lastYear);
+  const yBase = yFor(0);
+  const thisYearGradientId = `${gradientId}-this-year`;
+  const lastYearGradientId = `${gradientId}-last-year`;
 
   return (
     <div className="card" style={{ marginBottom: 16 }}>
@@ -102,6 +115,17 @@ export default function RevenueTrendChart({ thisYear, lastYear, months }) {
       <div ref={containerRef}>
         {width > 0 && (
           <svg width={width} height={HEIGHT} viewBox={`0 0 ${width} ${HEIGHT}`} style={{ display: "block" }} role="img" aria-label={`Monthly order revenue, ${thisYear} versus ${lastYear}`}>
+            <defs>
+              <linearGradient id={thisYearGradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={THIS_YEAR_COLOR} stopOpacity="0.35" />
+                <stop offset="100%" stopColor={THIS_YEAR_COLOR} stopOpacity="0.02" />
+              </linearGradient>
+              <linearGradient id={lastYearGradientId} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor={LAST_YEAR_COLOR} stopOpacity="0.3" />
+                <stop offset="100%" stopColor={LAST_YEAR_COLOR} stopOpacity="0.02" />
+              </linearGradient>
+            </defs>
+
             {gridLines.map((g) => {
               const y = PAD_TOP + innerHeight * (1 - g);
               return (
@@ -119,6 +143,9 @@ export default function RevenueTrendChart({ thisYear, lastYear, months }) {
                 {months[i].label}
               </text>
             ))}
+
+            <path d={buildAreaPath(lastYearValues, xFor, yFor, yBase)} fill={`url(#${lastYearGradientId})`} stroke="none" />
+            <path d={buildAreaPath(thisYearValues, xFor, yFor, yBase)} fill={`url(#${thisYearGradientId})`} stroke="none" />
 
             <path d={buildPath(lastYearValues, xFor, yFor)} fill="none" stroke={LAST_YEAR_COLOR} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             <path d={buildPath(thisYearValues, xFor, yFor)} fill="none" stroke={THIS_YEAR_COLOR} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
