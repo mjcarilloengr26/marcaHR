@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../api/client";
+import { NAV_ITEMS, applyNavOrder } from "../config/navItems";
 import ThemeToggle from "./ThemeToggle";
 
 const MANILA_TZ = "Asia/Manila";
@@ -34,54 +35,26 @@ function TopbarClock() {
   );
 }
 
-const NAV_ITEMS = [
-  { to: "/", label: "Overview", icon: "🏠", roles: ["admin", "hr", "employee"] },
-
-  { section: "Workforce", icon: "👥", roles: ["admin", "hr"] },
-  { to: "/employees", label: "Employees", icon: "🧑‍💼", roles: ["admin", "hr"], pageKey: "employees" },
-  { to: "/departments", label: "Departments", icon: "🏢", roles: ["admin", "hr"], pageKey: "departments" },
-  { to: "/locations", label: "Locations", icon: "📍", roles: ["admin", "hr"], pageKey: "locations" },
-
-  { section: "HR Operations", icon: "🗂️", roles: ["admin", "hr", "employee"] },
-  { to: "/leave", label: "Leave", icon: "🌴", roles: ["admin", "hr", "employee"] },
-  { to: "/attendance", label: "Attendance", icon: "⏱️", roles: ["admin", "hr", "employee"] },
-  { to: "/payroll", label: "Payroll", icon: "💵", roles: ["admin", "hr", "employee"] },
-  { to: "/performance", label: "Performance", icon: "📈", roles: ["admin", "hr", "employee"] },
-
-  { section: "Collaboration", icon: "🤝", roles: ["admin", "hr", "employee"] },
-  { to: "/board", label: "Task Board", icon: "🗒️", roles: ["admin", "hr", "employee"] },
-  { to: "/expenses", label: "Expenses", icon: "🧾", roles: ["admin", "hr", "employee"] },
-
-  { section: "Sales", icon: "💹", roles: ["admin", "hr", "employee"], salesOnly: true },
-  { to: "/sales", label: "Dashboard", icon: "📊", roles: ["admin", "hr"], pageKey: "sales" },
-  { to: "/deals", label: "Opportunities", icon: "🎯", roles: ["admin", "hr", "employee"], salesOnly: true, pageKey: "deals" },
-  { to: "/billing", label: "Billing", icon: "💳", roles: ["admin", "hr"], pageKey: "billing" },
-  { to: "/orders", label: "Orders", icon: "🛍️", roles: ["admin", "hr"], pageKey: "orders" },
-
-  { section: "Fulfillment", icon: "🚚", roles: ["admin", "hr", "employee"] },
-  { to: "/work-orders", label: "Work Orders", icon: "🔧", roles: ["admin", "hr", "employee"], pageKey: "work-orders" },
-
-  { section: "Procurement", icon: "🛒", roles: ["admin", "hr"] },
-  { to: "/purchase-orders", label: "Purchase Orders", icon: "📝", roles: ["admin", "hr"], pageKey: "purchase-orders" },
-  { to: "/inventory", label: "Inventory", icon: "📦", roles: ["admin", "hr"], pageKey: "inventory" },
-
-  { section: "Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true },
-  { to: "/reports", label: "Export Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true, pageKey: "reports" },
-
-  { section: "Administration", icon: "⚙️", roles: ["admin"] },
-  { to: "/users", label: "Users", icon: "👤", roles: ["admin"] },
-  { to: "/events", label: "Events", icon: "📜", roles: ["admin"] },
-  { to: "/page-access", label: "Page Access", icon: "🕒", roles: ["admin"] },
-  { to: "/terms-settings", label: "Terms & Conditions", icon: "📄", roles: ["admin"] },
-  { to: "/security-settings", label: "Security", icon: "🔒", roles: ["admin"] },
-  { to: "/branding-settings", label: "Branding", icon: "🖼️", roles: ["admin"] },
-];
-
 export default function Layout({ children }) {
   const { user, employee, logout } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
   const [logoData, setLogoData] = useState(null);
+  const [navOrder, setNavOrder] = useState({});
+
+  // Admin-defined menu order (Administration > Menu Order). Re-fetched on
+  // "menu-order-updated" so a save is reflected in this sidebar immediately
+  // rather than only after a full page reload.
+  useEffect(() => {
+    const loadOrder = () =>
+      api
+        .get("/nav-order")
+        .then((rows) => setNavOrder(Object.fromEntries(rows.map((r) => [r.item_key, r.position]))))
+        .catch(() => {});
+    loadOrder();
+    window.addEventListener("menu-order-updated", loadOrder);
+    return () => window.removeEventListener("menu-order-updated", loadOrder);
+  }, []);
 
   // Editable at Administration > Branding (frontend/src/pages/BrandingSettings.jsx).
   // That page fires "branding-updated" after a save so this header swaps to the
@@ -144,7 +117,11 @@ export default function Layout({ children }) {
     return false;
   };
 
-  const visibleNavItems = NAV_ITEMS.filter((item) =>
+  // Ordering is applied before visibility filtering so a hidden link doesn't
+  // change how the ones around it are arranged.
+  const orderedNavItems = applyNavOrder(NAV_ITEMS, navOrder);
+
+  const visibleNavItems = orderedNavItems.filter((item) =>
     item.section
       ? (item.roles.includes(user?.role) &&
           (!item.salesOnly || isSalesEmployee) &&

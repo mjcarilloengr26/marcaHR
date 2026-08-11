@@ -34,6 +34,7 @@ const TermsSettings = lazy(() => import("./pages/TermsSettings"));
 const SecuritySettings = lazy(() => import("./pages/SecuritySettings"));
 const BrandingSettings = lazy(() => import("./pages/BrandingSettings"));
 const PageAccess = lazy(() => import("./pages/PageAccess"));
+const MenuOrder = lazy(() => import("./pages/MenuOrder"));
 
 // pageKey marks a route as eligible for a temporary access grant — it must
 // match a key in backend/src/services/pageAccess.js GRANTABLE_PAGES.
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="/security-settings" element={<Protected roles={["admin"]}><SecuritySettings /></Protected>} />
         <Route path="/branding-settings" element={<Protected roles={["admin"]}><BrandingSettings /></Protected>} />
         <Route path="/page-access" element={<Protected roles={["admin"]}><PageAccess /></Protected>} />
+        <Route path="/menu-order" element={<Protected roles={["admin"]}><MenuOrder /></Protected>} />
         <Route path="/reports" element={<Protected pageKey="reports"><Reports /></Protected>} />
       </Routes>
     </Suspense>

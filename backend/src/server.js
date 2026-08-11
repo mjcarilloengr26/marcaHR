@@ -30,6 +30,7 @@ const termsRoutes = require("./routes/terms.routes");
 const securityRoutes = require("./routes/security.routes");
 const brandingRoutes = require("./routes/branding.routes");
 const pageAccessRoutes = require("./routes/pageaccess.routes");
+const navOrderRoutes = require("./routes/navorder.routes");
 
 const app = express();
 app.use(cors());
@@ -66,6 +67,7 @@ app.use("/api/terms", termsRoutes);
 app.use("/api/security-settings", securityRoutes);
 app.use("/api/branding", brandingRoutes);
 app.use("/api/page-access", pageAccessRoutes);
+app.use("/api/nav-order", navOrderRoutes);
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 

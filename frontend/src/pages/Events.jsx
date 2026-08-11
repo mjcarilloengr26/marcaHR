@@ -11,6 +11,7 @@ const ACTION_LABELS = {
   update_branding: "Updated company logo",
   grant_page_access: "Granted temporary page access",
   revoke_page_access: "Revoked temporary page access",
+  update_menu_order: "Updated sidebar menu order",
   create_user: "Create user",
   update_user: "Update user",
   delete_user: "Delete user",

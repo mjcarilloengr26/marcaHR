@@ -446,6 +446,20 @@ CREATE TABLE IF NOT EXISTS page_access_grants (
 );
 CREATE INDEX IF NOT EXISTS idx_page_access_grants_user ON page_access_grants(user_id);
 
+-- Admin-defined sidebar ordering. One row per menu link (item_key is the
+-- link's route, e.g. "/inventory"); position orders it within its own
+-- section. Links with no row here fall back to their built-in order, so a
+-- newly shipped menu item still shows up instead of disappearing.
+-- id is present (rather than item_key being the primary key) because the
+-- prepare() shim above appends "RETURNING id" to any plain INSERT — every
+-- table here is expected to have one, and omitting it makes inserts fail.
+CREATE TABLE IF NOT EXISTS nav_menu_order (
+  id SERIAL PRIMARY KEY,
+  item_key TEXT NOT NULL UNIQUE,
+  position INTEGER NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+);
+
 -- Company logo shown on the login screen and sidebar header. logo_data is a
 -- base64 data URL (client-compressed to PNG before upload, image.js) or NULL
 -- to fall back to the default "M" mark — same storage pattern as attendance
