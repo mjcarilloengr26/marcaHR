@@ -5,6 +5,24 @@ import EmployeeMultiSelect from "../components/EmployeeMultiSelect";
 
 const emptyCardForm = { title: "", description: "", employee_ids: [], due_date: "" };
 
+// "2026-08-11" -> "Aug 11, 2026" — the raw ISO string was colliding visually
+// with the assignee list on the card's meta line.
+function formatDueDate(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return dateStr;
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+// A card assigned to many people (up to "all employees") shouldn't spill a
+// giant comma list down the card — show the first couple of names plus a
+// count, with the full list available as a hover tooltip.
+function assigneeSummary(assignees) {
+  if (!assignees || assignees.length === 0) return null;
+  const names = assignees.map((a) => a.employee_name);
+  if (names.length <= 2) return { text: names.join(", "), full: names.join(", ") };
+  return { text: `${names.slice(0, 2).join(", ")} +${names.length - 2} more`, full: names.join(", ") };
+}
+
 export default function Board() {
   const { user } = useAuth();
   const isHr = user.role === "admin" || user.role === "hr";
@@ -208,12 +226,17 @@ export default function Board() {
               >
                 <div className="board-card-title">{card.title}</div>
                 {card.description && <div className="board-card-desc">{card.description}</div>}
-                <div className="board-card-meta">
-                  {card.assignees && card.assignees.length > 0 && (
-                    <span>{card.assignees.map((a) => a.employee_name).join(", ")}</span>
-                  )}
-                  {card.due_date && <span>Due {card.due_date}</span>}
-                </div>
+                {(() => {
+                  const summary = assigneeSummary(card.assignees);
+                  return (
+                    (summary || card.due_date) && (
+                      <div className="board-card-meta">
+                        {summary && <span title={summary.full}>{summary.text}</span>}
+                        {card.due_date && <span>Due {formatDueDate(card.due_date)}</span>}
+                      </div>
+                    )
+                  );
+                })()}
                 <div className="board-card-actions">
                   {isHr && (
                     <select
