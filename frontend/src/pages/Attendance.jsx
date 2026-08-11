@@ -52,15 +52,47 @@ function LocationCell({ lat, lng, distance }) {
   );
 }
 
-function PhotoCell({ src, onOpen }) {
-  if (!src) return <span>—</span>;
+// The list endpoint only ever sends a has-photo boolean (see backend), not
+// the photo bytes — this fetches the actual image lazily, only when someone
+// clicks to actually view it, instead of every row's photo loading upfront.
+function PhotoCell({ recordId, hasPhoto, which, onOpen, onError }) {
+  const [loading, setLoading] = useState(false);
+  if (!hasPhoto) return <span>—</span>;
+
+  const handleClick = async () => {
+    setLoading(true);
+    try {
+      const data = await api.get(`/attendance/${recordId}/photo`);
+      const src = which === "in" ? data.clock_in_photo : data.clock_out_photo;
+      if (src) onOpen(src);
+    } catch (err) {
+      onError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <img
-      src={src}
-      alt="Clock-in/out proof"
-      onClick={() => onOpen(src)}
-      style={{ width: 32, height: 32, objectFit: "cover", borderRadius: 4, cursor: "pointer", border: "1px solid var(--border)" }}
-    />
+    <button
+      type="button"
+      className="link-btn"
+      onClick={handleClick}
+      disabled={loading}
+      title="View photo"
+      style={{
+        width: 32,
+        height: 32,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: "1px solid var(--border)",
+        borderRadius: 4,
+        background: "var(--surface)",
+        cursor: loading ? "default" : "pointer",
+      }}
+    >
+      {loading ? "…" : "📷"}
+    </button>
   );
 }
 
@@ -271,10 +303,10 @@ export default function Attendance() {
                 <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
                 <td>{r.clock_in || "—"}</td>
                 <td><LocationCell lat={r.clock_in_lat} lng={r.clock_in_lng} distance={r.clock_in_distance_m} /></td>
-                <td><PhotoCell src={r.clock_in_photo} onOpen={setLightbox} /></td>
+                <td><PhotoCell recordId={r.id} hasPhoto={r.has_clock_in_photo} which="in" onOpen={setLightbox} onError={setError} /></td>
                 <td>{r.clock_out || "—"}</td>
                 <td><LocationCell lat={r.clock_out_lat} lng={r.clock_out_lng} distance={r.clock_out_distance_m} /></td>
-                <td><PhotoCell src={r.clock_out_photo} onOpen={setLightbox} /></td>
+                <td><PhotoCell recordId={r.id} hasPhoto={r.has_clock_out_photo} which="out" onOpen={setLightbox} onError={setError} /></td>
               </tr>
             ))}
           </tbody>

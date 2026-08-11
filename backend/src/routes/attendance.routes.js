@@ -16,6 +16,15 @@ function manilaToday() {
 function manilaNow() {
   return new Date().toLocaleTimeString("en-GB", { timeZone: MANILA_TZ, hour12: false }); // HH:MM:SS
 }
+// Calendar arithmetic on an already-resolved Manila date string, not a second
+// timezone conversion — avoids DST/offset edge cases from subtracting days off
+// a raw `new Date()` in a different zone.
+function manilaDaysAgo(days) {
+  const [y, m, d] = manilaToday().split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - days);
+  return dt.toISOString().slice(0, 10);
+}
 
 // Distance in meters between two lat/lng points (haversine).
 function distanceMeters(lat1, lng1, lat2, lng2) {
@@ -128,11 +137,23 @@ async function checkGeofence(loc, employeeId) {
   return null;
 }
 
+// Photo blobs (base64) are deliberately excluded from the list — they're the
+// overwhelming majority of this endpoint's payload (measured ~943KB of a
+// ~972KB response for just 72 records) and the list view only ever needs a
+// thumbnail-or-not signal, not the bytes themselves. has_clock_in_photo /
+// has_clock_out_photo let the UI show a "view photo" affordance that fetches
+// the actual image lazily, only for the one record someone actually opens,
+// via GET /:id/photo below.
+const LIST_COLUMNS = `a.id, a.employee_id, a.date, a.status,
+  a.clock_in, a.clock_in_lat, a.clock_in_lng, a.clock_in_accuracy, a.clock_in_distance_m,
+  a.clock_out, a.clock_out_lat, a.clock_out_lng, a.clock_out_accuracy, a.clock_out_distance_m,
+  a.note, (a.clock_in_photo IS NOT NULL) AS has_clock_in_photo, (a.clock_out_photo IS NOT NULL) AS has_clock_out_photo`;
+
 router.get(
   "/",
   requireAuth,
   asyncHandler(async (req, res) => {
-    let sql = `SELECT a.*, (e.first_name || ' ' || e.last_name) AS employee_name
+    let sql = `SELECT ${LIST_COLUMNS}, (e.first_name || ' ' || e.last_name) AS employee_name
              FROM attendance a JOIN employees e ON e.id = a.employee_id WHERE 1=1`;
     const params = [];
 
@@ -163,6 +184,11 @@ router.get(
       params.push(req.query.from, req.query.to);
       if (req.query.from <= today && today <= req.query.to) includeTodayPlaceholders = true;
     } else {
+      // No filter given at all: default to a bounded recent window rather than
+      // the entire all-time history — callers who genuinely want older records
+      // can still pass an explicit date or from/to range.
+      sql += " AND a.date BETWEEN ? AND ?";
+      params.push(manilaDaysAgo(30), today);
       includeTodayPlaceholders = true;
     }
 
@@ -198,14 +224,30 @@ router.get(
           clock_out_lng: null,
           clock_out_accuracy: null,
           clock_out_distance_m: null,
-          clock_in_photo: null,
-          clock_out_photo: null,
+          has_clock_in_photo: false,
+          has_clock_out_photo: false,
           note: null,
         });
       }
     }
 
     res.json(records);
+  })
+);
+
+// Fetches a single record's actual photo bytes on demand — the list endpoint
+// above only ever sends a has_photo boolean, so the UI calls this the moment
+// someone actually opens a specific record's photo, not on every list load.
+router.get(
+  "/:id/photo",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const record = await db.prepare("SELECT employee_id, clock_in_photo, clock_out_photo FROM attendance WHERE id = ?").get(req.params.id);
+    if (!record) return res.status(404).json({ error: "Attendance record not found" });
+    const isSelf = req.user.employee_id === record.employee_id;
+    const isHr = ["admin", "hr"].includes(req.user.role);
+    if (!isSelf && !isHr) return res.status(403).json({ error: "Insufficient permissions" });
+    res.json({ clock_in_photo: record.clock_in_photo, clock_out_photo: record.clock_out_photo });
   })
 );
 
