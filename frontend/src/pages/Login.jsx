@@ -45,10 +45,7 @@ export default function Login() {
           {loading ? "Signing in…" : "Sign in"}
         </button>
         <div className="login-hint">
-          Sample accounts (after seeding):<br />
-          admin@example.com / admin123<br />
-          hr@example.com / hr123<br />
-          jamie.chen@example.com / employee123
+          Use of this application is subject to MARCA Group's Terms and Conditions.
         </div>
       </form>
     </div>
