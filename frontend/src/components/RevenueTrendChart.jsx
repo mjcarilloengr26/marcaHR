@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useId } from "react";
+import useContainerWidth from "../hooks/useContainerWidth";
 
 const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 // Compact form for the y-axis (₱1,200,000 -> ₱1.2M) — the full format is reserved
@@ -37,29 +38,6 @@ function buildAreaPath(values, xFor, yFor, yBase) {
   const lastX = xFor(values.length - 1);
   const firstX = xFor(0);
   return `${top} L ${lastX} ${yBase} L ${firstX} ${yBase} Z`;
-}
-
-// Measures the container's real rendered width so the SVG's viewBox can be set
-// 1:1 with actual CSS pixels — keeping font-size a true, legible size at any
-// screen width, rather than shrinking proportionally the way a fixed-viewBox
-// SVG scaled via width:100% would (illegible axis labels on narrow phones).
-function useContainerWidth() {
-  const ref = useRef(null);
-  const [width, setWidth] = useState(0);
-
-  useEffect(() => {
-    if (!ref.current) return;
-    const el = ref.current;
-    const observer = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect?.width;
-      if (w) setWidth(w);
-    });
-    observer.observe(el);
-    setWidth(el.getBoundingClientRect().width);
-    return () => observer.disconnect();
-  }, []);
-
-  return [ref, width];
 }
 
 export default function RevenueTrendChart({ thisYear, lastYear, months }) {

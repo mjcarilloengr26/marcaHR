@@ -400,15 +400,23 @@ export default function SalesDashboard() {
                   <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
                     <div>
                       <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>By Expenses Type</h3>
+                      {/* Only 3 categories here, so the bar chart doesn't need much of
+                          its own width — let it fill whatever space the pie leaves
+                          instead of wrapping below it, unlike Title/Purpose's longer
+                          list. Still wraps to stacked on genuinely narrow screens. */}
                       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-                        <PieChart data={byTypePieData} />
-                        <BarChart
-                          data={expensesReport.byType}
-                          currentLabel={currentYearLabel}
-                          previousLabel={previousYearLabel}
-                          currentColor="#2f6fed"
-                          previousColor="#a9c6fb"
-                        />
+                        <div style={{ flexShrink: 0 }}>
+                          <PieChart data={byTypePieData} />
+                        </div>
+                        <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+                          <BarChart
+                            data={expensesReport.byType}
+                            currentLabel={currentYearLabel}
+                            previousLabel={previousYearLabel}
+                            currentColor="#2f6fed"
+                            previousColor="#a9c6fb"
+                          />
+                        </div>
                       </div>
                     </div>
                     <div>
