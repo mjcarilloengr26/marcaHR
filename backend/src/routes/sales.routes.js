@@ -2,7 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
-const { getSalesTargetsReport, parsePeriod } = require("../services/salesTargets");
+const { getSalesTargetsReport, parsePeriod, periodDateRange } = require("../services/salesTargets");
 const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
@@ -166,6 +166,76 @@ router.get(
     const { period_type, period_year, period_index } = parsePeriod(req.query);
     const rows = await getSalesTargetsReport({ period_type, period_year, period_index });
     res.json(rows);
+  })
+);
+
+function periodLabel(periodType, year, index) {
+  if (periodType === "yearly") return `${year}`;
+  if (periodType === "quarterly") return `Q${index} ${year}`;
+  return `${MONTH_NAMES[index]} ${year}`;
+}
+
+// Profit & Loss for a period: revenue (non-cancelled order amount, the same
+// figure already shown as "Orders revenue" elsewhere on this dashboard) minus
+// three cost lines drawn from the other modules this app already tracks —
+// procurement (purchase orders), labor (payroll), and operating expenses
+// (approved/reimbursed liquidation reports). Each cost line only counts
+// "committed" transactions (excluding draft/cancelled/rejected), mirroring how
+// the rest of the app already treats draft records as not-yet-real.
+router.get(
+  "/profit-loss",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const { period_type, period_year, period_index } = parsePeriod(req.query);
+    const { start, end } = periodDateRange(period_type, period_year, period_index);
+    const startMonth = Number(start.split("-")[1]);
+    const endMonth = Number(end.split("-")[1]);
+
+    const ordersRevenue = (
+      await db.prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled' AND order_date BETWEEN ? AND ?").get(
+        start,
+        end
+      )
+    ).v;
+
+    const procurement = (
+      await db
+        .prepare(
+          "SELECT COALESCE(SUM(amount), 0) AS v FROM purchase_orders WHERE status NOT IN ('cancelled', 'draft') AND order_date BETWEEN ? AND ?"
+        )
+        .get(start, end)
+    ).v;
+
+    const payroll = (
+      await db
+        .prepare(
+          "SELECT COALESCE(SUM(net_pay), 0) AS v FROM payroll_records WHERE status IN ('finalized', 'paid') AND period_year = ? AND period_month BETWEEN ? AND ?"
+        )
+        .get(period_year, startMonth, endMonth)
+    ).v;
+
+    const operatingExpenses = (
+      await db
+        .prepare(
+          `SELECT COALESCE(SUM(ei.amount), 0) AS v FROM expense_items ei
+           JOIN expense_reports er ON er.id = ei.report_id
+           WHERE er.status IN ('approved', 'reimbursed') AND ei.expense_date BETWEEN ? AND ?`
+        )
+        .get(start, end)
+    ).v;
+
+    const totalRevenue = ordersRevenue;
+    const totalCosts = procurement + payroll + operatingExpenses;
+    const netProfit = totalRevenue - totalCosts;
+    const profitMarginPercent = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : null;
+
+    res.json({
+      period: { type: period_type, year: period_year, index: period_index, label: periodLabel(period_type, period_year, period_index) },
+      revenue: { ordersRevenue },
+      costs: { procurement, payroll, operatingExpenses },
+      totals: { totalRevenue, totalCosts, netProfit, profitMarginPercent },
+    });
   })
 );
 
