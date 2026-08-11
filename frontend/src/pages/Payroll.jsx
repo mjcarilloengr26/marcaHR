@@ -67,6 +67,7 @@ export default function Payroll() {
       base_salary: record.base_salary,
       bonuses: record.bonuses,
       overtime_pay: record.overtime_pay,
+      night_differential_pay: record.night_differential_pay || 0,
       deductions: record.deductions,
       net_pay_override: "",
     });
@@ -85,6 +86,7 @@ export default function Payroll() {
         base_salary: Number(editForm.base_salary) || 0,
         bonuses: Number(editForm.bonuses) || 0,
         overtime_pay: Number(editForm.overtime_pay) || 0,
+        night_differential_pay: Number(editForm.night_differential_pay) || 0,
         deductions: Number(editForm.deductions) || 0,
         net_pay: editForm.net_pay_override !== "" ? Number(editForm.net_pay_override) : undefined,
       });
@@ -101,6 +103,11 @@ export default function Payroll() {
     setSettingsForm({
       standard_hours_per_day: settings.standard_hours_per_day,
       overtime_multiplier: settings.overtime_multiplier,
+      regular_start_time: settings.regular_start_time,
+      regular_end_time: settings.regular_end_time,
+      overtime_start_time: settings.overtime_start_time,
+      overtime_end_time: settings.overtime_end_time,
+      night_shift_multiplier: settings.night_shift_multiplier,
     });
     setEditingSettings(true);
   };
@@ -113,6 +120,11 @@ export default function Payroll() {
       const updated = await api.put("/payroll/settings", {
         standard_hours_per_day: Number(settingsForm.standard_hours_per_day) || 8,
         overtime_multiplier: Number(settingsForm.overtime_multiplier) || 1,
+        regular_start_time: settingsForm.regular_start_time,
+        regular_end_time: settingsForm.regular_end_time,
+        overtime_start_time: settingsForm.overtime_start_time,
+        overtime_end_time: settingsForm.overtime_end_time,
+        night_shift_multiplier: Number(settingsForm.night_shift_multiplier) || 1,
       });
       setSettings(updated);
       setEditingSettings(false);
@@ -144,7 +156,7 @@ export default function Payroll() {
         </div>
         {isHr && settings && (
           <button className="btn btn-secondary" onClick={openEditSettings}>
-            Standard hours: {settings.standard_hours_per_day}/day · OT ×{settings.overtime_multiplier}
+            {settings.standard_hours_per_day}h/day ({settings.regular_start_time}–{settings.regular_end_time}) · OT ×{settings.overtime_multiplier} · Night ×{settings.night_shift_multiplier}
           </button>
         )}
       </div>
@@ -192,6 +204,7 @@ export default function Payroll() {
               <SortTh label="Base" sortKey="base_salary" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Bonuses" sortKey="bonuses" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Overtime" sortKey="overtime_pay" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Night diff" sortKey="night_differential_pay" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Deductions" sortKey="deductions" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Net pay" sortKey="net_pay" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
@@ -206,6 +219,7 @@ export default function Payroll() {
                 <td>₱{Number(r.base_salary).toLocaleString()}</td>
                 <td>₱{Number(r.bonuses).toLocaleString()}</td>
                 <td>₱{Number(r.overtime_pay || 0).toLocaleString()}</td>
+                <td>₱{Number(r.night_differential_pay || 0).toLocaleString()}</td>
                 <td>₱{Number(r.deductions).toLocaleString()}</td>
                 <td><strong>₱{Number(r.net_pay).toLocaleString()}</strong></td>
                 <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
@@ -261,6 +275,14 @@ export default function Payroll() {
                 />
               </div>
               <div className="form-row">
+                <label>Night differential pay</label>
+                <input
+                  type="number"
+                  value={editForm.night_differential_pay}
+                  onChange={(e) => setEditForm({ ...editForm, night_differential_pay: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
                 <label>Deductions</label>
                 <input
                   type="number"
@@ -276,7 +298,8 @@ export default function Payroll() {
                 placeholder={`Leave blank to auto-calculate (₱${(
                   (Number(editForm.base_salary) || 0) +
                   (Number(editForm.bonuses) || 0) +
-                  (Number(editForm.overtime_pay) || 0) -
+                  (Number(editForm.overtime_pay) || 0) +
+                  (Number(editForm.night_differential_pay) || 0) -
                   (Number(editForm.deductions) || 0)
                 ).toLocaleString()})`}
                 value={editForm.net_pay_override}
@@ -296,7 +319,7 @@ export default function Payroll() {
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={saveSettings}>
             <h2>Payroll calculation settings</h2>
             <p className="subtitle" style={{ marginTop: -8 }}>
-              Used to auto-calculate base pay and overtime from attendance when generating payroll
+              Used to auto-calculate base pay, overtime, and night differential from attendance when generating payroll
             </p>
             <div className="form-row">
               <label>Standard hours per day</label>
@@ -307,6 +330,46 @@ export default function Payroll() {
                 onChange={(e) => setSettingsForm({ ...settingsForm, standard_hours_per_day: e.target.value })}
               />
             </div>
+            <div className="grid grid-2">
+              <div className="form-row">
+                <label>Regular shift start</label>
+                <input
+                  type="time"
+                  value={settingsForm.regular_start_time}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, regular_start_time: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
+                <label>Regular shift end</label>
+                <input
+                  type="time"
+                  value={settingsForm.regular_end_time}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, regular_end_time: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="grid grid-2">
+              <div className="form-row">
+                <label>Overtime window start</label>
+                <input
+                  type="time"
+                  value={settingsForm.overtime_start_time}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, overtime_start_time: e.target.value })}
+                />
+              </div>
+              <div className="form-row">
+                <label>Overtime window end</label>
+                <input
+                  type="time"
+                  value={settingsForm.overtime_end_time}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, overtime_end_time: e.target.value })}
+                />
+              </div>
+            </div>
+            <p className="subtitle" style={{ margin: "0 0 12px" }}>
+              Time actually clocked within the overtime window above is paid at the overtime multiplier, instead of
+              any time beyond standard hours.
+            </p>
             <div className="form-row">
               <label>Overtime pay multiplier</label>
               <input
@@ -315,6 +378,19 @@ export default function Payroll() {
                 value={settingsForm.overtime_multiplier}
                 onChange={(e) => setSettingsForm({ ...settingsForm, overtime_multiplier: e.target.value })}
               />
+            </div>
+            <div className="form-row">
+              <label>Night shift differential multiplier</label>
+              <input
+                type="number"
+                step="0.05"
+                value={settingsForm.night_shift_multiplier}
+                onChange={(e) => setSettingsForm({ ...settingsForm, night_shift_multiplier: e.target.value })}
+              />
+              <p className="subtitle" style={{ margin: "4px 0 0" }}>
+                Extra premium paid on top of the regular rate for time clocked between 10:00 PM and 6:00 AM (fixed,
+                per labor law — only the multiplier is adjustable).
+              </p>
             </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setEditingSettings(false)}>Cancel</button>

@@ -206,6 +206,7 @@ CREATE TABLE IF NOT EXISTS payroll_records (
   base_salary REAL NOT NULL DEFAULT 0,
   bonuses REAL NOT NULL DEFAULT 0,
   overtime_pay REAL NOT NULL DEFAULT 0,
+  night_differential_pay REAL NOT NULL DEFAULT 0,
   deductions REAL NOT NULL DEFAULT 0,
   net_pay REAL NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','finalized','paid')),
@@ -420,6 +421,11 @@ CREATE TABLE IF NOT EXISTS payroll_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   standard_hours_per_day REAL NOT NULL DEFAULT 8,
   overtime_multiplier REAL NOT NULL DEFAULT 1.25,
+  regular_start_time TEXT NOT NULL DEFAULT '08:00',
+  regular_end_time TEXT NOT NULL DEFAULT '17:00',
+  overtime_start_time TEXT NOT NULL DEFAULT '17:00',
+  overtime_end_time TEXT NOT NULL DEFAULT '22:00',
+  night_shift_multiplier REAL NOT NULL DEFAULT 1.10,
   updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
@@ -514,6 +520,22 @@ async function ensureExpenseType() {
   await pool.query("ALTER TABLE expense_reports ADD COLUMN IF NOT EXISTS expense_type TEXT");
 }
 
+// Regular/overtime shift windows and the night shift differential multiplier
+// predate this column set — existing deployed payroll_settings rows need
+// these added explicitly with the same defaults the fresh-install schema
+// uses, so payroll calculation has sane values immediately rather than NULLs.
+async function ensurePayrollTimeSettings() {
+  await pool.query("ALTER TABLE payroll_settings ADD COLUMN IF NOT EXISTS regular_start_time TEXT NOT NULL DEFAULT '08:00'");
+  await pool.query("ALTER TABLE payroll_settings ADD COLUMN IF NOT EXISTS regular_end_time TEXT NOT NULL DEFAULT '17:00'");
+  await pool.query("ALTER TABLE payroll_settings ADD COLUMN IF NOT EXISTS overtime_start_time TEXT NOT NULL DEFAULT '17:00'");
+  await pool.query("ALTER TABLE payroll_settings ADD COLUMN IF NOT EXISTS overtime_end_time TEXT NOT NULL DEFAULT '22:00'");
+  await pool.query("ALTER TABLE payroll_settings ADD COLUMN IF NOT EXISTS night_shift_multiplier REAL NOT NULL DEFAULT 1.10");
+}
+
+async function ensurePayrollNightDifferential() {
+  await pool.query("ALTER TABLE payroll_records ADD COLUMN IF NOT EXISTS night_differential_pay REAL NOT NULL DEFAULT 0");
+}
+
 let migrated = null;
 // Idempotent: safe to call on every boot. Runs the full schema once per
 // process (CREATE TABLE IF NOT EXISTS makes re-running harmless besides).
@@ -539,7 +561,9 @@ db.migrate = function () {
       .then(() => ensureLeaveTypeTaxonomy())
       .then(() => ensurePayrollPeriodHalf())
       .then(() => ensureBoardCardAssignees())
-      .then(() => ensureExpenseType());
+      .then(() => ensureExpenseType())
+      .then(() => ensurePayrollTimeSettings())
+      .then(() => ensurePayrollNightDifferential());
   }
   return migrated;
 };

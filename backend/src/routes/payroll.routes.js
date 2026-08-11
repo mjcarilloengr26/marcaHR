@@ -3,64 +3,12 @@ const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
+const { payrollPeriodRange, countWeekdays, computeEmployeePayroll } = require("../services/payrollCalc");
 
 const router = express.Router();
 
 const MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-// Cut-off is the 15th and the last day of the month (30/31, or 28/29 in Feb):
-// half 1 covers the 1st–15th, half 2 covers the 16th–end. period_half 0 is
-// reserved for legacy whole-month records created before this existed.
-function payrollPeriodRange(period_month, period_year, period_half) {
-  const mm = String(period_month).padStart(2, "0");
-  if (Number(period_half) === 1) {
-    return { start: `${period_year}-${mm}-01`, end: `${period_year}-${mm}-15` };
-  }
-  const lastDay = new Date(period_year, period_month, 0).getDate();
-  return { start: `${period_year}-${mm}-16`, end: `${period_year}-${mm}-${String(lastDay).padStart(2, "0")}` };
-}
-
-// Expected working days in the range — weekdays only, since the app has no
-// holiday calendar to consult. Used to prorate the half-month base salary
-// into a daily rate.
-function countWeekdays(start, end) {
-  let count = 0;
-  const d = new Date(`${start}T00:00:00Z`);
-  const endD = new Date(`${end}T00:00:00Z`);
-  while (d <= endD) {
-    const day = d.getUTCDay();
-    if (day !== 0 && day !== 6) count++;
-    d.setUTCDate(d.getUTCDate() + 1);
-  }
-  return count;
-}
-
-function hoursOf(timeStr) {
-  const [h, m, s] = timeStr.split(":").map(Number);
-  return h + m / 60 + (s || 0) / 3600;
-}
-
-// Reads actual attendance for the period: days credited toward base pay
-// (present/late/leave = 1 day, half_day = 0.5, absent or no record = 0) and
-// overtime hours (time actually clocked beyond the standard workday, summed
-// across the period — never negative, and a missing clock_out just isn't
-// counted rather than guessed at).
-async function computeAttendanceForPeriod(employeeId, start, end, standardHours) {
-  const rows = await db
-    .prepare("SELECT status, clock_in, clock_out FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ?")
-    .all(employeeId, start, end);
-  let daysWorked = 0;
-  let overtimeHours = 0;
-  for (const r of rows) {
-    if (r.status === "present" || r.status === "late" || r.status === "leave") daysWorked += 1;
-    else if (r.status === "half_day") daysWorked += 0.5;
-    if (r.clock_in && r.clock_out) {
-      const worked = hoursOf(r.clock_out) - hoursOf(r.clock_in);
-      if (worked > standardHours) overtimeHours += worked - standardHours;
-    }
-  }
-  return { daysWorked, overtimeHours };
-}
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 router.get(
   "/settings",
@@ -77,19 +25,56 @@ router.put(
   requireRole("admin", "hr"),
   asyncHandler(async (req, res) => {
     const existing = await db.prepare("SELECT * FROM payroll_settings WHERE id = 1").get();
-    const { standard_hours_per_day, overtime_multiplier } = req.body || {};
+    const {
+      standard_hours_per_day,
+      overtime_multiplier,
+      regular_start_time,
+      regular_end_time,
+      overtime_start_time,
+      overtime_end_time,
+      night_shift_multiplier,
+    } = req.body || {};
+
+    for (const [label, value] of [
+      ["regular_start_time", regular_start_time],
+      ["regular_end_time", regular_end_time],
+      ["overtime_start_time", overtime_start_time],
+      ["overtime_end_time", overtime_end_time],
+    ]) {
+      if (value !== undefined && !TIME_RE.test(value)) {
+        return res.status(400).json({ error: `${label} must be a 24-hour HH:MM time` });
+      }
+    }
+    if (night_shift_multiplier !== undefined && !(Number(night_shift_multiplier) > 0)) {
+      return res.status(400).json({ error: "night_shift_multiplier must be a positive number" });
+    }
+
     await db
       .prepare(
         `UPDATE payroll_settings SET standard_hours_per_day = ?, overtime_multiplier = ?,
-         updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') WHERE id = 1`
+         regular_start_time = ?, regular_end_time = ?, overtime_start_time = ?, overtime_end_time = ?,
+         night_shift_multiplier = ?, updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') WHERE id = 1`
       )
       .run(
         standard_hours_per_day !== undefined ? standard_hours_per_day : existing.standard_hours_per_day,
-        overtime_multiplier !== undefined ? overtime_multiplier : existing.overtime_multiplier
+        overtime_multiplier !== undefined ? overtime_multiplier : existing.overtime_multiplier,
+        regular_start_time !== undefined ? regular_start_time : existing.regular_start_time,
+        regular_end_time !== undefined ? regular_end_time : existing.regular_end_time,
+        overtime_start_time !== undefined ? overtime_start_time : existing.overtime_start_time,
+        overtime_end_time !== undefined ? overtime_end_time : existing.overtime_end_time,
+        night_shift_multiplier !== undefined ? night_shift_multiplier : existing.night_shift_multiplier
       );
     await logRequestEvent(req, "update_payroll_settings", {
       entityType: "payroll_settings",
-      details: { standard_hours_per_day, overtime_multiplier },
+      details: {
+        standard_hours_per_day,
+        overtime_multiplier,
+        regular_start_time,
+        regular_end_time,
+        overtime_start_time,
+        overtime_end_time,
+        night_shift_multiplier,
+      },
     });
     res.json(await db.prepare("SELECT * FROM payroll_settings WHERE id = 1").get());
   })
@@ -150,7 +135,7 @@ router.post(
   requireAuth,
   requireRole("admin", "hr"),
   asyncHandler(async (req, res) => {
-    const { employee_id, period_month, period_year, base_salary, bonuses, overtime_pay, deductions, notes } = req.body || {};
+    const { employee_id, period_month, period_year, base_salary, bonuses, overtime_pay, night_differential_pay, deductions, notes } = req.body || {};
     if (!employee_id || !period_month || !period_year) {
       return res.status(400).json({ error: "employee_id, period_month and period_year are required" });
     }
@@ -170,23 +155,24 @@ router.post(
     const base = base_salary ?? employee.base_salary;
     const bonus = bonuses || 0;
     const overtime = overtime_pay || 0;
+    const nightDiff = night_differential_pay || 0;
     const deduction = deductions || 0;
     // Manual final-pay override: if net_pay is explicitly sent, trust it as-is
     // (e.g. HR reconciling to an exact bank transfer figure) instead of always
     // recomputing it from the components.
     const netOverride = req.body?.net_pay;
-    const net = netOverride !== undefined && netOverride !== null && netOverride !== "" ? Number(netOverride) : base + bonus + overtime - deduction;
+    const net = netOverride !== undefined && netOverride !== null && netOverride !== "" ? Number(netOverride) : base + bonus + overtime + nightDiff - deduction;
 
     await db
       .prepare(
-        `INSERT INTO payroll_records (employee_id, period_month, period_year, period_half, base_salary, bonuses, overtime_pay, deductions, net_pay, status, notes)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?)
+        `INSERT INTO payroll_records (employee_id, period_month, period_year, period_half, base_salary, bonuses, overtime_pay, night_differential_pay, deductions, net_pay, status, notes)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?)
        ON CONFLICT(employee_id, period_month, period_year, period_half)
        DO UPDATE SET base_salary = excluded.base_salary, bonuses = excluded.bonuses,
-         overtime_pay = excluded.overtime_pay, deductions = excluded.deductions,
-         net_pay = excluded.net_pay, notes = excluded.notes`
+         overtime_pay = excluded.overtime_pay, night_differential_pay = excluded.night_differential_pay,
+         deductions = excluded.deductions, net_pay = excluded.net_pay, notes = excluded.notes`
       )
-      .run(employee_id, period_month, period_year, half, base, bonus, overtime, deduction, net, notes || null);
+      .run(employee_id, period_month, period_year, half, base, bonus, overtime, nightDiff, deduction, net, notes || null);
 
     // lastInsertRowid is unreliable on the UPDATE path of an upsert, so look the row up by its natural key.
     const record = await db
@@ -227,28 +213,19 @@ router.post(
       return res.status(400).json({ error: "period_month, period_year and period_half (1 or 2) are required" });
     }
     const half = Number(period_half);
-    const { start, end } = payrollPeriodRange(period_month, period_year, half);
-    const expectedDays = countWeekdays(start, end) || 1;
     const settings = await db.prepare("SELECT * FROM payroll_settings WHERE id = 1").get();
-    const standardHours = settings.standard_hours_per_day;
-    const otMultiplier = settings.overtime_multiplier;
 
     const employees = await db.prepare("SELECT * FROM employees WHERE status = 'active'").all();
     const insert = db.prepare(
-      `INSERT INTO payroll_records (employee_id, period_month, period_year, period_half, base_salary, bonuses, overtime_pay, deductions, net_pay, status)
-     VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?, 'draft')
+      `INSERT INTO payroll_records (employee_id, period_month, period_year, period_half, base_salary, bonuses, overtime_pay, night_differential_pay, deductions, net_pay, status)
+     VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0, ?, 'draft')
      ON CONFLICT(employee_id, period_month, period_year, period_half) DO NOTHING`
     );
     const generated = [];
     const runAll = db.transaction(async (rows) => {
       for (const e of rows) {
-        const { daysWorked, overtimeHours } = await computeAttendanceForPeriod(e.id, start, end, standardHours);
-        const dailyRate = e.base_salary / 2 / expectedDays;
-        const hourlyRate = dailyRate / standardHours;
-        const earnedBase = Math.round(dailyRate * daysWorked * 100) / 100;
-        const overtimePay = Math.round(overtimeHours * hourlyRate * otMultiplier * 100) / 100;
-        const net = Math.round((earnedBase + overtimePay) * 100) / 100;
-        await insert.run(e.id, period_month, period_year, half, earnedBase, overtimePay, net);
+        const pay = await computeEmployeePayroll(e, period_month, period_year, half, settings);
+        await insert.run(e.id, period_month, period_year, half, pay.base_salary, pay.overtime_pay, pay.night_differential_pay, pay.net_pay);
         generated.push(e.id);
       }
     });

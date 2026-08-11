@@ -3,6 +3,7 @@ const db = require("../db");
 const { requireAuth, requireRole, requireSelfOrRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
+const { currentPeriodHalf } = require("../services/payrollCalc");
 
 const router = express.Router();
 
@@ -22,25 +23,51 @@ const EMPLOYEE_FIELDS = [
   "photo",
 ];
 
-// If payroll has already been generated for the current period, a newly
-// hired employee should show up in it immediately rather than sitting
+// If payroll has already been generated for the current half-month period, a
+// newly hired employee should show up in it immediately rather than sitting
 // invisible in the Payroll list until HR notices and re-runs "Generate
-// payroll for period". Mirrors the same insert /generate uses, so it's a
-// no-op if this employee already has a record for the period.
+// payroll for period". Targets the same real unique constraint
+// (employee_id, period_month, period_year, period_half) the bulk
+// /payroll/generate endpoint uses — this used to be a separate, drifted
+// reimplementation targeting a two-column ON CONFLICT that stopped matching
+// any real constraint once semi-monthly payroll periods were added, which
+// made this insert throw on every call once payroll had already been
+// generated for the month (silently corrupting the "employee created"
+// response into a false "Could not create employee" error, even though the
+// employee row itself had already committed).
+//
+// Base pay defaults to half the employee's monthly base salary rather than
+// going through computeEmployeePayroll's attendance-proportional formula (as
+// /payroll/generate does): a brand-new employee can never have prior
+// attendance for this period (the employee_id didn't exist yet), so that
+// formula would always floor this at ₱0 here specifically — which reads as
+// "base salary isn't wired up" even though it's technically a correct zero-
+// attendance computation. Overtime/night differential still start at 0 since
+// there's nothing to compute them from — HR can adjust everything via Edit
+// once the employee's actual attendance for the period is known.
 async function backfillCurrentPayrollIfGenerated(employee) {
   if (employee.status !== "active") return;
   const now = new Date();
   const period_month = now.getMonth() + 1;
   const period_year = now.getFullYear();
+  const period_half = currentPeriodHalf(now);
   const alreadyGenerated = await db
-    .prepare("SELECT 1 FROM payroll_records WHERE period_month = ? AND period_year = ? LIMIT 1")
-    .get(period_month, period_year);
+    .prepare("SELECT 1 FROM payroll_records WHERE period_month = ? AND period_year = ? AND period_half = ? LIMIT 1")
+    .get(period_month, period_year, period_half);
   if (!alreadyGenerated) return;
-  await db.prepare(
-    `INSERT INTO payroll_records (employee_id, period_month, period_year, base_salary, bonuses, overtime_pay, deductions, net_pay, status)
-     VALUES (?, ?, ?, ?, 0, 0, 0, ?, 'draft')
-     ON CONFLICT(employee_id, period_month, period_year) DO NOTHING`
-  ).run(employee.id, period_month, period_year, employee.base_salary, employee.base_salary);
+  const pay = {
+    base_salary: Math.round(((employee.base_salary || 0) / 2) * 100) / 100,
+    overtime_pay: 0,
+    night_differential_pay: 0,
+  };
+  pay.net_pay = pay.base_salary;
+  await db
+    .prepare(
+      `INSERT INTO payroll_records (employee_id, period_month, period_year, period_half, base_salary, bonuses, overtime_pay, night_differential_pay, deductions, net_pay, status)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, 0, ?, 'draft')
+       ON CONFLICT(employee_id, period_month, period_year, period_half) DO NOTHING`
+    )
+    .run(employee.id, period_month, period_year, period_half, pay.base_salary, pay.overtime_pay, pay.night_differential_pay, pay.net_pay);
 }
 
 router.get(
