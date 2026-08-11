@@ -148,6 +148,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   font-size: 15px;
   box-shadow: var(--shadow-sm);
 }
+/* An uploaded logo replaces the default "M" mark in the same slot — drop the
+   gradient/shadow so the image itself carries the look, and contain rather
+   than crop so non-square logos aren't cut off. */
+.brand-mark-img {
+  background: none;
+  box-shadow: none;
+  object-fit: contain;
+}
 
 .nav-link {
   display: flex;

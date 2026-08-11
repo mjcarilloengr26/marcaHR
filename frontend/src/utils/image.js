@@ -24,6 +24,32 @@ export function compressImageFile(file, maxDim = 900, quality = 0.7) {
   });
 }
 
+// Same idea as compressImageFile, but for the company logo specifically:
+// output stays PNG (not JPEG) so a transparent background survives, and the
+// target size is much smaller since it's only ever rendered at icon size
+// (sidebar header, login card).
+export function compressLogoFile(file, maxDim = 240) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Could not read the selected file"));
+    reader.onload = () => {
+      img.onerror = () => reject(new Error("Could not read the selected image"));
+      img.onload = () => {
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 // Reads any file (PDF, doc, etc.) as a base64 data URL as-is — no compression
 // possible for non-image types, so a client-side size cap stands in for it.
 export function readFileAsDataUrl(file, maxBytes = 5_000_000) {

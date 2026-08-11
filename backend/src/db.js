@@ -428,6 +428,17 @@ CREATE TABLE IF NOT EXISTS attendance_settings (
   updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
+-- Company logo shown on the login screen and sidebar header. logo_data is a
+-- base64 data URL (client-compressed to PNG before upload, image.js) or NULL
+-- to fall back to the default "M" mark — same storage pattern as attendance
+-- clock-in photos and expense receipts elsewhere in this schema.
+CREATE TABLE IF NOT EXISTS branding_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  logo_data TEXT,
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
 -- Idle-session auto-logout: the frontend (useIdleLogout hook) signs a user
 -- out client-side after this many minutes of no mouse/keyboard/touch
 -- activity, as a data-security measure against a workstation left signed in
@@ -659,6 +670,7 @@ db.migrate = function () {
           "INSERT INTO security_settings (id, idle_timeout_minutes) VALUES (1, 15) ON CONFLICT (id) DO NOTHING"
         )
       )
+      .then(() => pool.query("INSERT INTO branding_settings (id, logo_data) VALUES (1, NULL) ON CONFLICT (id) DO NOTHING"))
       .then(() =>
         pool.query("INSERT INTO terms_content (id, content, version) VALUES (1, $1, $2) ON CONFLICT (id) DO NOTHING", [
           DEFAULT_TERMS_CONTENT,

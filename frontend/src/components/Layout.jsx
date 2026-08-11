@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { api } from "../api/client";
 import ThemeToggle from "./ThemeToggle";
 
 const MANILA_TZ = "Asia/Manila";
@@ -54,8 +55,8 @@ const NAV_ITEMS = [
   { section: "Sales", icon: "💹", roles: ["admin", "hr", "employee"], salesOnly: true },
   { to: "/sales", label: "Dashboard", icon: "📊", roles: ["admin", "hr"] },
   { to: "/deals", label: "Opportunities", icon: "🎯", roles: ["admin", "hr", "employee"], salesOnly: true },
-  { to: "/orders", label: "Orders", icon: "🛍️", roles: ["admin", "hr"] },
   { to: "/billing", label: "Billing", icon: "💳", roles: ["admin", "hr"] },
+  { to: "/orders", label: "Orders", icon: "🛍️", roles: ["admin", "hr"] },
 
   { section: "Fulfillment", icon: "🚚", roles: ["admin", "hr", "employee"] },
   { to: "/work-orders", label: "Work Orders", icon: "🔧", roles: ["admin", "hr", "employee"] },
@@ -72,12 +73,25 @@ const NAV_ITEMS = [
   { to: "/events", label: "Events", icon: "📜", roles: ["admin"] },
   { to: "/terms-settings", label: "Terms & Conditions", icon: "📄", roles: ["admin"] },
   { to: "/security-settings", label: "Security", icon: "🔒", roles: ["admin"] },
+  { to: "/branding-settings", label: "Branding", icon: "🖼️", roles: ["admin"] },
 ];
 
 export default function Layout({ children }) {
   const { user, employee, logout } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [logoData, setLogoData] = useState(null);
+
+  // Editable at Administration > Branding (frontend/src/pages/BrandingSettings.jsx).
+  // That page fires "branding-updated" after a save so this header swaps to the
+  // new logo immediately, instead of showing the stale one until a full reload.
+  useEffect(() => {
+    const loadLogo = () =>
+      api.get("/branding").then((data) => setLogoData(data.logo_data)).catch(() => {});
+    loadLogo();
+    window.addEventListener("branding-updated", loadLogo);
+    return () => window.removeEventListener("branding-updated", loadLogo);
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -115,7 +129,11 @@ export default function Layout({ children }) {
     <div className="app-shell">
       <aside className={menuOpen ? "sidebar open" : "sidebar"}>
         <div className="brand">
-          <span className="brand-mark">M</span>
+          {logoData ? (
+            <img src={logoData} alt="MARCA GROUP" className="brand-mark brand-mark-img" />
+          ) : (
+            <span className="brand-mark">M</span>
+          )}
           <span>MARCA GROUP</span>
         </div>
         <nav>

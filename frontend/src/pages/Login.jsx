@@ -12,11 +12,13 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [loginNotice, setLoginNotice] = useState("");
+  const [logoData, setLogoData] = useState(null);
 
-  // Public, unauthenticated endpoint — editable at Administration > Terms &
-  // Conditions (frontend/src/pages/TermsSettings.jsx) rather than hardcoded here.
+  // Public, unauthenticated endpoints — editable at Administration > Terms &
+  // Conditions and Administration > Branding, rather than hardcoded here.
   useEffect(() => {
     api.get("/terms/login-notice").then((data) => setLoginNotice(data.login_notice)).catch(() => {});
+    api.get("/branding").then((data) => setLogoData(data.logo_data)).catch(() => {});
   }, []);
 
   if (user) return <Navigate to="/" replace />;
@@ -38,7 +40,11 @@ export default function Login() {
   return (
     <div className="login-screen">
       <form className="login-card" onSubmit={handleSubmit}>
-        <div className="brand-mark login-brand-mark">M</div>
+        {logoData ? (
+          <img src={logoData} alt="MARCA GROUP" className="brand-mark login-brand-mark brand-mark-img" />
+        ) : (
+          <div className="brand-mark login-brand-mark">M</div>
+        )}
         <h1>MARCA GROUP</h1>
         <p className="subtitle">Sign in to continue</p>
         {location.state?.idleLogout && (
