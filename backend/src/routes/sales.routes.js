@@ -254,7 +254,7 @@ router.get(
 
     const rows = await db
       .prepare(
-        `SELECT er.expense_type, er.cash_advance_amount,
+        `SELECT er.expense_type, er.title, er.cash_advance_amount,
                 COALESCE((SELECT SUM(amount) FROM expense_items WHERE report_id = er.id), 0) AS total_expenses
          FROM expense_reports er
          WHERE er.created_at::date BETWEEN ? AND ?`
@@ -267,16 +267,23 @@ router.get(
     const liquidationRatePercent = totalCashAdvance > 0 ? (totalExpenses / totalCashAdvance) * 100 : null;
 
     const byTypeMap = new Map();
+    const byTitleMap = new Map();
     for (const r of rows) {
       const type = r.expense_type || "Unspecified";
       byTypeMap.set(type, (byTypeMap.get(type) || 0) + r.total_expenses);
+      const title = r.title || "Unspecified";
+      byTitleMap.set(title, (byTitleMap.get(title) || 0) + r.total_expenses);
     }
     const byType = Array.from(byTypeMap.entries()).map(([type, amount]) => ({ type, amount }));
+    const byTitle = Array.from(byTitleMap.entries())
+      .map(([title, amount]) => ({ title, amount }))
+      .sort((a, b) => b.amount - a.amount);
 
     res.json({
       period: { type: period_type, year: period_year, index: period_index, label: periodLabel(period_type, period_year, period_index) },
       totals: { totalCashAdvance, totalExpenses, balance, liquidationRatePercent },
       byType,
+      byTitle,
     });
   })
 );

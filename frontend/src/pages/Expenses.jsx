@@ -10,7 +10,8 @@ const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { minimumFra
 const EXPENSE_TYPE_OPTIONS = ["Operating Expenses", "Project Expenses"];
 const EXPENSE_TITLE_OPTIONS = [
   "Fuel", "Parking", "Toll Fees", "Meals", "Maintenance", "Allowance",
-  "Supplies", "Materials", "Labor", "Airfare", "Hotel", "Foods", "Others",
+  "Supplies", "Materials", "Labor", "Airfare", "Hotel", "Foods",
+  "Equipment Rental", "Vehicle Rental", "Others",
 ];
 const EMPTY_FORM = { title: "", title_other: "", expense_type: "", cash_advance_amount: "", cost_center: "", notes: "" };
 

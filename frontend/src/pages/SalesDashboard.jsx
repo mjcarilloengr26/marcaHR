@@ -30,6 +30,21 @@ const EXPENSE_TYPE_COLORS = {
   Unspecified: "#6b7280",
 };
 
+// Title/Purpose isn't a fixed small taxonomy like Expenses Type — the
+// dropdown offers ~13 presets plus arbitrary free text when "Others" is
+// picked, so slices are colored by position in this rotation (already
+// sorted by amount, largest first) rather than a per-label fixed map.
+// "Unspecified" (reports predating the dropdown) still gets the same
+// neutral gray used elsewhere for "no real category".
+const TITLE_PALETTE = [
+  "#2f6fed", "#e0930b", "#1e8e5a", "#d64550", "#8b5cf6",
+  "#0891b2", "#c026d3", "#65a30d", "#b45309", "#4338ca",
+  "#db2777", "#0d9488",
+];
+function titleColor(title, index) {
+  return title === "Unspecified" ? "#6b7280" : TITLE_PALETTE[index % TITLE_PALETTE.length];
+}
+
 function periodLabel(periodType, year, index) {
   if (periodType === "yearly") return `${year}`;
   if (periodType === "quarterly") return `Q${index} ${year}`;
@@ -367,13 +382,28 @@ export default function SalesDashboard() {
                 </div>
               </div>
 
-              <PieChart
-                data={expensesReport.byType.map((t) => ({
-                  label: t.type,
-                  value: t.amount,
-                  color: EXPENSE_TYPE_COLORS[t.type] || EXPENSE_TYPE_COLORS.Unspecified,
-                }))}
-              />
+              <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                <div style={{ flex: "1 1 280px" }}>
+                  <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>By Expenses Type</h3>
+                  <PieChart
+                    data={expensesReport.byType.map((t) => ({
+                      label: t.type,
+                      value: t.amount,
+                      color: EXPENSE_TYPE_COLORS[t.type] || EXPENSE_TYPE_COLORS.Unspecified,
+                    }))}
+                  />
+                </div>
+                <div style={{ flex: "1 1 280px" }}>
+                  <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>By Title / Purpose</h3>
+                  <PieChart
+                    data={expensesReport.byTitle.map((t, i) => ({
+                      label: t.title,
+                      value: t.amount,
+                      color: titleColor(t.title, i),
+                    }))}
+                  />
+                </div>
+              </div>
             </>
           )}
         </div>
