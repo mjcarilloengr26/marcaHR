@@ -3,7 +3,7 @@ const ExcelJS = require("exceljs");
 const db = require("../db");
 const { requireAuth } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
-const { getSalesTargetsReport, parsePeriod } = require("../services/salesTargets");
+const { getSalesTargetsReport, parsePeriod, periodDateRange } = require("../services/salesTargets");
 const { getExpenseSummary } = require("../services/expenseSummary");
 const { logRequestEvent } = require("../services/auditLog");
 
@@ -223,6 +223,63 @@ router.get(
     });
 
     const filename = `marca-group-sales-finance-report-${period_year}-${period_type}-${period_index}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  })
+);
+
+// Purchase Orders export lives on the same Finance/Admin audience as the sales/
+// finance report it sits next to on the Reports page — procurement spend is
+// financial data, not day-to-day HR territory, so this deliberately doesn't
+// widen to isAdminHrOrFinance the way the payroll export does.
+router.get(
+  "/purchase-orders-export",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!(await isFinanceOrAdmin(req))) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
+    const { period_type, period_year, period_index } = parsePeriod(req.query);
+    const { start, end } = periodDateRange(period_type, period_year, period_index);
+
+    const rows = await db
+      .prepare(
+        `SELECT po.po_number, po.vendor_name, po.description, po.amount, po.status,
+                po.order_date, po.expected_delivery_date, po.received_date,
+                (e.first_name || ' ' || e.last_name) AS requested_by_name
+         FROM purchase_orders po LEFT JOIN employees e ON e.id = po.requested_by
+         WHERE po.order_date BETWEEN ? AND ?
+         ORDER BY po.order_date DESC`
+      )
+      .all(start, end);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "MARCA GROUP";
+    workbook.created = new Date();
+    const sheet = workbook.addWorksheet("Purchase Orders");
+    sheet.columns = [
+      { header: "PO #", key: "po_number", width: 14 },
+      { header: "Vendor", key: "vendor_name", width: 22 },
+      { header: "Description", key: "description", width: 28 },
+      { header: "Amount", key: "amount", width: 14 },
+      { header: "Status", key: "status", width: 12 },
+      { header: "Requested By", key: "requested_by_name", width: 20 },
+      { header: "Order Date", key: "order_date", width: 14 },
+      { header: "Expected Delivery", key: "expected_delivery_date", width: 16 },
+      { header: "Received Date", key: "received_date", width: 14 },
+    ];
+    sheet.addRows(rows.map((r) => ({ ...r, requested_by_name: r.requested_by_name || "—" })));
+    sheet.getRow(1).font = { bold: true };
+
+    await logRequestEvent(req, "export_excel", {
+      entityType: "report",
+      details: { report: "purchase-orders", period_type, period_year, period_index },
+    });
+
+    const filename = `marca-group-purchase-orders-report-${period_year}-${period_type}-${period_index}.xlsx`;
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     await workbook.xlsx.write(res);

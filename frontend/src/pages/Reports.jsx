@@ -13,6 +13,11 @@ export default function Reports() {
   const [year, setYear] = useState(now.getFullYear());
   const [exportingSalesFinance, setExportingSalesFinance] = useState(false);
 
+  const [poPeriodType, setPoPeriodType] = useState("monthly");
+  const [poPeriodIndex, setPoPeriodIndex] = useState(now.getMonth() + 1);
+  const [poYear, setPoYear] = useState(now.getFullYear());
+  const [exportingPurchaseOrders, setExportingPurchaseOrders] = useState(false);
+
   const [payrollMonth, setPayrollMonth] = useState(now.getMonth() + 1);
   const [payrollYear, setPayrollYear] = useState(now.getFullYear());
   const [payrollHalf, setPayrollHalf] = useState(""); // "" = both halves
@@ -25,14 +30,22 @@ export default function Reports() {
   // reachable at all doesn't grant access to the underlying data.
   const isFinance = (employee?.department_name || "").toLowerCase().includes("finance");
   const canExportSalesFinance = user?.role === "admin" || isFinance;
+  const canExportPurchaseOrders = user?.role === "admin" || isFinance;
   const canExportPayroll = ["admin", "hr"].includes(user?.role) || isFinance;
-  const canSeePage = canExportSalesFinance || canExportPayroll;
+  const canSeePage = canExportSalesFinance || canExportPurchaseOrders || canExportPayroll;
 
   const changePeriodType = (type) => {
     setPeriodType(type);
     if (type === "monthly") setPeriodIndex(now.getMonth() + 1);
     else if (type === "quarterly") setPeriodIndex(Math.floor(now.getMonth() / 3) + 1);
     else setPeriodIndex(0);
+  };
+
+  const changePoPeriodType = (type) => {
+    setPoPeriodType(type);
+    if (type === "monthly") setPoPeriodIndex(now.getMonth() + 1);
+    else if (type === "quarterly") setPoPeriodIndex(Math.floor(now.getMonth() / 3) + 1);
+    else setPoPeriodIndex(0);
   };
 
   const exportSalesFinance = async () => {
@@ -47,6 +60,21 @@ export default function Reports() {
       setError(err.message);
     } finally {
       setExportingSalesFinance(false);
+    }
+  };
+
+  const exportPurchaseOrders = async () => {
+    setExportingPurchaseOrders(true);
+    setError("");
+    try {
+      await downloadFile(
+        `/reports/purchase-orders-export?period_type=${poPeriodType}&year=${poYear}&index=${poPeriodIndex}`,
+        "marca-group-purchase-orders-report.xlsx"
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setExportingPurchaseOrders(false);
     }
   };
 
@@ -72,7 +100,7 @@ export default function Reports() {
         <div className="page-header">
           <div>
             <h1>Reports</h1>
-            <p className="subtitle">Export sales, finance, and payroll data to Excel</p>
+            <p className="subtitle">Export sales, finance, purchase orders, and payroll data to Excel</p>
           </div>
         </div>
         <div className="empty-state">This page is available to Admin, HR, and Finance only.</div>
@@ -85,7 +113,7 @@ export default function Reports() {
       <div className="page-header">
         <div>
           <h1>Reports</h1>
-          <p className="subtitle">Export sales, finance, and payroll data to Excel</p>
+          <p className="subtitle">Export sales, finance, purchase orders, and payroll data to Excel</p>
         </div>
       </div>
 
@@ -138,11 +166,58 @@ export default function Reports() {
         </div>
       )}
 
+      {canExportPurchaseOrders && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>Purchase Orders Report</h2>
+          <p className="subtitle" style={{ margin: "0 0 12px" }}>
+            Downloads an Excel workbook of purchase orders for the selected period, separate from the reports above and below.
+          </p>
+          <div className="form-inline" style={{ marginBottom: 16 }}>
+            <div className="form-row">
+              <label>Period</label>
+              <select value={poPeriodType} onChange={(e) => changePoPeriodType(e.target.value)}>
+                <option value="monthly">Monthly</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+            {poPeriodType === "monthly" && (
+              <div className="form-row">
+                <label>Month</label>
+                <select value={poPeriodIndex} onChange={(e) => setPoPeriodIndex(Number(e.target.value))}>
+                  {MONTH_NAMES.slice(1).map((name, i) => (
+                    <option key={name} value={i + 1}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {poPeriodType === "quarterly" && (
+              <div className="form-row">
+                <label>Quarter</label>
+                <select value={poPeriodIndex} onChange={(e) => setPoPeriodIndex(Number(e.target.value))}>
+                  <option value={1}>Q1</option>
+                  <option value={2}>Q2</option>
+                  <option value={3}>Q3</option>
+                  <option value={4}>Q4</option>
+                </select>
+              </div>
+            )}
+            <div className="form-row">
+              <label>Year</label>
+              <input type="number" value={poYear} onChange={(e) => setPoYear(Number(e.target.value))} />
+            </div>
+          </div>
+          <button type="button" className="btn" onClick={exportPurchaseOrders} disabled={exportingPurchaseOrders}>
+            {exportingPurchaseOrders ? "Exporting…" : "Export to Excel"}
+          </button>
+        </div>
+      )}
+
       {canExportPayroll && (
         <div className="card">
           <h2>Payroll Report</h2>
           <p className="subtitle" style={{ margin: "0 0 12px" }}>
-            Downloads an Excel workbook of payroll records for the selected period, separate from the report above.
+            Downloads an Excel workbook of payroll records for the selected period, separate from the reports above.
           </p>
           <div className="form-inline" style={{ marginBottom: 16 }}>
             <div className="form-row">
