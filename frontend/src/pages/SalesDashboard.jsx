@@ -405,9 +405,7 @@ export default function SalesDashboard() {
                           instead of wrapping below it, unlike Title/Purpose's longer
                           list. Still wraps to stacked on genuinely narrow screens. */}
                       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-                        <div style={{ flexShrink: 0 }}>
-                          <PieChart data={byTypePieData} />
-                        </div>
+                        <PieChart data={byTypePieData} />
                         <div style={{ flex: "1 1 260px", minWidth: 0 }}>
                           <BarChart
                             data={expensesReport.byType}
