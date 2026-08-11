@@ -287,22 +287,28 @@ export default function SalesDashboard() {
                 </div>
               </div>
 
-              <PieChart
-                data={
-                  pnl.totals.netProfit >= 0
-                    ? [
-                        { label: "Net Profit", value: pnl.totals.netProfit, color: PNL_COLORS.netProfit },
-                        { label: "Payroll", value: pnl.costs.payroll, color: PNL_COLORS.payroll },
-                        { label: "Procurement", value: pnl.costs.procurement, color: PNL_COLORS.procurement },
-                        { label: "Operating Expenses", value: pnl.costs.operatingExpenses, color: PNL_COLORS.operatingExpenses },
-                      ]
-                    : [
-                        { label: "Payroll", value: pnl.costs.payroll, color: PNL_COLORS.payroll },
-                        { label: "Procurement", value: pnl.costs.procurement, color: PNL_COLORS.procurement },
-                        { label: "Operating Expenses", value: pnl.costs.operatingExpenses, color: PNL_COLORS.operatingExpenses },
-                      ]
-                }
-              />
+              {/* Same fixed width the Expenses Report pies use, so all three pies
+                  on this page occupy an identical block instead of this one
+                  spanning the whole card. The circle itself is already a fixed
+                  160px inside PieChart; this pins the legend beside it too. */}
+              <div style={{ maxWidth: 460 }}>
+                <PieChart
+                  data={
+                    pnl.totals.netProfit >= 0
+                      ? [
+                          { label: "Net Profit", value: pnl.totals.netProfit, color: PNL_COLORS.netProfit },
+                          { label: "Payroll", value: pnl.costs.payroll, color: PNL_COLORS.payroll },
+                          { label: "Procurement", value: pnl.costs.procurement, color: PNL_COLORS.procurement },
+                          { label: "Operating Expenses", value: pnl.costs.operatingExpenses, color: PNL_COLORS.operatingExpenses },
+                        ]
+                      : [
+                          { label: "Payroll", value: pnl.costs.payroll, color: PNL_COLORS.payroll },
+                          { label: "Procurement", value: pnl.costs.procurement, color: PNL_COLORS.procurement },
+                          { label: "Operating Expenses", value: pnl.costs.operatingExpenses, color: PNL_COLORS.operatingExpenses },
+                        ]
+                  }
+                />
+              </div>
               {pnl.totals.netProfit < 0 && (
                 <p className="subtitle" style={{ marginTop: 12, marginBottom: 0 }}>
                   Costs exceeded revenue this period, so the chart shows cost composition only (no profit slice to draw).
