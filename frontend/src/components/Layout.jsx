@@ -71,6 +71,7 @@ const NAV_ITEMS = [
   { to: "/users", label: "Users", icon: "👤", roles: ["admin"] },
   { to: "/events", label: "Events", icon: "📜", roles: ["admin"] },
   { to: "/terms-settings", label: "Terms & Conditions", icon: "📄", roles: ["admin"] },
+  { to: "/security-settings", label: "Security", icon: "🔒", roles: ["admin"] },
 ];
 
 export default function Layout({ children }) {

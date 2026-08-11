@@ -1,12 +1,16 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, getToken, setToken } from "../api/client";
+import { useIdleLogout } from "../hooks/useIdleLogout";
 
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
+  const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [employee, setEmployee] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState(null);
 
   const loadMe = useCallback(async () => {
     if (!getToken()) {
@@ -51,6 +55,29 @@ export function AuthProvider({ children }) {
     await api.post("/auth/accept-terms");
     setUser((u) => ({ ...u, terms_accepted: true }));
   };
+
+  // Every signed-in session needs to know the configured idle-logout window
+  // (Administration > Security, admin-only to edit) to run its own timer.
+  useEffect(() => {
+    if (!user) {
+      setIdleTimeoutMinutes(null);
+      return;
+    }
+    api
+      .get("/security-settings")
+      .then((data) => setIdleTimeoutMinutes(data.idle_timeout_minutes))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  useIdleLogout({
+    enabled: !!user,
+    minutes: idleTimeoutMinutes,
+    onIdle: () => {
+      logout();
+      navigate("/login", { state: { idleLogout: true } });
+    },
+  });
 
   return (
     <AuthContext.Provider value={{ user, employee, loading, login, logout, acceptTerms, refresh: loadMe }}>

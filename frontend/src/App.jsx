@@ -31,6 +31,7 @@ const Users = lazy(() => import("./pages/Users"));
 const Reports = lazy(() => import("./pages/Reports"));
 const Events = lazy(() => import("./pages/Events"));
 const TermsSettings = lazy(() => import("./pages/TermsSettings"));
+const SecuritySettings = lazy(() => import("./pages/SecuritySettings"));
 
 function Protected({ children, roles }) {
   return (
@@ -66,6 +67,7 @@ export default function App() {
         <Route path="/users" element={<Protected roles={["admin"]}><Users /></Protected>} />
         <Route path="/events" element={<Protected roles={["admin"]}><Events /></Protected>} />
         <Route path="/terms-settings" element={<Protected roles={["admin"]}><TermsSettings /></Protected>} />
+        <Route path="/security-settings" element={<Protected roles={["admin"]}><SecuritySettings /></Protected>} />
         <Route path="/reports" element={<Protected><Reports /></Protected>} />
       </Routes>
     </Suspense>

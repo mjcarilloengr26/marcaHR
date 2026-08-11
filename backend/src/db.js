@@ -428,6 +428,17 @@ CREATE TABLE IF NOT EXISTS attendance_settings (
   updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
+-- Idle-session auto-logout: the frontend (useIdleLogout hook) signs a user
+-- out client-side after this many minutes of no mouse/keyboard/touch
+-- activity, as a data-security measure against a workstation left signed in
+-- and unattended. Editable only by admins at Administration > Security.
+CREATE TABLE IF NOT EXISTS security_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  idle_timeout_minutes INTEGER NOT NULL DEFAULT 15,
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
 -- Inputs to the automatic payroll calculation (base pay proration + overtime),
 -- kept editable rather than hardcoded since neither figure is safe to assume
 -- for every company.
@@ -641,6 +652,11 @@ db.migrate = function () {
       .then(() =>
         pool.query(
           "INSERT INTO inventory_settings (id, alarm_threshold_percent) VALUES (1, 20) ON CONFLICT (id) DO NOTHING"
+        )
+      )
+      .then(() =>
+        pool.query(
+          "INSERT INTO security_settings (id, idle_timeout_minutes) VALUES (1, 15) ON CONFLICT (id) DO NOTHING"
         )
       )
       .then(() =>

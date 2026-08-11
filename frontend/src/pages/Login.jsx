@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../api/client";
 
 export default function Login() {
   const { user, login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -40,6 +41,9 @@ export default function Login() {
         <div className="brand-mark login-brand-mark">M</div>
         <h1>MARCA GROUP</h1>
         <p className="subtitle">Sign in to continue</p>
+        {location.state?.idleLogout && (
+          <div className="error-banner">You were signed out due to inactivity. Please sign in again.</div>
+        )}
         {error && <div className="error-banner">{error}</div>}
         <div className="form-row">
           <label>Email</label>
