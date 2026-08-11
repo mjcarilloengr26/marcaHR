@@ -47,8 +47,13 @@ export function AuthProvider({ children }) {
     setEmployee(null);
   };
 
+  const acceptTerms = async () => {
+    await api.post("/auth/accept-terms");
+    setUser((u) => ({ ...u, terms_accepted: true }));
+  };
+
   return (
-    <AuthContext.Provider value={{ user, employee, loading, login, logout, refresh: loadMe }}>
+    <AuthContext.Provider value={{ user, employee, loading, login, logout, acceptTerms, refresh: loadMe }}>
       {children}
     </AuthContext.Provider>
   );

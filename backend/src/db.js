@@ -147,6 +147,8 @@ CREATE TABLE IF NOT EXISTS users (
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('admin','hr','employee')),
   employee_id INTEGER REFERENCES employees(id) ON DELETE CASCADE,
+  terms_version TEXT,
+  terms_accepted_at TEXT,
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
@@ -568,6 +570,15 @@ async function ensurePayrollDeductionBreakdown() {
 // instead of resetting to 0 every period; editing the breakdown on a payroll
 // record (POST /payroll) writes the new amounts back here too, so the change
 // carries forward into future cut-offs until HR/admin edits it again.
+// Existing deployed accounts predate the mandatory post-login Terms and
+// Conditions / Data Privacy / Cybersecurity acknowledgment — both columns
+// come in NULL for them, which is exactly what should make every existing
+// user see the acceptance gate once on their next login.
+async function ensureUserTermsAcceptance() {
+  await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_version TEXT");
+  await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TEXT");
+}
+
 async function ensureEmployeeStandingDeductions() {
   await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_sss REAL NOT NULL DEFAULT 0");
   await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_hdmf REAL NOT NULL DEFAULT 0");
@@ -606,7 +617,8 @@ db.migrate = function () {
       .then(() => ensurePayrollTimeSettings())
       .then(() => ensurePayrollNightDifferential())
       .then(() => ensurePayrollDeductionBreakdown())
-      .then(() => ensureEmployeeStandingDeductions());
+      .then(() => ensureEmployeeStandingDeductions())
+      .then(() => ensureUserTermsAcceptance());
   }
   return migrated;
 };
