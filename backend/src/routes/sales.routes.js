@@ -29,10 +29,48 @@ router.get(
   requireAuth,
   requireRole("admin", "hr"),
   asyncHandler(async (req, res) => {
-    const dealCounts = (await db.prepare("SELECT stage, COUNT(*) AS c FROM deals GROUP BY stage").all()).reduce(
-      (acc, row) => ({ ...acc, [row.stage]: row.c }),
-      {}
-    );
+    // Every query below is independent, so they're issued together instead of
+    // awaited one at a time — against a hosted database the sequential version
+    // cost the sum of ~10 round-trips rather than roughly one.
+    const todayManila = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+    const [todayYear, todayMonth, todayDay] = todayManila.split("-");
+    const lastYear = String(Number(todayYear) - 1);
+
+    const [
+      dealCountRows,
+      orderCountRows,
+      pipelineValueRow,
+      wonValueRow,
+      openDealsRow,
+      ordersRevenueRow,
+      ordersThisMonthRow,
+      orderBacklog,
+      ytdThisYearRow,
+      ytdLastYearRow,
+    ] = await Promise.all([
+      db.prepare("SELECT stage, COUNT(*) AS c FROM deals GROUP BY stage").all(),
+      db.prepare("SELECT status, COUNT(*) AS c FROM orders GROUP BY status").all(),
+      db.prepare("SELECT COALESCE(SUM(value), 0) AS v FROM deals WHERE stage NOT IN ('won', 'lost')").get(),
+      db.prepare("SELECT COALESCE(SUM(value), 0) AS v FROM deals WHERE stage = 'won'").get(),
+      db.prepare("SELECT COUNT(*) AS c FROM deals WHERE stage NOT IN ('won', 'lost')").get(),
+      db.prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled'").get(),
+      db
+        .prepare(
+          "SELECT COUNT(*) AS c FROM orders WHERE to_char(order_date::date, 'YYYY-MM') = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM')"
+        )
+        .get(),
+      db
+        .prepare("SELECT COUNT(*) AS c, COALESCE(SUM(amount), 0) AS v FROM orders WHERE status NOT IN ('delivered', 'cancelled')")
+        .get(),
+      db
+        .prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled' AND order_date BETWEEN ? AND ?")
+        .get(`${todayYear}-01-01`, todayManila),
+      db
+        .prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled' AND order_date BETWEEN ? AND ?")
+        .get(`${lastYear}-01-01`, `${lastYear}-${todayMonth}-${todayDay}`),
+    ]);
+
+    const dealCounts = dealCountRows.reduce((acc, row) => ({ ...acc, [row.stage]: row.c }), {});
 
     const dealStageLabels = {
       lead: "Lead",
@@ -43,18 +81,13 @@ router.get(
     };
     const dealFunnel = buildFunnel(dealCounts, DEAL_STAGES, dealStageLabels, "lost", "Lost");
 
-    const orderCounts = (await db.prepare("SELECT status, COUNT(*) AS c FROM orders GROUP BY status").all()).reduce(
-      (acc, row) => ({ ...acc, [row.status]: row.c }),
-      {}
-    );
+    const orderCounts = orderCountRows.reduce((acc, row) => ({ ...acc, [row.status]: row.c }), {});
     const orderStatusLabels = { placed: "Placed", processing: "Processing", shipped: "Shipped", delivered: "Delivered" };
     const orderFunnel = buildFunnel(orderCounts, ORDER_STATUSES, orderStatusLabels, "cancelled", "Cancelled");
 
-    const pipelineValue = (
-      await db.prepare("SELECT COALESCE(SUM(value), 0) AS v FROM deals WHERE stage NOT IN ('won', 'lost')").get()
-    ).v;
-    const wonValue = (await db.prepare("SELECT COALESCE(SUM(value), 0) AS v FROM deals WHERE stage = 'won'").get()).v;
-    const openDeals = (await db.prepare("SELECT COUNT(*) AS c FROM deals WHERE stage NOT IN ('won', 'lost')").get()).c;
+    const pipelineValue = pipelineValueRow.v;
+    const wonValue = wonValueRow.v;
+    const openDeals = openDealsRow.c;
 
     // Win rate: won opportunities as a share of every opportunity that's actually
     // been decided (won + lost) — open/in-progress deals are excluded since they
@@ -64,38 +97,19 @@ router.get(
     const closedDeals = wonDeals + lostDeals;
     const winRate = closedDeals > 0 ? (wonDeals / closedDeals) * 100 : null;
 
-    const ordersRevenue = (await db.prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled'").get())
-      .v;
-    const ordersThisMonth = (
-      await db
-        .prepare(
-          "SELECT COUNT(*) AS c FROM orders WHERE to_char(order_date::date, 'YYYY-MM') = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM')"
-        )
-        .get()
-    ).c;
+    const ordersRevenue = ordersRevenueRow.v;
+    const ordersThisMonth = ordersThisMonthRow.c;
 
-    // Order backlog: value still owed to customers — placed/processing/shipped
-    // but not yet delivered (and not cancelled, since that's a dead order, not
-    // outstanding work).
-    const orderBacklog = await db
-      .prepare("SELECT COUNT(*) AS c, COALESCE(SUM(amount), 0) AS v FROM orders WHERE status NOT IN ('delivered', 'cancelled')")
-      .get();
-
+    // Order backlog (orderBacklog above): value still owed to customers —
+    // placed/processing/shipped but not yet delivered (and not cancelled,
+    // since that's a dead order, not outstanding work).
+    //
     // Year-to-date order revenue, this year vs the same Jan-1-through-today
     // window last year — an apples-to-apples YoY comparison, not full-year
     // totals (which would unfairly compare a partial year to a complete one).
     // Anchored to Manila "today" like the rest of the app's date logic.
-    const todayManila = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
-    const [todayYear, todayMonth, todayDay] = todayManila.split("-");
-    const lastYear = String(Number(todayYear) - 1);
-    const ytdRevenue = async (year, end) =>
-      (
-        await db
-          .prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled' AND order_date BETWEEN ? AND ?")
-          .get(`${year}-01-01`, end)
-      ).v;
-    const ordersRevenueYtdThisYear = await ytdRevenue(todayYear, todayManila);
-    const ordersRevenueYtdLastYear = await ytdRevenue(lastYear, `${lastYear}-${todayMonth}-${todayDay}`);
+    const ordersRevenueYtdThisYear = ytdThisYearRow.v;
+    const ordersRevenueYtdLastYear = ytdLastYearRow.v;
 
     res.json({
       dealFunnel,
@@ -192,38 +206,35 @@ router.get(
     const startMonth = Number(start.split("-")[1]);
     const endMonth = Number(end.split("-")[1]);
 
-    const ordersRevenue = (
-      await db.prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled' AND order_date BETWEEN ? AND ?").get(
-        start,
-        end
-      )
-    ).v;
-
-    const procurement = (
-      await db
+    // The four cost/revenue totals are independent, so they're fetched
+    // together instead of one round-trip at a time.
+    const [ordersRevenueRow, procurementRow, payrollRow, operatingExpensesRow] = await Promise.all([
+      db
+        .prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled' AND order_date BETWEEN ? AND ?")
+        .get(start, end),
+      db
         .prepare(
           "SELECT COALESCE(SUM(amount), 0) AS v FROM purchase_orders WHERE status NOT IN ('cancelled', 'draft') AND order_date BETWEEN ? AND ?"
         )
-        .get(start, end)
-    ).v;
-
-    const payroll = (
-      await db
+        .get(start, end),
+      db
         .prepare(
           "SELECT COALESCE(SUM(net_pay), 0) AS v FROM payroll_records WHERE status IN ('finalized', 'paid') AND period_year = ? AND period_month BETWEEN ? AND ?"
         )
-        .get(period_year, startMonth, endMonth)
-    ).v;
-
-    const operatingExpenses = (
-      await db
+        .get(period_year, startMonth, endMonth),
+      db
         .prepare(
           `SELECT COALESCE(SUM(ei.amount), 0) AS v FROM expense_items ei
            JOIN expense_reports er ON er.id = ei.report_id
            WHERE er.status IN ('approved', 'reimbursed') AND ei.expense_date BETWEEN ? AND ?`
         )
-        .get(start, end)
-    ).v;
+        .get(start, end),
+    ]);
+
+    const ordersRevenue = ordersRevenueRow.v;
+    const procurement = procurementRow.v;
+    const payroll = payrollRow.v;
+    const operatingExpenses = operatingExpensesRow.v;
 
     const totalRevenue = ordersRevenue;
     const totalCosts = procurement + payroll + operatingExpenses;

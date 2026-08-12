@@ -36,6 +36,10 @@ export default function Board() {
   const [columnName, setColumnName] = useState("");
   const [saving, setSaving] = useState(false);
   const [editingCard, setEditingCard] = useState(null); // the card being edited, or null
+  // Card descriptions are clamped to a few lines on the card itself, so a long
+  // one (meeting details, requirements lists) is unreadable in place. This
+  // holds the card whose full details are open in the read-only viewer.
+  const [viewingCard, setViewingCard] = useState(null);
 
   // Mirrors the backend's canManageCard check, so the Edit button only shows up
   // where the request would actually be allowed to succeed.
@@ -225,7 +229,23 @@ export default function Board() {
                 onDrop={isHr ? handleDropOnCard(card) : undefined}
               >
                 <div className="board-card-title">{card.title}</div>
-                {card.description && <div className="board-card-desc">{card.description}</div>}
+                {card.description && (
+                  <div
+                    className="board-card-desc"
+                    role="button"
+                    tabIndex={0}
+                    title="Click to read the full description"
+                    onClick={() => setViewingCard(card)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setViewingCard(card);
+                      }
+                    }}
+                  >
+                    {card.description}
+                  </div>
+                )}
                 {(() => {
                   const summary = assigneeSummary(card.assignees);
                   return (
@@ -253,6 +273,9 @@ export default function Board() {
                         ))}
                     </select>
                   )}
+                  <button className="link-btn" onClick={() => setViewingCard(card)}>
+                    View
+                  </button>
                   {canManageCard(card) && (
                     <button className="link-btn" onClick={() => openEditCard(card)}>
                       Edit
@@ -374,6 +397,54 @@ export default function Board() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Read-only full view — available to everyone, including people who
+          can't edit the card, since the point is just to read a description
+          that's too long for the card face. */}
+      {viewingCard && (
+        <div className="modal-backdrop" onClick={() => setViewingCard(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2 style={{ marginBottom: 4 }}>{viewingCard.title}</h2>
+            {(() => {
+              const summary = assigneeSummary(viewingCard.assignees);
+              return (
+                (summary || viewingCard.due_date) && (
+                  <p className="subtitle" style={{ marginTop: 0 }}>
+                    {summary && <span>{summary.full}</span>}
+                    {summary && viewingCard.due_date && <span> · </span>}
+                    {viewingCard.due_date && <span>Due {formatDueDate(viewingCard.due_date)}</span>}
+                  </p>
+                )
+              );
+            })()}
+            {viewingCard.description ? (
+              // pre-wrap so the line breaks the author typed survive — these
+              // descriptions are often step lists rather than prose.
+              <div style={{ whiteSpace: "pre-wrap", fontSize: 14, lineHeight: 1.6 }}>{viewingCard.description}</div>
+            ) : (
+              <div className="empty-state" style={{ padding: 12 }}>This card has no description.</div>
+            )}
+            <div className="modal-actions">
+              {canManageCard(viewingCard) && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => {
+                    const card = viewingCard;
+                    setViewingCard(null);
+                    openEditCard(card);
+                  }}
+                >
+                  Edit
+                </button>
+              )}
+              <button type="button" className="btn" onClick={() => setViewingCard(null)}>
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

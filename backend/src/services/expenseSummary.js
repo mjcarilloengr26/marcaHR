@@ -51,13 +51,26 @@ async function getExpenseSummary() {
       }
     }
   }
+  // One query for every name rather than one per employee inside the loop —
+  // that N+1 was costing a full database round-trip per employee, which
+  // dominated the Overview dashboard's load time.
+  const ids = Object.keys(expenseSummaryByEmployee);
+  const nameById = new Map();
+  if (ids.length > 0) {
+    const placeholders = ids.map(() => "?").join(",");
+    const rows = await db
+      .prepare(`SELECT id, first_name, last_name FROM employees WHERE id IN (${placeholders})`)
+      .all(...ids);
+    for (const r of rows) nameById.set(String(r.id), `${r.first_name} ${r.last_name}`);
+  }
+
   const expenseSummary = [];
-  for (const id of Object.keys(expenseSummaryByEmployee)) {
-    const employee = await db.prepare("SELECT first_name, last_name FROM employees WHERE id = ?").get(id);
+  for (const id of ids) {
+    const employeeName = nameById.get(String(id)) || "Unknown";
     const s = expenseSummaryByEmployee[id];
     expenseSummary.push({
       employee_id: Number(id),
-      employee_name: employee ? `${employee.first_name} ${employee.last_name}` : "Unknown",
+      employee_name: employeeName,
       monthly_count: s.monthly.count,
       monthly_total: s.monthly.value,
       quarterly_count: s.quarterly.count,

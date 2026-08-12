@@ -572,6 +572,8 @@ input[type="date"]::-webkit-datetime-edit-year-field {
   cursor: grab;
 }
 .board-card-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; line-height: 1.3; }
+/* Clamped to 4 lines on the card face; clicking it (or the View button)
+   opens the full text in a modal, so the cursor/hover hints at that. */
 .board-card-desc {
   font-size: 12px;
   line-height: 1.5;
@@ -581,7 +583,9 @@ input[type="date"]::-webkit-datetime-edit-year-field {
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
+  cursor: pointer;
 }
+.board-card-desc:hover { color: var(--text); }
 .board-card-meta {
   display: flex;
   flex-direction: column;

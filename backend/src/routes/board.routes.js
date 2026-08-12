@@ -47,15 +47,19 @@ router.get(
   "/",
   requireAuth,
   asyncHandler(async (req, res) => {
-    const columns = await db.prepare("SELECT * FROM board_columns ORDER BY position, id").all();
-    const cards = await db.prepare("SELECT * FROM board_cards ORDER BY position, id").all();
-    const assigneeRows = await db
-      .prepare(
-        `SELECT ca.card_id, e.id AS employee_id, (e.first_name || ' ' || e.last_name) AS employee_name
+    // Three independent reads — issued together rather than one after the
+    // other, since each round-trip to a hosted database costs ~200ms.
+    const [columns, cards, assigneeRows] = await Promise.all([
+      db.prepare("SELECT * FROM board_columns ORDER BY position, id").all(),
+      db.prepare("SELECT * FROM board_cards ORDER BY position, id").all(),
+      db
+        .prepare(
+          `SELECT ca.card_id, e.id AS employee_id, (e.first_name || ' ' || e.last_name) AS employee_name
          FROM board_card_assignees ca JOIN employees e ON e.id = ca.employee_id
          ORDER BY e.first_name, e.last_name`
-      )
-      .all();
+        )
+        .all(),
+    ]);
     const assigneesByCard = new Map();
     for (const row of assigneeRows) {
       if (!assigneesByCard.has(row.card_id)) assigneesByCard.set(row.card_id, []);
