@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { NAV_ITEMS, groupNavItems, applyNavOrder } from "../config/navItems";
+import { useAppSettings } from "../context/AppSettingsContext";
 
 // Reordering is scoped to a single section on purpose: a link's section is
 // what puts it under the right heading, so dragging one across groups would
@@ -8,6 +9,7 @@ import { NAV_ITEMS, groupNavItems, applyNavOrder } from "../config/navItems";
 // another section are rejected rather than silently ignored, so it's clear
 // why nothing moved.
 export default function MenuOrder() {
+  const { t } = useAppSettings();
   const [groups, setGroups] = useState([]);
   // The dragged item lives in a ref, not state: the drop handler must read it
   // synchronously, and a state value would still be the pre-drag one if React
@@ -154,7 +156,7 @@ export default function MenuOrder() {
             <div className="card" key={g.section} style={{ marginBottom: 16 }}>
               <h2 style={{ marginTop: 0, fontSize: 15 }}>
                 <span style={{ marginRight: 8 }}>{g.sectionItem?.icon}</span>
-                {g.section}
+                {t(g.section)}
               </h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {g.links.map((l, i) => (
@@ -178,7 +180,7 @@ export default function MenuOrder() {
                   >
                     <span style={{ color: "var(--text-muted)", cursor: "grab" }} aria-hidden="true">⠿</span>
                     <span>{l.icon}</span>
-                    <span style={{ flex: 1 }}>{l.label}</span>
+                    <span style={{ flex: 1 }}>{t(l.label)}</span>
                     <button
                       className="btn btn-sm btn-secondary"
                       onClick={() => move(g.section, l.to, -1)}

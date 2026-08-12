@@ -1,15 +1,7 @@
 import { useId } from "react";
+import { useAppSettings } from "../context/AppSettingsContext";
 import useContainerWidth from "../hooks/useContainerWidth";
 
-const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-// Compact form for the y-axis (₱1,200,000 -> ₱1.2M) — the full format is reserved
-// for hover tooltips, where there's room, so axis labels don't crowd narrow screens.
-const moneyCompact = (n) => {
-  const v = Number(n || 0);
-  if (v >= 1_000_000) return `₱${(v / 1_000_000).toFixed(v % 1_000_000 === 0 ? 0 : 1)}M`;
-  if (v >= 1_000) return `₱${(v / 1_000).toFixed(0)}k`;
-  return `₱${v}`;
-};
 
 const HEIGHT = 280;
 const PAD_LEFT = 56;
@@ -42,6 +34,7 @@ function buildAreaPath(values, xFor, yFor, yBase) {
 
 export default function RevenueTrendChart({ thisYear, lastYear, months }) {
   const [containerRef, measuredWidth] = useContainerWidth();
+  const { money, moneyCompact } = useAppSettings();
   const gradientId = useId();
 
   if (!months || months.length === 0) return null;

@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 
 const emptyForm = { invoice_number: "", order_id: "", customer_name: "", amount: "", status: "draft", issue_date: "", due_date: "", notes: "" };
 const STATUSES = ["draft", "sent", "paid", "overdue", "cancelled"];
-const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 export default function Billing() {
+  const { money } = useAppSettings();
   const [invoices, setInvoices] = useState([]);
   const [orders, setOrders] = useState([]);
   const [error, setError] = useState("");

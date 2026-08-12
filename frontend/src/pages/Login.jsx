@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 
 export default function Login() {
   const { user, login } = useAuth();
+  const { t } = useAppSettings();
   const navigate = useNavigate();
   const location = useLocation();
   const [email, setEmail] = useState("");
@@ -46,13 +48,13 @@ export default function Login() {
           <div className="brand-mark login-brand-mark">M</div>
         )}
         <h1>MARCA GROUP</h1>
-        <p className="subtitle">Sign in to continue</p>
+        <p className="subtitle">{t("Sign in to continue")}</p>
         {location.state?.idleLogout && (
           <div className="error-banner">You were signed out due to inactivity. Please sign in again.</div>
         )}
         {error && <div className="error-banner">{error}</div>}
         <div className="form-row">
-          <label>Email</label>
+          <label>{t("Email")}</label>
           <input
             type="email"
             placeholder="admin@example.com"
@@ -62,7 +64,7 @@ export default function Login() {
           />
         </div>
         <div className="form-row">
-          <label>Password</label>
+          <label>{t("Password")}</label>
           <input
             type="password"
             placeholder="••••••••"
@@ -72,7 +74,7 @@ export default function Login() {
           />
         </div>
         <button className="btn" type="submit" disabled={loading} style={{ width: "100%" }}>
-          {loading ? "Signing in…" : "Sign in"}
+          {loading ? "Signing in…" : t("Sign in")}
         </button>
         {loginNotice && <div className="login-hint">{loginNotice}</div>}
       </form>

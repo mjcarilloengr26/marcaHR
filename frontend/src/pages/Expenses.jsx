@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { useAppSettings } from "../context/AppSettingsContext";
 import { compressImageFile, readFileAsDataUrl } from "../utils/image";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
-
-const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const EXPENSE_TYPE_OPTIONS = ["Operating Expenses", "Project Expenses"];
 const EXPENSE_TITLE_OPTIONS = [
@@ -17,6 +16,8 @@ const EMPTY_FORM = { title: "", title_other: "", expense_type: "", cash_advance_
 
 export default function Expenses() {
   const { user } = useAuth();
+  // Expense figures keep two decimals — they're reconciled to the centavo.
+  const { moneyPrecise: money } = useAppSettings();
   const isHr = user.role === "admin" || user.role === "hr";
   const [reports, setReports] = useState([]);
   const [error, setError] = useState("");

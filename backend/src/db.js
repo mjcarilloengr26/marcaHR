@@ -446,6 +446,19 @@ CREATE TABLE IF NOT EXISTS page_access_grants (
 );
 CREATE INDEX IF NOT EXISTS idx_page_access_grants_user ON page_access_grants(user_id);
 
+-- App-wide currency and language, set by an admin at Administration >
+-- Localization. Only the ISO currency code is stored — the symbol and where
+-- it sits relative to the number are derived per-locale by Intl on the
+-- client, which gets placement right for currencies the app has never been
+-- explicitly taught (e.g. "1.234 €" vs "€1,234").
+CREATE TABLE IF NOT EXISTS app_settings (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  currency_code TEXT NOT NULL DEFAULT 'PHP',
+  language TEXT NOT NULL DEFAULT 'en',
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
 -- Admin-defined sidebar ordering. One row per menu link (item_key is the
 -- link's route, e.g. "/inventory"); position orders it within its own
 -- section. Links with no row here fall back to their built-in order, so a
@@ -703,6 +716,9 @@ db.migrate = function () {
         )
       )
       .then(() => pool.query("INSERT INTO branding_settings (id, logo_data) VALUES (1, NULL) ON CONFLICT (id) DO NOTHING"))
+      .then(() =>
+        pool.query("INSERT INTO app_settings (id, currency_code, language) VALUES (1, 'PHP', 'en') ON CONFLICT (id) DO NOTHING")
+      )
       .then(() =>
         pool.query("INSERT INTO terms_content (id, content, version) VALUES (1, $1, $2) ON CONFLICT (id) DO NOTHING", [
           DEFAULT_TERMS_CONTENT,

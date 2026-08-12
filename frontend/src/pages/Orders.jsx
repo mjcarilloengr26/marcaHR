@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 
 const emptyForm = { order_number: "", customer_name: "", amount: "", status: "placed", owner_id: "", order_date: "", notes: "" };
 const STATUSES = ["placed", "processing", "shipped", "delivered", "cancelled"];
-const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 export default function Orders() {
+  const { money } = useAppSettings();
   const [orders, setOrders] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [error, setError] = useState("");

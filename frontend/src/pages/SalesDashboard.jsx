@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import Funnel from "../components/Funnel";
 import Meter from "../components/Meter";
 import RevenueTrendChart from "../components/RevenueTrendChart";
 import PieChart from "../components/PieChart";
 import BarChart from "../components/BarChart";
 
-const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 const MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // Fixed categorical hues, one per cost/profit category — reused across the
@@ -53,6 +53,7 @@ function periodLabel(periodType, year, index) {
 }
 
 function YtdComparison({ thisYear, lastYear }) {
+  const { money } = useAppSettings();
   if (!lastYear) {
     return (
       <div className="subtitle" style={{ margin: "6px 0 0" }}>
@@ -73,6 +74,7 @@ function YtdComparison({ thisYear, lastYear }) {
 }
 
 export default function SalesDashboard() {
+  const { money } = useAppSettings();
   const [stats, setStats] = useState(null);
   const [revenueTrend, setRevenueTrend] = useState(null);
   const [targets, setTargets] = useState([]);

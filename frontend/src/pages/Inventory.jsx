@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 
 const emptyForm = { sku: "", name: "", category: "", unit: "pcs", reorder_level: "", unit_cost: "", unit_price: "", location_id: "", notes: "" };
-const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 export default function Inventory() {
+  const { money } = useAppSettings();
   const [items, setItems] = useState([]);
   const [locations, setLocations] = useState([]);
   const [summary, setSummary] = useState(null);

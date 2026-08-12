@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 
 const emptyForm = { po_number: "", vendor_name: "", description: "", amount: "", order_date: "", expected_delivery_date: "", notes: "" };
 const STATUSES = ["draft", "submitted", "approved", "received", "cancelled"];
-const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 export default function PurchaseOrders() {
+  const { money } = useAppSettings();
   const [pos, setPos] = useState([]);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);

@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../api/client";
 import { NAV_ITEMS, applyNavOrder } from "../config/navItems";
+import { useAppSettings } from "../context/AppSettingsContext";
 import ThemeToggle from "./ThemeToggle";
 
 const MANILA_TZ = "Asia/Manila";
@@ -39,6 +40,7 @@ export default function Layout({ children }) {
   const { user, employee, logout } = useAuth();
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
+  const { t } = useAppSettings();
   const [logoData, setLogoData] = useState(null);
   const [navOrder, setNavOrder] = useState({});
 
@@ -146,7 +148,7 @@ export default function Layout({ children }) {
             item.section ? (
               <div className="nav-section" key={`section-${item.section}`}>
                 <span className="nav-section-icon">{item.icon}</span>
-                {item.section}
+                {t(item.section)}
               </div>
             ) : (
               <NavLink
@@ -157,7 +159,7 @@ export default function Layout({ children }) {
                 onClick={() => setMenuOpen(false)}
               >
                 <span className="nav-icon">{item.icon}</span>
-                <span>{item.label}</span>
+                <span>{t(item.label)}</span>
               </NavLink>
             )
           )}
@@ -188,7 +190,7 @@ export default function Layout({ children }) {
               <span className="role-badge">{user?.role}</span>
             </span>
             <button className="btn btn-secondary" onClick={handleLogout}>
-              Log out
+              {t("Log out")}
             </button>
           </div>
         </header>

@@ -1,10 +1,11 @@
-const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+import { useAppSettings } from "../context/AppSettingsContext";
 
 // All labels/values render as plain HTML (the legend), never as SVG <text> —
 // sidesteps the class of bug where SVG text scales down illegibly on narrow
 // screens (see RevenueTrendChart), since a pie chart's own arcs need no text
 // inside the drawing at all.
 export default function PieChart({ data, size = 160 }) {
+  const { money } = useAppSettings();
   const slices = (data || []).filter((d) => d.value > 0);
   const total = slices.reduce((s, d) => s + d.value, 0);
 

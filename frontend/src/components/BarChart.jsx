@@ -1,15 +1,7 @@
 import { useState } from "react";
+import { useAppSettings } from "../context/AppSettingsContext";
 import useContainerWidth from "../hooks/useContainerWidth";
 
-const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
-// Compact form for the y-axis (₱1,200,000 -> ₱1.2M) — same convention as
-// RevenueTrendChart, so axis labels never crowd narrow screens.
-const moneyCompact = (n) => {
-  const v = Number(n || 0);
-  if (v >= 1_000_000) return `₱${(v / 1_000_000).toFixed(v % 1_000_000 === 0 ? 0 : 1)}M`;
-  if (v >= 1_000) return `₱${(v / 1_000).toFixed(0)}k`;
-  return `₱${v}`;
-};
 
 const HEIGHT = 260;
 const PAD_LEFT = 52;
@@ -40,6 +32,7 @@ export default function BarChart({
   previousColor = "#a9c6fb",
 }) {
   const [containerRef, measuredWidth] = useContainerWidth();
+  const { money, moneyCompact } = useAppSettings();
   const [hover, setHover] = useState(null); // { x, y, label, year, value, color }
 
   const rows = (data || [])

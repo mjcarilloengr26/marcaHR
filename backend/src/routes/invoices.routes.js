@@ -52,7 +52,7 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
     if ((amount || 0) > info.remaining) {
       return res
         .status(400)
-        .json({ error: `Amount exceeds the order's remaining unbilled balance of ₱${info.remaining.toLocaleString()}` });
+        .json({ error: `Amount exceeds the order's remaining unbilled balance of ${info.remaining.toLocaleString()}` });
     }
   }
   try {
@@ -119,7 +119,7 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
       if (info && effectiveAmount > info.remaining) {
         return res
           .status(400)
-          .json({ error: `Amount exceeds the order's remaining unbilled balance of ₱${info.remaining.toLocaleString()}` });
+          .json({ error: `Amount exceeds the order's remaining unbilled balance of ${info.remaining.toLocaleString()}` });
       }
     }
   }

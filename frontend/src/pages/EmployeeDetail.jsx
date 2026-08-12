@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { api } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import { compressImageFile } from "../utils/image";
 
 export default function EmployeeDetail() {
+  const { money } = useAppSettings();
   const { id } = useParams();
   const navigate = useNavigate();
   const routerLocation = useLocation();
@@ -136,7 +138,7 @@ export default function EmployeeDetail() {
             <div><strong>Manager</strong><div>{employee.manager_name || "—"}</div></div>
             <div><strong>Hire date</strong><div>{employee.hire_date || "—"}</div></div>
             <div><strong>Status</strong><div><span className={`badge badge-${employee.status}`}>{employee.status}</span></div></div>
-            <div><strong>Base salary</strong><div>₱{Number(employee.base_salary || 0).toLocaleString()}</div></div>
+            <div><strong>Base salary</strong><div>{money(employee.base_salary)}</div></div>
             <div><strong>Address</strong><div>{employee.address || "—"}</div></div>
           </div>
         </div>

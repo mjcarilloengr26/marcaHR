@@ -31,6 +31,7 @@ const securityRoutes = require("./routes/security.routes");
 const brandingRoutes = require("./routes/branding.routes");
 const pageAccessRoutes = require("./routes/pageaccess.routes");
 const navOrderRoutes = require("./routes/navorder.routes");
+const { router: appSettingsRoutes } = require("./routes/appsettings.routes");
 
 const app = express();
 app.use(cors());
@@ -68,6 +69,7 @@ app.use("/api/security-settings", securityRoutes);
 app.use("/api/branding", brandingRoutes);
 app.use("/api/page-access", pageAccessRoutes);
 app.use("/api/nav-order", navOrderRoutes);
+app.use("/api/app-settings", appSettingsRoutes);
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 

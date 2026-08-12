@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
@@ -14,6 +15,7 @@ function periodLabel(record) {
 }
 
 export default function Payroll() {
+  const { money } = useAppSettings();
   const { user } = useAuth();
   const isHr = user.role === "admin" || user.role === "hr";
   const [records, setRecords] = useState([]);
@@ -226,12 +228,12 @@ export default function Payroll() {
               <tr key={r.id}>
                 {isHr && <td>{r.employee_name}</td>}
                 <td>{periodLabel(r)}</td>
-                <td>₱{Number(r.base_salary).toLocaleString()}</td>
-                <td>₱{Number(r.bonuses).toLocaleString()}</td>
-                <td>₱{Number(r.overtime_pay || 0).toLocaleString()}</td>
-                <td>₱{Number(r.night_differential_pay || 0).toLocaleString()}</td>
-                <td>₱{Number(r.deductions).toLocaleString()}</td>
-                <td><strong>₱{Number(r.net_pay).toLocaleString()}</strong></td>
+                <td>{money(r.base_salary)}</td>
+                <td>{money(r.bonuses)}</td>
+                <td>{money(r.overtime_pay)}</td>
+                <td>{money(r.night_differential_pay)}</td>
+                <td>{money(r.deductions)}</td>
+                <td><strong>{money(r.net_pay)}</strong></td>
                 <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
                 {isHr && (
                   <td style={{ display: "flex", gap: 6 }}>
@@ -347,20 +349,20 @@ export default function Payroll() {
               </div>
             </div>
             <p className="subtitle" style={{ margin: "0 0 12px" }}>
-              Total deductions: ₱{(
+              Total deductions: {money(
                 (Number(editForm.deduction_sss) || 0) +
                 (Number(editForm.deduction_hdmf) || 0) +
                 (Number(editForm.deduction_philhealth) || 0) +
                 (Number(editForm.deduction_taxes) || 0) +
                 (Number(editForm.deduction_loans) || 0) +
                 (Number(editForm.deduction_cash_advances) || 0)
-              ).toLocaleString()}
+              )}
             </p>
             <div className="form-row">
               <label>Final pay override (optional)</label>
               <input
                 type="number"
-                placeholder={`Leave blank to auto-calculate (₱${(
+                placeholder={`Leave blank to auto-calculate (${money(
                   (Number(editForm.base_salary) || 0) +
                   (Number(editForm.bonuses) || 0) +
                   (Number(editForm.overtime_pay) || 0) +
@@ -371,7 +373,7 @@ export default function Payroll() {
                     (Number(editForm.deduction_taxes) || 0) +
                     (Number(editForm.deduction_loans) || 0) +
                     (Number(editForm.deduction_cash_advances) || 0))
-                ).toLocaleString()})`}
+                )})`}
                 value={editForm.net_pay_override}
                 onChange={(e) => setEditForm({ ...editForm, net_pay_override: e.target.value })}
               />

@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 import Funnel from "../components/Funnel";
 
-const money = (n) => `₱${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
 
 export default function Dashboard() {
+  const { money } = useAppSettings();
   const { user, employee } = useAuth();
   const [stats, setStats] = useState(null);
   const [error, setError] = useState("");
