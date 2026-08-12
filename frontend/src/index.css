@@ -273,6 +273,32 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   opacity: 0.7;
   font-size: 11px;
 }
+/* FX readout beside the clock. Same recessive treatment — it's reference
+   information, not something to compete with the page content. */
+.topbar-fx {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  margin-left: 14px;
+  padding-left: 14px;
+  border-left: 1px solid var(--border);
+}
+.topbar-fx-pair {
+  font-size: 11px;
+  opacity: 0.7;
+  letter-spacing: 0.02em;
+}
+.topbar-fx-value { font-weight: 600; color: var(--text); }
+/* Marks a rate served from cache after the provider failed, so a stale figure
+   isn't presented as current. */
+.topbar-fx-stale { color: var(--text-muted); opacity: 0.7; }
+
+/* The header is tight on phones — the clock already fills it, so the FX
+   readout steps aside rather than wrapping the row. */
+@media (max-width: 640px) {
+  .topbar-fx { display: none; }
+}
 
 .theme-toggle {
   background: none;

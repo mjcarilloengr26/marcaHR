@@ -36,6 +36,49 @@ function TopbarClock() {
   );
 }
 
+// Reference FX rate beside the clock — USD against the app's currency by
+// default. Rendering nothing (rather than an error) when the rate provider is
+// unreachable keeps a third-party outage from putting a broken element in the
+// header of every page.
+function TopbarRate() {
+  const [fx, setFx] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      api
+        .get("/exchange-rate")
+        .then((d) => !cancelled && setFx(d))
+        .catch(() => !cancelled && setFx(null));
+    load();
+    // The backend caches for an hour, so polling more often than this would
+    // just return the same figure.
+    const id = setInterval(load, 60 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  if (!fx) return null;
+
+  const formatted = fx.rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const asOf = new Date(fx.fetched_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+  return (
+    <div
+      className="topbar-fx"
+      title={`1 ${fx.base} = ${formatted} ${fx.quote}${fx.stale ? " (last known rate — provider unreachable)" : ""}\nAs of ${asOf}`}
+    >
+      <span className="topbar-fx-pair">
+        {fx.base}/{fx.quote}
+      </span>{" "}
+      <span className="topbar-fx-value">{formatted}</span>
+      {fx.stale && <span className="topbar-fx-stale"> ·</span>}
+    </div>
+  );
+}
+
 export default function Layout({ children }) {
   const { user, employee, logout } = useAuth();
   const navigate = useNavigate();
@@ -176,6 +219,7 @@ export default function Layout({ children }) {
             ☰
           </button>
           <TopbarClock />
+          <TopbarRate />
           <div className="user-info">
             <ThemeToggle />
             {employee?.photo ? (
