@@ -221,6 +221,9 @@ export default function Expenses() {
 }
 
 function ReportDetail({ id, isHr, onClose, onChanged }) {
+  // Its own hook call — this is a separate component from Expenses above, so
+  // it can't see that one's formatter.
+  const { moneyPrecise: money } = useAppSettings();
   const [report, setReport] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);

@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, getToken, setToken } from "../api/client";
-import { useIdleLogout } from "../hooks/useIdleLogout";
+import { useIdleLogout, idleSessionExpired, markActivity, LAST_ACTIVITY_KEY } from "../hooks/useIdleLogout";
 
 const AuthContext = createContext(null);
 
@@ -14,6 +14,19 @@ export function AuthProvider({ children }) {
 
   const loadMe = useCallback(async () => {
     if (!getToken()) {
+      setLoading(false);
+      return;
+    }
+    // The in-page idle timer only runs while a tab is open, so a browser
+    // closed and reopened later would otherwise resume a live session without
+    // asking for a password again. Enforce the same idle window on startup.
+    if (idleSessionExpired()) {
+      setToken(null);
+      try {
+        localStorage.removeItem(LAST_ACTIVITY_KEY);
+      } catch { /* ignore */ }
+      setUser(null);
+      setEmployee(null);
       setLoading(false);
       return;
     }
@@ -37,6 +50,9 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     const data = await api.post("/auth/login", { email, password });
     setToken(data.token);
+    // Start the idle clock at sign-in, so a session is never treated as
+    // already-stale before the user has touched anything.
+    markActivity();
     setUser(data.user);
     setEmployee(data.employee);
     return data;
@@ -47,6 +63,9 @@ export function AuthProvider({ children }) {
     // the user from actually logging out.
     api.post("/auth/logout").catch(() => {});
     setToken(null);
+    try {
+      localStorage.removeItem(LAST_ACTIVITY_KEY);
+    } catch { /* ignore */ }
     setUser(null);
     setEmployee(null);
   };
