@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -23,7 +23,11 @@ export default function Login() {
     api.get("/branding").then((data) => setLogoData(data.logo_data)).catch(() => {});
   }, []);
 
-  if (user) return <Navigate to="/" replace />;
+  // Deliberately no redirect-when-already-signed-in here. Bouncing straight to
+  // the dashboard is what made opening the sign-in page look like an automatic
+  // login, and it also left no way to sign in as somebody else without hunting
+  // for the logout button first. Reaching this page means you intend to sign
+  // in, so it always shows the form.
 
   const handleSubmit = async (e) => {
     e.preventDefault();

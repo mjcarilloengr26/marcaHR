@@ -3,13 +3,33 @@ const TOKEN_KEY = "hr_app_token";
 // In production (e.g. Vercel), set VITE_API_URL to the deployed backend's origin.
 const API_BASE = import.meta.env.VITE_API_URL || "";
 
+// The session lives in sessionStorage, not localStorage: a localStorage token
+// outlives the browser itself, so closing everything and reopening the app
+// dropped you straight back into a live session without a password. Payroll
+// and personnel records shouldn't be reachable that way on a shared or
+// unattended machine. The trade-off is that each new tab starts signed out.
 export function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  return sessionStorage.getItem(TOKEN_KEY);
 }
 
 export function setToken(token) {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
+  if (token) sessionStorage.setItem(TOKEN_KEY, token);
+  else sessionStorage.removeItem(TOKEN_KEY);
+  // Clear any token left in localStorage by an earlier build, so an existing
+  // browser doesn't keep resuming from it.
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+// Drop a pre-existing localStorage token at startup — without this, anyone
+// already signed in under the old scheme would stay auto-signed-in forever.
+try {
+  localStorage.removeItem(TOKEN_KEY);
+} catch {
+  /* ignore */
 }
 
 async function request(path, { method = "GET", body, headers } = {}) {
