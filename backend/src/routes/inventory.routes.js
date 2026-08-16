@@ -180,6 +180,32 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
   } catch (err) {
     return res.status(400).json({ error: "An item with that SKU already exists" });
   }
+
+  // Quantity may be corrected from the edit form, but it is never written
+  // straight over the stock level — the difference is recorded as an
+  // adjustment so the item's History still explains every change, the same
+  // way the Adjust action and the Excel import do.
+  const qty = req.body?.quantity_on_hand;
+  if (qty !== undefined && qty !== null && qty !== "") {
+    const newQuantity = Number(qty);
+    if (!Number.isFinite(newQuantity) || newQuantity < 0) {
+      return res.status(400).json({ error: "quantity_on_hand must be zero or a positive number" });
+    }
+    if (newQuantity !== existing.quantity_on_hand) {
+      const delta = newQuantity - existing.quantity_on_hand;
+      await db.transaction(async () => {
+        await db.prepare("UPDATE inventory_items SET quantity_on_hand = ? WHERE id = ?").run(newQuantity, req.params.id);
+        await db
+          .prepare(
+            `INSERT INTO inventory_transactions (item_id, type, quantity, reason, created_by)
+             VALUES (?, 'adjustment', ?, 'Corrected on edit form', ?)`
+          )
+          .run(req.params.id, delta, req.user.employee_id || null);
+      })();
+      notifyIfEnteredCritical(existing, newQuantity, await getAlarmThresholdPercent());
+    }
+  }
+
   res.json(await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(req.params.id));
 }));
 

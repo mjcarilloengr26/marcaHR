@@ -76,6 +76,9 @@ export function AppSettingsProvider({ children }) {
     return {
       ...settings,
       locale,
+      // Bare symbol, for labelling amount inputs so a form field reads in the
+      // same currency the tables around it display.
+      currencySymbol: money(0).replace(/[\d.,\s]/g, ""),
       money,
       moneyPrecise,
       moneyCompact,

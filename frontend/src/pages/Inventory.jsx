@@ -8,7 +8,7 @@ import SortTh from "../components/SortTh";
 const emptyForm = { sku: "", name: "", category: "", unit: "pcs", quantity_on_hand: "", reorder_level: "", unit_cost: "", unit_price: "", location_id: "", notes: "" };
 
 export default function Inventory() {
-  const { money } = useAppSettings();
+  const { money, currencySymbol } = useAppSettings();
   const [items, setItems] = useState([]);
   const [locations, setLocations] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -70,6 +70,7 @@ export default function Inventory() {
       name: item.name,
       category: item.category || "",
       unit: item.unit,
+      quantity_on_hand: item.quantity_on_hand,
       reorder_level: item.reorder_level,
       unit_cost: item.unit_cost,
       unit_price: item.unit_price,
@@ -86,18 +87,17 @@ export default function Inventory() {
     try {
       const payload = {
         ...form,
+        quantity_on_hand: Number(form.quantity_on_hand) || 0,
         reorder_level: Number(form.reorder_level) || 0,
         unit_cost: Number(form.unit_cost) || 0,
         unit_price: Number(form.unit_price) || 0,
         location_id: form.location_id || null,
       };
+      // Create records it as an opening balance; update records the difference
+      // as an adjustment. Either way the change lands in the item's History.
       if (editingId) {
-        // Quantity is owned by the stock movement endpoints once an item
-        // exists, so it must not ride along on an edit.
-        delete payload.quantity_on_hand;
         await api.put(`/inventory/${editingId}`, payload);
       } else {
-        payload.quantity_on_hand = Number(form.quantity_on_hand) || 0;
         await api.post("/inventory", payload);
       }
       setShowForm(false);
@@ -485,25 +485,26 @@ export default function Inventory() {
                   Just the unit of measure — put the quantity in the field beside it, not here.
                 </p>
               </div>
-              {/* Opening stock, on create only. After an item exists its quantity
-                  moves through Stock in / Stock out / Adjust so every change is
-                  recorded in the item's History; letting it be edited freely here
-                  would leave unexplained jumps in that ledger. */}
-              {!editingId && (
-                <div className="form-row">
-                  <label>Quantity on hand</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={form.quantity_on_hand}
-                    onChange={(e) => setForm({ ...form, quantity_on_hand: e.target.value })}
-                    placeholder="0"
-                  />
-                  <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                    How many you have right now. Recorded as an opening balance.
-                  </p>
-                </div>
-              )}
+              {/* Shown when creating and when editing. A correction here is
+                  still written to the item's History as an adjustment rather
+                  than overwriting the stock level, so the ledger continues to
+                  explain every change — routine movements should still go
+                  through Stock in / Stock out. */}
+              <div className="form-row">
+                <label>Quantity on hand</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={form.quantity_on_hand}
+                  onChange={(e) => setForm({ ...form, quantity_on_hand: e.target.value })}
+                  placeholder="0"
+                />
+                <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  {editingId
+                    ? "Correcting this records an adjustment in the item's History. For routine stock movement use Stock in / Stock out."
+                    : "How many you have right now. Recorded as an opening balance."}
+                </p>
+              </div>
               <div className="form-row">
                 <label>Reorder level</label>
                 <input type="number" value={form.reorder_level} onChange={(e) => setForm({ ...form, reorder_level: e.target.value })} />
@@ -512,11 +513,11 @@ export default function Inventory() {
                 </p>
               </div>
               <div className="form-row">
-                <label>Unit cost</label>
+                <label>Unit cost ({currencySymbol})</label>
                 <input type="number" value={form.unit_cost} onChange={(e) => setForm({ ...form, unit_cost: e.target.value })} />
               </div>
               <div className="form-row">
-                <label>Unit price</label>
+                <label>Unit price ({currencySymbol})</label>
                 <input type="number" value={form.unit_price} onChange={(e) => setForm({ ...form, unit_price: e.target.value })} />
               </div>
               <div className="form-row">
