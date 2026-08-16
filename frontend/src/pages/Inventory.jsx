@@ -211,7 +211,11 @@ export default function Inventory() {
   };
 
   const criticalItems = summary?.lowStockItems?.filter((i) => i.stock_status === "critical") || [];
-  const { sorted, toggleSort, arrow } = useSort(items, null, "asc");
+  // Defaults to SKU ascending so the list opens in catalogue order rather than
+  // whatever order the query happened to return. The comparison is numeric-
+  // aware (see useSort), so INV-999 sorts before INV-1054 rather than after it
+  // as a plain text sort would put it.
+  const { sorted, sortKey, sortDir, toggleSort, setSort, arrow } = useSort(items, "sku", "asc");
 
   return (
     <div>
@@ -262,6 +266,21 @@ export default function Inventory() {
         <div className="form-row">
           <label>Search</label>
           <input type="text" placeholder="Search by SKU or name…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        {/* Column headers stay clickable for every field; this is here because
+            SKU order is the one people look for by name, and a header click
+            isn't discoverable. "Custom" appears only when another column is
+            driving the sort, so the control never misreports the order. */}
+        <div className="form-row">
+          <label>Sort by SKU</label>
+          <select
+            value={sortKey === "sku" ? sortDir : "other"}
+            onChange={(e) => setSort("sku", e.target.value === "desc" ? "desc" : "asc")}
+          >
+            <option value="asc">SKU — ascending (1 → 9)</option>
+            <option value="desc">SKU — descending (9 → 1)</option>
+            {sortKey !== "sku" && <option value="other">Custom (sorted by another column)</option>}
+          </select>
         </div>
         <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 20 }}>
           <input type="checkbox" checked={lowStockOnly} onChange={(e) => setLowStockOnly(e.target.checked)} />

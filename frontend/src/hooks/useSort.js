@@ -43,5 +43,13 @@ export function useSort(items, initialKey = null, initialDir = "desc") {
 
   const arrow = (key) => (sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "");
 
-  return { sorted, sortKey, sortDir, toggleSort, arrow };
+  // Sets column and direction outright, for a dropdown or button that has to
+  // land on a specific order. toggleSort can't express that — it always starts
+  // a new column ascending and only flips on a repeat click.
+  const setSort = (key, dir = "asc") => {
+    setSortKey(key);
+    setSortDir(dir);
+  };
+
+  return { sorted, sortKey, sortDir, toggleSort, setSort, arrow };
 }
