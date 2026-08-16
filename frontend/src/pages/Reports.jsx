@@ -28,6 +28,11 @@ export default function Reports() {
   const [expYear, setExpYear] = useState(now.getFullYear());
   const [exportingExpenses, setExportingExpenses] = useState(false);
 
+  const [invPeriodType, setInvPeriodType] = useState("monthly");
+  const [invPeriodIndex, setInvPeriodIndex] = useState(now.getMonth() + 1);
+  const [invYear, setInvYear] = useState(now.getFullYear());
+  const [exportingInventory, setExportingInventory] = useState(false);
+
   const [error, setError] = useState("");
 
   // Client-side checks just control what's shown here — the backend enforces
@@ -38,7 +43,8 @@ export default function Reports() {
   const canExportPurchaseOrders = user?.role === "admin" || isFinance;
   const canExportPayroll = ["admin", "hr"].includes(user?.role) || isFinance;
   const canExportExpenses = ["admin", "hr"].includes(user?.role) || isFinance;
-  const canSeePage = canExportSalesFinance || canExportPurchaseOrders || canExportPayroll || canExportExpenses;
+  const canExportInventory = ["admin", "hr"].includes(user?.role) || isFinance;
+  const canSeePage = canExportSalesFinance || canExportPurchaseOrders || canExportPayroll || canExportExpenses || canExportInventory;
 
   const changePeriodType = (type) => {
     setPeriodType(type);
@@ -104,6 +110,28 @@ export default function Reports() {
       setError(err.message);
     } finally {
       setExportingPayroll(false);
+    }
+  };
+
+  const changeInvPeriodType = (type) => {
+    setInvPeriodType(type);
+    if (type === "monthly") setInvPeriodIndex(now.getMonth() + 1);
+    else if (type === "quarterly") setInvPeriodIndex(Math.floor(now.getMonth() / 3) + 1);
+    else setInvPeriodIndex(0);
+  };
+
+  const exportInventory = async () => {
+    setExportingInventory(true);
+    setError("");
+    try {
+      await downloadFile(
+        `/reports/inventory-export?period_type=${invPeriodType}&year=${invYear}&index=${invPeriodIndex}`,
+        "marca-group-inventory-report.xlsx"
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setExportingInventory(false);
     }
   };
 
@@ -318,6 +346,55 @@ export default function Reports() {
           </div>
           <button type="button" className="btn" onClick={exportExpenses} disabled={exportingExpenses}>
             {exportingExpenses ? "Exporting…" : "Export to Excel"}
+          </button>
+        </div>
+      )}
+
+      {canExportInventory && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>Inventory Report</h2>
+          <p className="subtitle" style={{ margin: "0 0 12px" }}>
+            Two sheets: current stock on hand for every item with its value and reorder status, plus all stock
+            movements recorded during the selected period. Stock levels are always as of today — the period only
+            filters the movements.
+          </p>
+          <div className="form-inline" style={{ marginBottom: 16 }}>
+            <div className="form-row">
+              <label>Period</label>
+              <select value={invPeriodType} onChange={(e) => changeInvPeriodType(e.target.value)}>
+                <option value="monthly">Monthly</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+            {invPeriodType === "monthly" && (
+              <div className="form-row">
+                <label>Month</label>
+                <select value={invPeriodIndex} onChange={(e) => setInvPeriodIndex(Number(e.target.value))}>
+                  {MONTH_NAMES.slice(1).map((name, i) => (
+                    <option key={name} value={i + 1}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {invPeriodType === "quarterly" && (
+              <div className="form-row">
+                <label>Quarter</label>
+                <select value={invPeriodIndex} onChange={(e) => setInvPeriodIndex(Number(e.target.value))}>
+                  <option value={1}>Q1</option>
+                  <option value={2}>Q2</option>
+                  <option value={3}>Q3</option>
+                  <option value={4}>Q4</option>
+                </select>
+              </div>
+            )}
+            <div className="form-row">
+              <label>Year</label>
+              <input type="number" value={invYear} onChange={(e) => setInvYear(Number(e.target.value))} />
+            </div>
+          </div>
+          <button type="button" className="btn" onClick={exportInventory} disabled={exportingInventory}>
+            {exportingInventory ? "Exporting…" : "Export to Excel"}
           </button>
         </div>
       )}

@@ -392,4 +392,124 @@ router.get(
   })
 );
 
+// Inventory sits with procurement/operations rather than finance, so it uses
+// the same admin/HR-or-finance gate as payroll and expenses.
+//
+// Two sheets, because the two halves answer different questions and only one
+// of them is period-bound: "Stock On Hand" is a snapshot of every item as it
+// stands right now (a stock level has no meaning "for last March"), while
+// "Stock Movements" covers what actually moved during the chosen period.
+router.get(
+  "/inventory-export",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!(await isAdminHrOrFinance(req))) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
+    const { period_type, period_year, period_index } = parsePeriod(req.query);
+    const { start, end } = periodDateRange(period_type, period_year, period_index);
+
+    const items = await db
+      .prepare(
+        `SELECT i.sku, i.name, i.category, i.unit, i.quantity_on_hand, i.reorder_level,
+                i.unit_cost, i.unit_price, i.notes, l.name AS location_name
+         FROM inventory_items i LEFT JOIN locations l ON l.id = i.location_id
+         ORDER BY i.name`
+      )
+      .all();
+
+    const movements = await db
+      .prepare(
+        `SELECT t.created_at, i.sku, i.name AS item_name, i.unit, t.type, t.quantity,
+                t.reason, t.reference, (e.first_name || ' ' || e.last_name) AS created_by_name
+         FROM inventory_transactions t
+         JOIN inventory_items i ON i.id = t.item_id
+         LEFT JOIN employees e ON e.id = t.created_by
+         WHERE t.created_at BETWEEN ? AND ?
+         ORDER BY t.created_at DESC`
+      )
+      .all(`${start} 00:00:00`, `${end} 23:59:59`);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "MARCA GROUP";
+    workbook.created = new Date();
+
+    const stockSheet = workbook.addWorksheet("Stock On Hand");
+    stockSheet.columns = [
+      { header: "SKU", key: "sku", width: 22 },
+      { header: "Item", key: "name", width: 34 },
+      { header: "Category", key: "category", width: 18 },
+      { header: "Unit", key: "unit", width: 10 },
+      { header: "On Hand", key: "quantity_on_hand", width: 12 },
+      { header: "Reorder Level", key: "reorder_level", width: 14 },
+      { header: "Status", key: "status", width: 12 },
+      { header: "Unit Cost", key: "unit_cost", width: 12 },
+      { header: "Stock Value", key: "stock_value", width: 14 },
+      { header: "Unit Price", key: "unit_price", width: 12 },
+      { header: "Location", key: "location_name", width: 18 },
+      { header: "Notes", key: "notes", width: 30 },
+    ];
+    stockSheet.addRows(
+      items.map((i) => ({
+        ...i,
+        // Mirrors the same reorder-level rule the Inventory page shows on
+        // screen, so the spreadsheet and the app never disagree about what
+        // counts as low.
+        status:
+          i.reorder_level > 0 && i.quantity_on_hand <= i.reorder_level
+            ? "REORDER"
+            : i.quantity_on_hand === 0
+              ? "OUT OF STOCK"
+              : "OK",
+        stock_value: Number(((i.quantity_on_hand || 0) * (i.unit_cost || 0)).toFixed(2)),
+        location_name: i.location_name || "—",
+        category: i.category || "—",
+        notes: i.notes || "",
+      }))
+    );
+    stockSheet.getRow(1).font = { bold: true };
+
+    const totalValue = items.reduce((s, i) => s + (i.quantity_on_hand || 0) * (i.unit_cost || 0), 0);
+    const totalRow = stockSheet.addRow({
+      name: `TOTAL — ${items.length} items`,
+      stock_value: Number(totalValue.toFixed(2)),
+    });
+    totalRow.font = { bold: true };
+
+    const moveSheet = workbook.addWorksheet("Stock Movements");
+    moveSheet.columns = [
+      { header: "Date", key: "created_at", width: 20 },
+      { header: "SKU", key: "sku", width: 22 },
+      { header: "Item", key: "item_name", width: 34 },
+      { header: "Type", key: "type", width: 12 },
+      { header: "Quantity", key: "quantity", width: 12 },
+      { header: "Unit", key: "unit", width: 10 },
+      { header: "Reason", key: "reason", width: 26 },
+      { header: "Reference", key: "reference", width: 18 },
+      { header: "Recorded By", key: "created_by_name", width: 22 },
+    ];
+    moveSheet.addRows(
+      movements.map((m) => ({
+        ...m,
+        reason: m.reason || "—",
+        reference: m.reference || "—",
+        created_by_name: m.created_by_name || "—",
+      }))
+    );
+    moveSheet.getRow(1).font = { bold: true };
+
+    await logRequestEvent(req, "export_excel", {
+      entityType: "report",
+      details: { report: "inventory", period_type, period_year, period_index },
+    });
+
+    const filename = `marca-group-inventory-report-${period_year}-${period_type}-${period_index}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  })
+);
+
 module.exports = router;
