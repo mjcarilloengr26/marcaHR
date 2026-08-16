@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 const { notifyLowStockAlarm } = require("../notifications");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
+const ExcelJS = require("exceljs");
 
 const router = express.Router();
 
@@ -295,6 +296,211 @@ router.post("/bulk-delete", requireAuth, requireRole("admin", "hr"), asyncHandle
   });
 
   res.json({ deleted: found.length, movements_removed: txCount, missing: ids.length - found.length });
+}));
+
+// ---------------------------------------------------------------------------
+// Excel import, accepting the exact workbook the Inventory export produces, so
+// the round trip is export → edit in Excel → import.
+//
+// Columns are matched by header name rather than position, so reordering or
+// inserting columns in Excel doesn't silently write values into the wrong
+// field. Status and Stock Value are ignored on the way in — both are derived,
+// and honouring them would let a stale spreadsheet overwrite computed truth.
+const HEADER_ALIASES = {
+  sku: "sku",
+  item: "name",
+  itemname: "name",
+  name: "name",
+  category: "category",
+  unit: "unit",
+  onhand: "quantity_on_hand",
+  quantityonhand: "quantity_on_hand",
+  qty: "quantity_on_hand",
+  quantity: "quantity_on_hand",
+  reorderlevel: "reorder_level",
+  reorder: "reorder_level",
+  unitcost: "unit_cost",
+  cost: "unit_cost",
+  unitprice: "unit_price",
+  price: "unit_price",
+  location: "location_name",
+  notes: "notes",
+};
+
+const normaliseHeader = (h) => String(h || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+// ExcelJS hands back rich text objects, formula results and hyperlinks as
+// objects rather than plain values, so flatten before using anything.
+function cellText(v) {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "object") {
+    if (v.richText) return v.richText.map((t) => t.text).join("");
+    if (v.text !== undefined) return String(v.text);
+    if (v.result !== undefined) return String(v.result);
+    if (v.hyperlink) return String(v.text || v.hyperlink);
+    return "";
+  }
+  return String(v).trim();
+}
+
+function cellNumber(v) {
+  const s = cellText(v).replace(/[^0-9.\-]/g, "");
+  if (s === "" || s === "-") return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+router.post("/import", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
+  const raw = req.body?.file_data;
+  if (typeof raw !== "string" || !raw) {
+    return res.status(400).json({ error: "file_data (a base64 .xlsx) is required" });
+  }
+  const base64 = raw.includes(",") ? raw.slice(raw.indexOf(",") + 1) : raw;
+  let workbook;
+  try {
+    workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(base64, "base64"));
+  } catch (err) {
+    return res.status(400).json({ error: "That file could not be read as an Excel workbook" });
+  }
+
+  // Prefer the sheet the export writes; fall back to the first sheet so a
+  // hand-made file still works.
+  const sheet = workbook.getWorksheet("Stock On Hand") || workbook.worksheets[0];
+  if (!sheet) return res.status(400).json({ error: "The workbook has no sheets" });
+
+  const headerRow = sheet.getRow(1);
+  const colToField = {};
+  headerRow.eachCell((cell, colNumber) => {
+    const field = HEADER_ALIASES[normaliseHeader(cellText(cell.value))];
+    if (field) colToField[colNumber] = field;
+  });
+  const mappedFields = Object.values(colToField);
+  if (!mappedFields.includes("sku") || !mappedFields.includes("name")) {
+    return res.status(400).json({
+      error: "Could not find SKU and Item columns in row 1. Export the inventory first and edit that file.",
+    });
+  }
+
+  const locations = await db.prepare("SELECT id, name FROM locations").all();
+  const locationByName = new Map(locations.map((l) => [l.name.trim().toLowerCase(), l.id]));
+
+  const parsed = [];
+  const errors = [];
+  for (let r = 2; r <= sheet.rowCount; r++) {
+    const row = sheet.getRow(r);
+    const rec = {};
+    for (const [col, field] of Object.entries(colToField)) rec[field] = row.getCell(Number(col)).value;
+
+    const sku = cellText(rec.sku);
+    const name = cellText(rec.name);
+    // Skips blank spacer rows and the TOTAL line the export appends.
+    if (!sku && !name) continue;
+    if (!sku && /^total/i.test(name)) continue;
+
+    if (!sku) { errors.push({ row: r, sku: "", message: "Missing SKU" }); continue; }
+    if (!name) { errors.push({ row: r, sku, message: "Missing item name" }); continue; }
+
+    let locationId = null;
+    const locName = cellText(rec.location_name);
+    if (locName && locName !== "—") {
+      locationId = locationByName.get(locName.toLowerCase()) ?? null;
+      if (locationId === null) {
+        errors.push({ row: r, sku, message: `Unknown location "${locName}"` });
+        continue;
+      }
+    }
+
+    parsed.push({
+      row: r,
+      sku,
+      name,
+      category: cellText(rec.category) === "—" ? null : cellText(rec.category) || null,
+      unit: cellText(rec.unit) || "pcs",
+      quantity_on_hand: cellNumber(rec.quantity_on_hand),
+      reorder_level: cellNumber(rec.reorder_level),
+      unit_cost: cellNumber(rec.unit_cost),
+      unit_price: cellNumber(rec.unit_price),
+      notes: cellText(rec.notes) || null,
+      location_id: locationId,
+    });
+  }
+
+  if (parsed.length === 0) {
+    return res.status(400).json({ error: "No usable rows found in the sheet", errors });
+  }
+
+  const existing = await db.prepare("SELECT id, sku, quantity_on_hand FROM inventory_items").all();
+  const bySku = new Map(existing.map((e) => [e.sku.trim().toLowerCase(), e]));
+
+  let created = 0;
+  let updated = 0;
+  let quantityChanges = 0;
+
+  await db.transaction(async () => {
+    for (const p of parsed) {
+      const match = bySku.get(p.sku.toLowerCase());
+      if (match) {
+        await db
+          .prepare(
+            `UPDATE inventory_items SET name = ?, category = ?, unit = ?, reorder_level = ?,
+             unit_cost = ?, unit_price = ?, location_id = ?, notes = ? WHERE id = ?`
+          )
+          .run(
+            p.name,
+            p.category,
+            p.unit,
+            p.reorder_level ?? 0,
+            p.unit_cost ?? 0,
+            p.unit_price ?? 0,
+            p.location_id,
+            p.notes,
+            match.id
+          );
+        updated += 1;
+
+        // A quantity change on an existing item goes through the same
+        // adjustment trail as the on-screen Adjust action, rather than being
+        // written straight over the stock level — otherwise an import would
+        // leave an unexplained jump in the item's History.
+        if (p.quantity_on_hand !== null && p.quantity_on_hand !== match.quantity_on_hand) {
+          const delta = p.quantity_on_hand - match.quantity_on_hand;
+          await db.prepare("UPDATE inventory_items SET quantity_on_hand = ? WHERE id = ?").run(p.quantity_on_hand, match.id);
+          await db
+            .prepare(
+              `INSERT INTO inventory_transactions (item_id, type, quantity, reason, created_by)
+               VALUES (?, 'adjustment', ?, 'Excel import', ?)`
+            )
+            .run(match.id, delta, req.user.employee_id || null);
+          quantityChanges += 1;
+        }
+      } else {
+        const opening = p.quantity_on_hand ?? 0;
+        const info = await db
+          .prepare(
+            `INSERT INTO inventory_items (sku, name, category, unit, quantity_on_hand, reorder_level, unit_cost, unit_price, location_id, notes)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(p.sku, p.name, p.category, p.unit, opening, p.reorder_level ?? 0, p.unit_cost ?? 0, p.unit_price ?? 0, p.location_id, p.notes);
+        if (opening > 0) {
+          await db
+            .prepare(
+              `INSERT INTO inventory_transactions (item_id, type, quantity, reason, created_by)
+               VALUES (?, 'in', ?, 'Opening balance (Excel import)', ?)`
+            )
+            .run(info.lastInsertRowid, opening, req.user.employee_id || null);
+        }
+        created += 1;
+      }
+    }
+  })();
+
+  await logRequestEvent(req, "import_inventory", {
+    entityType: "inventory",
+    details: { created, updated, quantity_adjustments: quantityChanges, skipped: errors.length },
+  });
+
+  res.json({ created, updated, quantity_adjustments: quantityChanges, skipped: errors.length, errors });
 }));
 
 module.exports = router;

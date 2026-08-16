@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
+import { readFileAsDataUrl } from "../utils/image";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 
@@ -28,6 +29,9 @@ export default function Inventory() {
   const [savingThreshold, setSavingThreshold] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const importInputRef = useRef(null);
 
   const load = () => {
     const params = new URLSearchParams();
@@ -149,6 +153,37 @@ export default function Inventory() {
     }
   };
 
+  // Import matches on SKU: known SKUs are updated, new ones created. That makes
+  // a re-import of the same file safe, so a partly-rejected import can simply
+  // be fixed and run again rather than needing the good rows stripped out.
+  const handleImport = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (
+      !confirm(
+        `Import "${file.name}"?\n\n` +
+          "Rows whose SKU already exists will be updated; new SKUs will be added. " +
+          "Nothing is deleted. Quantity changes are recorded in each item's History."
+      )
+    ) {
+      return;
+    }
+    setImporting(true);
+    setError("");
+    setImportResult(null);
+    try {
+      const dataUrl = await readFileAsDataUrl(file, 8_000_000);
+      const res = await api.post("/inventory/import", { file_data: dataUrl });
+      setImportResult(res);
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const openStock = (item, mode) => {
     setStockModal({ item, mode });
     setStockForm({ quantity: mode === "adjust" ? item.quantity_on_hand : "", reason: "" });
@@ -228,11 +263,52 @@ export default function Inventory() {
           <button className="btn btn-secondary" onClick={openThresholdForm}>
             Alarm threshold: {alarmThreshold ?? "…"}%
           </button>
+          <button className="btn btn-secondary" onClick={() => importInputRef.current?.click()} disabled={importing}>
+            {importing ? "Importing…" : "Import from Excel"}
+          </button>
+          <input
+            ref={importInputRef}
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={handleImport}
+            style={{ display: "none" }}
+          />
           <button className="btn" onClick={openAdd}>+ Add item</button>
         </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+
+      {/* Reports what the import did per outcome, and lists any rows it
+          refused with the spreadsheet row number, so a rejected row can be
+          found and corrected in the file itself. */}
+      {importResult && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <strong>Import finished</strong>
+            <span className="badge badge-approved">{importResult.created} added</span>
+            <span className="badge badge-active">{importResult.updated} updated</span>
+            {importResult.quantity_adjustments > 0 && (
+              <span className="badge badge-pending">{importResult.quantity_adjustments} quantity changes</span>
+            )}
+            {importResult.skipped > 0 && (
+              <span className="badge badge-inactive">{importResult.skipped} skipped</span>
+            )}
+            <span style={{ flex: 1 }} />
+            <button type="button" className="link-btn" onClick={() => setImportResult(null)}>Dismiss</button>
+          </div>
+          {importResult.errors?.length > 0 && (
+            <ul style={{ margin: "10px 0 0", paddingLeft: 20, fontSize: 13, color: "var(--text-muted)" }}>
+              {importResult.errors.slice(0, 15).map((er, i) => (
+                <li key={i}>
+                  Row {er.row}{er.sku ? ` (${er.sku})` : ""} — {er.message}
+                </li>
+              ))}
+              {importResult.errors.length > 15 && <li>…and {importResult.errors.length - 15} more</li>}
+            </ul>
+          )}
+        </div>
+      )}
 
       {criticalItems.length > 0 && (
         <div className="card" style={{ marginBottom: 16, borderColor: "var(--danger)", color: "var(--danger)" }}>
