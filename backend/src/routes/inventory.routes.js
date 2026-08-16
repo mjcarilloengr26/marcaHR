@@ -106,24 +106,50 @@ router.get("/:id/transactions", requireAuth, requireRole("admin", "hr"), asyncHa
 router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
   const { sku, name, category, unit, reorder_level, unit_cost, unit_price, location_id, notes } = req.body || {};
   if (!sku || !name) return res.status(400).json({ error: "sku and name are required" });
+
+  // Opening stock. Without this the form had nowhere to record what's already
+  // on the shelf, so people typed the quantity into the free-text unit field
+  // instead ("10pcs", "2900PCS") — which is why unit values ended up holding
+  // numbers and every item read as zero on hand.
+  const openingQty = req.body?.quantity_on_hand;
+  const opening = openingQty === undefined || openingQty === null || openingQty === "" ? 0 : Number(openingQty);
+  if (!Number.isFinite(opening) || opening < 0) {
+    return res.status(400).json({ error: "quantity_on_hand must be zero or a positive number" });
+  }
+
   try {
-    const info = await db
-      .prepare(
-        `INSERT INTO inventory_items (sku, name, category, unit, reorder_level, unit_cost, unit_price, location_id, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        sku,
-        name,
-        category || null,
-        unit || "pcs",
-        reorder_level || 0,
-        unit_cost || 0,
-        unit_price || 0,
-        location_id || null,
-        notes || null
-      );
-    res.status(201).json(await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(info.lastInsertRowid));
+    let newId;
+    await db.transaction(async () => {
+      const info = await db
+        .prepare(
+          `INSERT INTO inventory_items (sku, name, category, unit, reorder_level, unit_cost, unit_price, location_id, notes, quantity_on_hand)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          sku,
+          name,
+          category || null,
+          unit || "pcs",
+          reorder_level || 0,
+          unit_cost || 0,
+          unit_price || 0,
+          location_id || null,
+          notes || null,
+          opening
+        );
+      newId = info.lastInsertRowid;
+      // Logged as a movement so the item's History explains where the starting
+      // number came from, rather than a quantity appearing from nowhere.
+      if (opening > 0) {
+        await db
+          .prepare(
+            `INSERT INTO inventory_transactions (item_id, type, quantity, reason, created_by)
+             VALUES (?, 'in', ?, 'Opening balance', ?)`
+          )
+          .run(newId, opening, req.user.employee_id || null);
+      }
+    })();
+    res.status(201).json(await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(newId));
   } catch (err) {
     res.status(400).json({ error: "An item with that SKU already exists" });
   }

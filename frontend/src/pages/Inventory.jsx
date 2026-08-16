@@ -4,7 +4,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 
-const emptyForm = { sku: "", name: "", category: "", unit: "pcs", reorder_level: "", unit_cost: "", unit_price: "", location_id: "", notes: "" };
+const emptyForm = { sku: "", name: "", category: "", unit: "pcs", quantity_on_hand: "", reorder_level: "", unit_cost: "", unit_price: "", location_id: "", notes: "" };
 
 export default function Inventory() {
   const { money } = useAppSettings();
@@ -86,8 +86,12 @@ export default function Inventory() {
         location_id: form.location_id || null,
       };
       if (editingId) {
+        // Quantity is owned by the stock movement endpoints once an item
+        // exists, so it must not ride along on an edit.
+        delete payload.quantity_on_hand;
         await api.put(`/inventory/${editingId}`, payload);
       } else {
+        payload.quantity_on_hand = Number(form.quantity_on_hand) || 0;
         await api.post("/inventory", payload);
       }
       setShowForm(false);
@@ -292,10 +296,35 @@ export default function Inventory() {
               <div className="form-row">
                 <label>Unit</label>
                 <input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} placeholder="pcs, box, kg…" />
+                <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  Just the unit of measure — put the quantity in the field beside it, not here.
+                </p>
               </div>
+              {/* Opening stock, on create only. After an item exists its quantity
+                  moves through Stock in / Stock out / Adjust so every change is
+                  recorded in the item's History; letting it be edited freely here
+                  would leave unexplained jumps in that ledger. */}
+              {!editingId && (
+                <div className="form-row">
+                  <label>Quantity on hand</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.quantity_on_hand}
+                    onChange={(e) => setForm({ ...form, quantity_on_hand: e.target.value })}
+                    placeholder="0"
+                  />
+                  <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                    How many you have right now. Recorded as an opening balance.
+                  </p>
+                </div>
+              )}
               <div className="form-row">
                 <label>Reorder level</label>
                 <input type="number" value={form.reorder_level} onChange={(e) => setForm({ ...form, reorder_level: e.target.value })} />
+                <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  Alerts you when stock falls this low. Leave at 0 for no alert.
+                </p>
               </div>
               <div className="form-row">
                 <label>Unit cost</label>
