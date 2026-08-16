@@ -26,6 +26,8 @@ export default function Inventory() {
   const [showThresholdForm, setShowThresholdForm] = useState(false);
   const [thresholdInput, setThresholdInput] = useState("");
   const [savingThreshold, setSavingThreshold] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   const load = () => {
     const params = new URLSearchParams();
@@ -104,12 +106,46 @@ export default function Inventory() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this inventory item? This cannot be undone.")) return;
+    if (!confirm("Delete this inventory item? This also removes its stock movement history, and cannot be undone.")) return;
     try {
       await api.del(`/inventory/${id}`);
       load();
     } catch (err) {
       setError(err.message);
+    }
+  };
+
+  // Names both consequences before deleting: how many items, and that their
+  // movement history goes with them. Lists the item names when the selection
+  // is small enough to read, so a mis-tick is caught before it's irreversible.
+  const handleBulkDelete = async () => {
+    const chosen = items.filter((i) => selectedIds.includes(i.id));
+    if (chosen.length === 0) return;
+    const names =
+      chosen.length <= 8
+        ? `\n\n${chosen.map((i) => `• ${i.sku} — ${i.name}`).join("\n")}`
+        : `\n\n(${chosen.length} items)`;
+    if (
+      !confirm(
+        `Delete ${chosen.length} inventory item${chosen.length > 1 ? "s" : ""}?${names}\n\n` +
+          "Their stock movement history will be removed too. This cannot be undone."
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    setError("");
+    try {
+      const res = await api.post("/inventory/bulk-delete", { ids: selectedIds });
+      setSelectedIds([]);
+      load();
+      if (res?.missing > 0) {
+        setError(`${res.deleted} deleted. ${res.missing} were already gone.`);
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -233,10 +269,52 @@ export default function Inventory() {
         </label>
       </div>
 
+      {/* Only appears once something is ticked, so a destructive control isn't
+          sitting armed on the page during ordinary browsing. */}
+      {selectedIds.length > 0 && (
+        <div
+          className="card"
+          style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}
+        >
+          <strong>{selectedIds.length} selected</strong>
+          <button type="button" className="link-btn" onClick={() => setSelectedIds([])}>
+            Clear selection
+          </button>
+          <span style={{ flex: 1 }} />
+          <button
+            type="button"
+            className="btn btn-sm btn-danger"
+            onClick={handleBulkDelete}
+            disabled={bulkDeleting}
+          >
+            {bulkDeleting ? "Deleting…" : `Delete ${selectedIds.length} selected`}
+          </button>
+        </div>
+      )}
+
       <div className="card">
         <table>
           <thead>
             <tr>
+              <th style={{ width: 32 }}>
+                <input
+                  type="checkbox"
+                  aria-label="Select all items shown"
+                  // Ticks only what's currently listed, so it respects the
+                  // search and low-stock filters rather than silently
+                  // selecting rows that aren't on screen.
+                  checked={sorted.length > 0 && sorted.every((i) => selectedIds.includes(i.id))}
+                  ref={(el) => {
+                    if (el) {
+                      const n = sorted.filter((i) => selectedIds.includes(i.id)).length;
+                      el.indeterminate = n > 0 && n < sorted.length;
+                    }
+                  }}
+                  onChange={(e) =>
+                    setSelectedIds(e.target.checked ? sorted.map((i) => i.id) : [])
+                  }
+                />
+              </th>
               <SortTh label="SKU" sortKey="sku" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Name" sortKey="name" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Category" sortKey="category" toggleSort={toggleSort} arrow={arrow} />
@@ -251,7 +329,19 @@ export default function Inventory() {
           </thead>
           <tbody>
             {sorted.map((i) => (
-              <tr key={i.id}>
+              <tr key={i.id} className={selectedIds.includes(i.id) ? "row-selected" : undefined}>
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${i.name}`}
+                    checked={selectedIds.includes(i.id)}
+                    onChange={(e) =>
+                      setSelectedIds((prev) =>
+                        e.target.checked ? [...prev, i.id] : prev.filter((id) => id !== i.id)
+                      )
+                    }
+                  />
+                </td>
                 <td>{i.sku}</td>
                 <td>{i.name}</td>
                 <td>{i.category || "—"}</td>

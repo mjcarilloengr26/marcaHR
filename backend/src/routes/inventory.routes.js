@@ -3,6 +3,7 @@ const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { notifyLowStockAlarm } = require("../notifications");
 const asyncHandler = require("../middleware/asyncHandler");
+const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
 
@@ -244,6 +245,56 @@ router.delete("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(asyn
   if (!existing) return res.status(404).json({ error: "Inventory item not found" });
   await db.prepare("DELETE FROM inventory_items WHERE id = ?").run(req.params.id);
   res.status(204).end();
+}));
+
+// Bulk delete for the tick-box selection on the Inventory page. A POST rather
+// than a DELETE because it carries a body, which not every client and proxy
+// handles reliably on DELETE.
+//
+// Deleting an item also removes its stock movement history (the transactions
+// table cascades on item delete), so this reports exactly what it removed and
+// the UI names that consequence before asking to confirm.
+router.post("/bulk-delete", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
+  const raw = req.body?.ids;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return res.status(400).json({ error: "ids must be a non-empty array of item ids" });
+  }
+  const ids = raw.map(Number);
+  if (ids.some((id) => !Number.isInteger(id) || id <= 0)) {
+    return res.status(400).json({ error: "ids must all be positive whole numbers" });
+  }
+  // Guards against a runaway request wiping the catalogue in one call.
+  if (ids.length > 500) {
+    return res.status(400).json({ error: "Cannot delete more than 500 items at once" });
+  }
+
+  const placeholders = ids.map(() => "?").join(",");
+  const found = await db
+    .prepare(`SELECT id, sku, name FROM inventory_items WHERE id IN (${placeholders})`)
+    .all(...ids);
+  if (found.length === 0) return res.status(404).json({ error: "None of those items exist" });
+
+  const foundIds = found.map((f) => f.id);
+  const txCount = (
+    await db
+      .prepare(`SELECT COUNT(*) AS c FROM inventory_transactions WHERE item_id IN (${foundIds.map(() => "?").join(",")})`)
+      .get(...foundIds)
+  ).c;
+
+  await db
+    .prepare(`DELETE FROM inventory_items WHERE id IN (${foundIds.map(() => "?").join(",")})`)
+    .run(...foundIds);
+
+  await logRequestEvent(req, "bulk_delete_inventory", {
+    entityType: "inventory",
+    details: {
+      deleted_count: found.length,
+      movements_removed: txCount,
+      skus: found.map((f) => f.sku).join(", ").slice(0, 500),
+    },
+  });
+
+  res.json({ deleted: found.length, movements_removed: txCount, missing: ids.length - found.length });
 }));
 
 module.exports = router;

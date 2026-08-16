@@ -449,6 +449,10 @@ tbody tr:last-child td { border-bottom: none; }
 .btn-secondary:hover { background: var(--hover-bg); border-color: var(--text-muted); box-shadow: none; }
 .btn-danger { background: var(--danger); }
 .btn-danger:hover { background: #b93a3a; }
+
+/* Tinted row for tick-box selection. Uses the existing hover tint so the
+   highlight reads the same in light and dark themes without a new colour. */
+.row-selected > td { background: var(--hover-bg); }
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 
 .form-row { margin-bottom: 14px; }
