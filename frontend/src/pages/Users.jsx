@@ -96,7 +96,7 @@ export default function Users() {
       </div>
 
       <div className="card">
-        <table>
+        <table className="sticky-head">
           <thead>
             <tr>
               <SortTh label="Email" sortKey="email" toggleSort={toggleSort} arrow={arrow} />

@@ -148,7 +148,7 @@ export default function Events() {
         {loading && <div className="page-loading">Loading…</div>}
         {!loading && events.length === 0 && <div className="empty-state">No events found.</div>}
         {!loading && events.length > 0 && (
-          <table>
+          <table className="sticky-head">
             <thead>
               <tr>
                 <th>

@@ -184,7 +184,7 @@ export default function PageAccess() {
         ) : grants.length === 0 ? (
           <div className="empty-state">No page access has been granted yet.</div>
         ) : (
-          <table>
+          <table className="sticky-head">
             <thead>
               <tr>
                 <th>User</th>

@@ -66,7 +66,7 @@ export default function Departments() {
       </form>
 
       <div className="card">
-        <table>
+        <table className="sticky-head">
           <thead>
             <tr>
               <th>Name</th>

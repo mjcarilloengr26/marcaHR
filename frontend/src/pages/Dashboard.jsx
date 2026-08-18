@@ -68,7 +68,7 @@ export default function Dashboard() {
 
           <div className="card">
             <h2>Employees by department</h2>
-            <table>
+            <table className="sticky-head">
               <thead>
                 <tr>
                   <th>Department</th>
@@ -104,7 +104,7 @@ export default function Dashboard() {
               <div className="empty-state">No expense items recorded yet.</div>
             )}
             {stats.expenseSummary && stats.expenseSummary.length > 0 && (
-              <table>
+              <table className="sticky-head">
                 <thead>
                   <tr>
                     <th>Employee</th>

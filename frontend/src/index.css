@@ -438,8 +438,19 @@ tbody tr:hover { background: var(--row-hover); }
 tbody tr:last-child td { border-bottom: none; }
 
 /* Lets a table grow past its card rather than crushing columns to fit. Opt-in
-   per table, since most cards hold popovers that need overflow left visible. */
+   per table, since most cards hold popovers that need overflow left visible.
+   Prefer letting .content scroll sideways instead where the table also wants a
+   docked header — a card that scrolls is its own scroll container, and would
+   pin the header to a box that never moves vertically. */
 .table-scroll { overflow-x: auto; }
+
+/* A card holding a table wider than the viewport: without this the card is
+   only as wide as the visible area, so once you scroll sideways the table
+   carries on over bare page background with no card behind it. */
+.card-wide {
+  width: fit-content;
+  min-width: 100%;
+}
 
 /* Opt-in docked table header: the column names stay visible while a long list
    scrolls under them. The offset is negative because sticky measures from the
@@ -488,6 +499,10 @@ tbody tr:last-child td { border-bottom: none; }
    stack of buttons — six deep and ~250px on a phone, so barely three rows fit
    a screen. The row-action column claims its full width instead and the table
    scrolls sideways, which costs nothing on desktop where it still fits. */
+/* The flex row lives in a div INSIDE the cell, not on the cell itself. A td
+   set to display:flex stops taking part in column sizing, so its header cell
+   collapses to nothing — invisible until the header was made sticky, at which
+   point rows showed through the gap where the header should have been. */
 .col-actions {
   display: flex;
   gap: 6px;
@@ -1011,7 +1026,10 @@ input[type="date"]::-webkit-datetime-edit-year-field {
 
   .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
 
-  .card { overflow-x: auto; }
+  /* .card used to scroll sideways here. It no longer does: .content is the
+     scroll container on both axes now, so a wide table scrolls the page
+     instead — and a card that scrolls is a card whose sticky header cannot
+     stay put, which would have quietly disabled docked headers on phones. */
   .card table { min-width: 560px; }
 
   .form-inline { flex-direction: column; align-items: stretch; }

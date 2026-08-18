@@ -136,7 +136,7 @@ export default function WorkOrders() {
       </div>
 
       <div className="card">
-        <table>
+        <table className="sticky-head">
           <thead>
             <tr>
               <SortTh label="WO #" sortKey="work_order_number" toggleSort={toggleSort} arrow={arrow} />

@@ -137,7 +137,7 @@ export default function Deals() {
       </div>
 
       <div className="card">
-        <table>
+        <table className="sticky-head">
           <thead>
             <tr>
               <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} />

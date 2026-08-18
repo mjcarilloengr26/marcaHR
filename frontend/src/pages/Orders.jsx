@@ -113,7 +113,7 @@ export default function Orders() {
       </div>
 
       <div className="card">
-        <table>
+        <table className="sticky-head">
           <thead>
             <tr>
               <SortTh label="Order #" sortKey="order_number" toggleSort={toggleSort} arrow={arrow} />

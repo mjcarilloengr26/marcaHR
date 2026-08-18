@@ -111,7 +111,7 @@ export default function PurchaseOrders() {
       </div>
 
       <div className="card">
-        <table>
+        <table className="sticky-head">
           <thead>
             <tr>
               <SortTh label="PO #" sortKey="po_number" toggleSort={toggleSort} arrow={arrow} />

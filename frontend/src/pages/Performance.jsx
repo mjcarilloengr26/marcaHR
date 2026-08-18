@@ -100,7 +100,7 @@ export default function Performance() {
       {error && <div className="error-banner">{error}</div>}
 
       <div className="card">
-        <table>
+        <table className="sticky-head">
           <thead>
             <tr>
               {isHr && <th>Employee</th>}

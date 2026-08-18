@@ -214,7 +214,7 @@ export default function Leave() {
         {!balanceEmployeeId && <div className="empty-state">Select an employee to view their leave balances.</div>}
         {balanceEmployeeId && balances.length === 0 && <div className="empty-state">No leave balances found.</div>}
         {balanceEmployeeId && balances.length > 0 && (
-          <table>
+          <table className="sticky-head">
             <thead>
               <tr>
                 <th>Type</th>
@@ -255,7 +255,7 @@ export default function Leave() {
       </div>
 
       <div className="card">
-        <table>
+        <table className="sticky-head">
           <thead>
             <tr>
               {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}

@@ -90,7 +90,7 @@ export default function Employees() {
       </div>
 
       <div className="card">
-        <table>
+        <table className="sticky-head">
           <thead>
             <tr>
               <SortTh label="Name" sortKey="last_name" toggleSort={toggleSort} arrow={arrow} />

@@ -483,7 +483,7 @@ export default function SalesDashboard() {
         </p>
         {targets.length === 0 && <div className="empty-state">No sales employees found.</div>}
         {targets.length > 0 && (
-          <table>
+          <table className="sticky-head">
             <thead>
               <tr>
                 <th>Employee</th>

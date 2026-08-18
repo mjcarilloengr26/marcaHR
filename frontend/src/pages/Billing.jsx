@@ -158,7 +158,7 @@ export default function Billing() {
       {unbilledOrders.length > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <h2>Orders not yet fully billed</h2>
-          <table>
+          <table className="sticky-head">
             <thead>
               <tr>
                 <th>Order #</th>
@@ -199,7 +199,7 @@ export default function Billing() {
       </div>
 
       <div className="card">
-        <table>
+        <table className="sticky-head">
           <thead>
             <tr>
               <SortTh label="Invoice #" sortKey="invoice_number" toggleSort={toggleSort} arrow={arrow} />

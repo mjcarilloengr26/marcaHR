@@ -144,7 +144,7 @@ export default function Locations() {
       </form>
 
       <div className="card">
-        <table>
+        <table className="sticky-head">
           <thead>
             <tr>
               <th>Name</th>

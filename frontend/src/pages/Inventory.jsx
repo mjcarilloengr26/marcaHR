@@ -416,8 +416,8 @@ export default function Inventory() {
         </div>
       )}
 
-      <div className="card table-scroll">
-        <table>
+      <div className="card card-wide">
+        <table className="sticky-head">
           <thead>
             <tr>
               <th style={{ width: 32 }}>
@@ -475,13 +475,15 @@ export default function Inventory() {
                 <td>{money(i.total_value)}</td>
                 <td>{i.location_name || "—"}</td>
                 <td>{statusBadge(i.stock_status)}</td>
-                <td className="col-actions">
+                <td>
+                  <div className="col-actions">
                   <button className="btn btn-sm" onClick={() => openStock(i, "in")}>Stock in</button>
                   <button className="btn btn-sm btn-secondary" onClick={() => openStock(i, "out")}>Stock out</button>
                   <button className="btn btn-sm btn-secondary" onClick={() => openStock(i, "adjust")}>Adjust</button>
                   <button className="btn btn-sm btn-secondary" onClick={() => openHistory(i)}>History</button>
                   <button className="btn btn-sm btn-secondary" onClick={() => openEdit(i)}>Edit</button>
-                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(i.id)}>Delete</button>
+                    <button className="btn btn-sm btn-danger" onClick={() => handleDelete(i.id)}>Delete</button>
+                  </div>
                 </td>
               </tr>
             ))}
