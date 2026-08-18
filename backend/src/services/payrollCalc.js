@@ -22,6 +22,13 @@ function payrollPeriodRange(period_month, period_year, period_half) {
 
 // How many payroll periods a month is split into, and so what share of the
 // monthly base salary one period is worth.
+// The employee's stated salary expressed as a monthly amount, whichever way
+// it was entered. A per-cut-off figure is two of those to the month.
+function monthlyEquivalentSalary(employee) {
+  const stated = Number(employee?.base_salary) || 0;
+  return employee?.salary_basis === "semi_monthly" ? stated * 2 : stated;
+}
+
 function periodsPerMonth(settings) {
   return settings?.pay_frequency === "monthly" ? 1 : 2;
 }
@@ -161,11 +168,13 @@ async function computeEmployeePayroll(employee, period_month, period_year, perio
     settings
   );
 
-  // The employee record holds a MONTHLY base salary, so one period is worth
-  // that divided by the number of periods in a month — half for semi-monthly,
-  // all of it for monthly. This used to be a hardcoded /2, which paid a
-  // monthly-frequency run half of what it owed.
-  const monthlySalary = Number(employee.base_salary) || 0;
+  // Two independent things decide what one period is worth. The employee's
+  // salary_basis says what the figure on their record means — a whole month,
+  // or the amount handed over each cut-off. pay_frequency says how often the
+  // company runs payroll. Normalise to a monthly figure first, then divide it
+  // across the periods in a month. (The divisor used to be a hardcoded /2,
+  // which paid a monthly-frequency run half of what it owed.)
+  const monthlySalary = monthlyEquivalentSalary(employee);
   const periodSalary = monthlySalary / periodsPerMonth(settings);
   const dailyRate = periodSalary / expectedDays;
   const hourlyRate = settings.standard_hours_per_day > 0 ? dailyRate / settings.standard_hours_per_day : 0;
@@ -202,6 +211,7 @@ module.exports = {
   payrollPeriodRange,
   periodsPerMonth,
   periodHalfFor,
+  monthlyEquivalentSalary,
   currentPeriodHalf,
   countWeekdays,
   hoursOf,

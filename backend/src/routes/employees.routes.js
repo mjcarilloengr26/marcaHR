@@ -9,7 +9,10 @@ const {
   periodHalfFor,
   getPayrollSettings,
   computeEmployeePayroll,
+  monthlyEquivalentSalary,
 } = require("../services/payrollCalc");
+
+const SALARY_BASES = ["monthly", "semi_monthly"];
 
 const router = express.Router();
 
@@ -25,6 +28,7 @@ const EMPLOYEE_FIELDS = [
   "hire_date",
   "status",
   "base_salary",
+  "salary_basis",
   "address",
   "photo",
   "deduction_sss",
@@ -76,10 +80,10 @@ async function backfillCurrentPayrollIfGenerated(employee) {
   const cashAdvances = employee.deduction_cash_advances || 0;
   const deductions = sss + hdmf + philhealth + taxes + loans + cashAdvances;
   const pay = {
-    // One period's share of the monthly salary, which is the whole of it on
-    // a monthly frequency. This was a hardcoded /2 and so underpaid a
-    // monthly-frequency backfill by half.
-    base_salary: Math.round(((employee.base_salary || 0) / periodsPerMonth(settings)) * 100) / 100,
+    // One period's share of the salary once it is normalised to a monthly
+    // figure, which is the whole of it on a monthly frequency. This was a
+    // hardcoded /2 and so underpaid a monthly-frequency backfill by half.
+    base_salary: Math.round((monthlyEquivalentSalary(employee) / periodsPerMonth(settings)) * 100) / 100,
     overtime_pay: 0,
     night_differential_pay: 0,
   };
@@ -204,6 +208,9 @@ router.post(
     if (!body.first_name || !body.last_name || !body.email) {
       return res.status(400).json({ error: "first_name, last_name and email are required" });
     }
+    if (body.salary_basis !== undefined && !SALARY_BASES.includes(body.salary_basis)) {
+      return res.status(400).json({ error: `salary_basis must be one of: ${SALARY_BASES.join(", ")}` });
+    }
     const cols = EMPLOYEE_FIELDS.filter((f) => body[f] !== undefined);
     const placeholders = cols.map(() => "?").join(", ");
     const values = cols.map((f) => body[f]);
@@ -240,6 +247,9 @@ router.put(
     if (!existing) return res.status(404).json({ error: "Employee not found" });
 
     const body = req.body || {};
+    if (body.salary_basis !== undefined && !SALARY_BASES.includes(body.salary_basis)) {
+      return res.status(400).json({ error: `salary_basis must be one of: ${SALARY_BASES.join(", ")}` });
+    }
     // Employees editing themselves can only update contact info, not salary/status/dept/manager.
     const allowedFields =
       req.user.role === "admin" || req.user.role === "hr"
@@ -266,7 +276,10 @@ router.put(
     // Only when something that actually drives pay moved, so an edit to a
     // phone number does not quietly rewrite payroll.
     let refreshed = 0;
-    if (cols.includes("base_salary") && Number(existing.base_salary) !== Number(updated.base_salary)) {
+    const salaryMoved =
+      (cols.includes("base_salary") && Number(existing.base_salary) !== Number(updated.base_salary)) ||
+      (cols.includes("salary_basis") && existing.salary_basis !== updated.salary_basis);
+    if (salaryMoved) {
       refreshed = await refreshDraftPayrollFor(updated);
     }
 

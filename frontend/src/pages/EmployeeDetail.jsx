@@ -57,6 +57,7 @@ export default function EmployeeDetail() {
         department_id: form.department_id || null,
         location_id: form.location_id || null,
         base_salary: form.base_salary ? Number(form.base_salary) : 0,
+        salary_basis: form.salary_basis || "monthly",
       });
       setEmployee(updated);
       setEditing(false);
@@ -138,7 +139,15 @@ export default function EmployeeDetail() {
             <div><strong>Manager</strong><div>{employee.manager_name || "—"}</div></div>
             <div><strong>Hire date</strong><div>{employee.hire_date || "—"}</div></div>
             <div><strong>Status</strong><div><span className={`badge badge-${employee.status}`}>{employee.status}</span></div></div>
-            <div><strong>Base salary</strong><div>{money(employee.base_salary)}</div></div>
+            <div>
+              <strong>Base salary</strong>
+              <div>
+                {money(employee.base_salary)}{" "}
+                <span className="subtitle" style={{ fontSize: 12 }}>
+                  {employee.salary_basis === "semi_monthly" ? "per cut-off" : "per month"}
+                </span>
+              </div>
+            </div>
             <div><strong>Address</strong><div>{employee.address || "—"}</div></div>
           </div>
         </div>
@@ -224,6 +233,16 @@ export default function EmployeeDetail() {
             <div className="form-row">
               <label>Base salary</label>
               <input type="number" value={form.base_salary || ""} onChange={handleChange("base_salary")} />
+            </div>
+            <div className="form-row">
+              <label>Salary is</label>
+              <select value={form.salary_basis || "monthly"} onChange={handleChange("salary_basis")}>
+                <option value="monthly">Per month</option>
+                <option value="semi_monthly">Per cut-off (bi-monthly)</option>
+              </select>
+              <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                Changing this recalculates their unpaid draft payroll.
+              </p>
             </div>
           </div>
           <div className="form-row">

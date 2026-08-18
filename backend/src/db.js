@@ -711,6 +711,15 @@ async function ensureEmployeeStandingDeductions() {
   await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_taxes REAL NOT NULL DEFAULT 0");
   await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_loans REAL NOT NULL DEFAULT 0");
   await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS deduction_cash_advances REAL NOT NULL DEFAULT 0");
+
+  // What the base_salary figure on an employee actually represents:
+  //   'monthly'      - a whole month's pay (the default, and what every
+  //                    existing row held, so no backfill is needed).
+  //   'semi_monthly' - the amount paid each cut-off, i.e. half a month.
+  // Separate from payroll_settings.pay_frequency, which is how often the
+  // company runs payroll. One is how the number was written down, the other
+  // is how often it is paid out, and they are not always the same.
+  await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary_basis TEXT NOT NULL DEFAULT 'monthly'");
 }
 
 // Seeded once on first boot only (ON CONFLICT DO NOTHING) — after that this

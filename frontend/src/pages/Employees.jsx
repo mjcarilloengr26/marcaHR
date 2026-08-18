@@ -15,6 +15,7 @@ const emptyForm = {
   manager_id: "",
   hire_date: "",
   base_salary: "",
+  salary_basis: "monthly",
   address: "",
 };
 
@@ -58,6 +59,7 @@ export default function Employees() {
         location_id: form.location_id || null,
         manager_id: form.manager_id || null,
         base_salary: form.base_salary ? Number(form.base_salary) : 0,
+        salary_basis: form.salary_basis || "monthly",
       });
       setShowForm(false);
       setForm(emptyForm);
@@ -199,6 +201,18 @@ export default function Employees() {
               <div className="form-row">
                 <label>Base salary</label>
                 <input type="number" value={form.base_salary} onChange={handleChange("base_salary")} />
+              </div>
+              <div className="form-row">
+                <label>Salary is</label>
+                <select value={form.salary_basis} onChange={handleChange("salary_basis")}>
+                  <option value="monthly">Per month</option>
+                  <option value="semi_monthly">Per cut-off (bi-monthly)</option>
+                </select>
+                <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  {form.salary_basis === "semi_monthly"
+                    ? "The amount handed over each cut-off, so a month is twice this."
+                    : "A whole month's pay, split across the cut-offs when payroll runs."}
+                </p>
               </div>
             </div>
             <div className="form-row">
