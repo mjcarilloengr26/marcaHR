@@ -96,6 +96,35 @@ async function start() {
 
   const PORT = process.env.PORT || 4000;
   app.listen(PORT, () => console.log(`HR app backend listening on http://localhost:${PORT}`));
+
+  // Open the first Postgres connection now rather than letting the first real
+  // request pay for it. The migration above already does this in practice, but
+  // keeping the warm-up explicit means it survives that changing.
+  db.prepare("SELECT 1 AS ok").get().catch(() => {});
+
+  keepWarm();
+}
+
+// Render's free plan stops the instance after ~15 minutes with no inbound
+// traffic, and the next visitor then waits out a 30-60s cold boot — which
+// lands squarely on whoever is trying to sign in. A request to our own public
+// URL counts as inbound traffic as far as Render is concerned, so pinging
+// ourselves inside that window keeps the instance up.
+//
+// Set KEEP_WARM_URL to the service's public URL to enable it. Leave it unset
+// on any paid plan, which never sleeps, so the app is not making pointless
+// requests to itself. Note that this holds the instance awake around the
+// clock and so spends the monthly free instance-hour allowance.
+function keepWarm() {
+  const base = process.env.KEEP_WARM_URL;
+  if (!base) return;
+  const trimmed = base.endsWith("/") ? base.slice(0, -1) : base;
+  const url = trimmed + "/api/health";
+  const PING_EVERY_MS = 10 * 60 * 1000; // comfortably inside the ~15 minute window
+  console.log(`Keep-warm ping enabled: ${url} every ${PING_EVERY_MS / 60000} min`);
+  setInterval(() => {
+    fetch(url).catch((err) => console.error("Keep-warm ping failed:", err.message));
+  }, PING_EVERY_MS).unref();
 }
 
 start().catch((err) => {

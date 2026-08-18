@@ -21,6 +21,24 @@ types.setTypeParser(1700, (val) => parseFloat(val)); // numeric / decimal
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
+  // Supabase is a network round-trip away and opening a fresh TLS Postgres
+  // connection to it costs roughly a second. The default idleTimeoutMillis
+  // (10s) meant a quiet minute was enough to throw the connection away, so
+  // the next request — very often someone signing in — paid that second
+  // before its first query even ran. Hold connections open instead, and keep
+  // the TCP socket alive so an idle one is not dropped by anything in between.
+  keepAlive: true,
+  idleTimeoutMillis: 0,
+  max: 10,
+});
+
+// Holding idle connections open means a connection killed at the far end (a
+// Supabase restart, a network blip) surfaces as an error on the pool rather
+// than on any one query — and an unhandled one of those takes the whole
+// process down. pg has already discarded the bad client by the time this
+// fires, so logging is all that is needed; the next query opens a fresh one.
+pool.on("error", (err) => {
+  console.error("Postgres pool error (idle client discarded):", err.message);
 });
 
 // Every route file was written against node:sqlite's synchronous

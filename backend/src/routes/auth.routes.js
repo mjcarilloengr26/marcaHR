@@ -32,18 +32,24 @@ router.post(
     }
 
     const token = signToken(user);
-    const employee = user.employee_id
-      ? await db
-          .prepare(
-            `SELECT e.*, d.name AS department_name FROM employees e
-             LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?`
-          )
-          .get(user.employee_id)
-      : null;
-    const termsVersion = await currentTermsVersion();
-    const pageGrants = await activeGrantsForUser(user.id);
 
-    await logEvent({ userId: user.id, userEmail: user.email, action: "login", ip: req.ip });
+    // These four are independent of each other, so they go out together. Run
+    // one after another they cost four round-trips to Supabase — around a
+    // second of pure waiting, all of it while someone stares at the sign-in
+    // button. In parallel the whole group costs one round-trip.
+    const [employee, termsVersion, pageGrants] = await Promise.all([
+      user.employee_id
+        ? db
+            .prepare(
+              `SELECT e.*, d.name AS department_name FROM employees e
+               LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?`
+            )
+            .get(user.employee_id)
+        : null,
+      currentTermsVersion(),
+      activeGrantsForUser(user.id),
+      logEvent({ userId: user.id, userEmail: user.email, action: "login", ip: req.ip }),
+    ]);
 
     res.json({
       token,
@@ -96,16 +102,20 @@ router.get(
   asyncHandler(async (req, res) => {
     const user = await db.prepare("SELECT id, email, role, employee_id, terms_version FROM users WHERE id = ?").get(req.user.id);
     if (!user) return res.status(404).json({ error: "User not found" });
-    const employee = user.employee_id
-      ? await db
-          .prepare(
-            `SELECT e.*, d.name AS department_name FROM employees e
-             LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?`
-          )
-          .get(user.employee_id)
-      : null;
-    const termsVersion = await currentTermsVersion();
-    const pageGrants = await activeGrantsForUser(user.id);
+    // Same three-at-once as /login. This route runs on every page load and
+    // every refresh, so its round-trips are the ones felt most often.
+    const [employee, termsVersion, pageGrants] = await Promise.all([
+      user.employee_id
+        ? db
+            .prepare(
+              `SELECT e.*, d.name AS department_name FROM employees e
+               LEFT JOIN departments d ON d.id = e.department_id WHERE e.id = ?`
+            )
+            .get(user.employee_id)
+        : null,
+      currentTermsVersion(),
+      activeGrantsForUser(user.id),
+    ]);
     res.json({
       user: {
         id: user.id,
