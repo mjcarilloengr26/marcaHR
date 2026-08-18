@@ -647,6 +647,20 @@ async function ensurePayrollTimeSettings() {
   await pool.query("ALTER TABLE payroll_settings ADD COLUMN IF NOT EXISTS overtime_start_time TEXT NOT NULL DEFAULT '17:00'");
   await pool.query("ALTER TABLE payroll_settings ADD COLUMN IF NOT EXISTS overtime_end_time TEXT NOT NULL DEFAULT '22:00'");
   await pool.query("ALTER TABLE payroll_settings ADD COLUMN IF NOT EXISTS night_shift_multiplier REAL NOT NULL DEFAULT 1.10");
+
+  // How often people are paid, and so how much of the monthly base salary one
+  // payroll period is worth. Semi-monthly (1st-15th and 16th-end) is the
+  // default because that is what the period_half column already assumed.
+  await pool.query("ALTER TABLE payroll_settings ADD COLUMN IF NOT EXISTS pay_frequency TEXT NOT NULL DEFAULT 'semi_monthly'");
+
+  // How attendance feeds into base pay.
+  //   'fixed'       - a salaried employee earns the whole period's salary, less
+  //                   whatever absences are actually recorded against them.
+  //   'worked_days' - pay only for days attendance shows they worked.
+  // Default is fixed: the worked_days rule quietly pays everyone zero at any
+  // company that does not use the attendance module, which is not a sensible
+  // thing for payroll to do on its own.
+  await pool.query("ALTER TABLE payroll_settings ADD COLUMN IF NOT EXISTS attendance_basis TEXT NOT NULL DEFAULT 'fixed'");
 }
 
 async function ensurePayrollNightDifferential() {

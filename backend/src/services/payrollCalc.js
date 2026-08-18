@@ -5,11 +5,36 @@ const db = require("../db");
 // reserved for legacy whole-month records created before this existed.
 function payrollPeriodRange(period_month, period_year, period_half) {
   const mm = String(period_month).padStart(2, "0");
-  if (Number(period_half) === 1) {
+  const lastDay = String(new Date(period_year, period_month, 0).getDate()).padStart(2, "0");
+  const half = Number(period_half);
+  if (half === 1) {
     return { start: `${period_year}-${mm}-01`, end: `${period_year}-${mm}-15` };
   }
-  const lastDay = new Date(period_year, period_month, 0).getDate();
-  return { start: `${period_year}-${mm}-16`, end: `${period_year}-${mm}-${String(lastDay).padStart(2, "0")}` };
+  if (half === 2) {
+    return { start: `${period_year}-${mm}-16`, end: `${period_year}-${mm}-${lastDay}` };
+  }
+  // half 0 is the whole month: monthly pay frequency, and legacy whole-month
+  // records created before the halves existed. This used to fall through to
+  // the 16th-onward branch, which charged those records half a month of
+  // working days and silently halved the pay they were built from.
+  return { start: `${period_year}-${mm}-01`, end: `${period_year}-${mm}-${lastDay}` };
+}
+
+// How many payroll periods a month is split into, and so what share of the
+// monthly base salary one period is worth.
+function periodsPerMonth(settings) {
+  return settings?.pay_frequency === "monthly" ? 1 : 2;
+}
+
+// Which period_half value a given pay frequency uses. Monthly runs are stored
+// as half 0 (the whole month) so they never collide with a semi-monthly run.
+function periodHalfFor(settings, requestedHalf) {
+  return periodsPerMonth(settings) === 1 ? 0 : Number(requestedHalf);
+}
+
+function isWeekend(dateStr) {
+  const day = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+  return day === 0 || day === 6;
 }
 
 // Which half-month period "now" falls into — used to know which period an
@@ -77,7 +102,7 @@ const NIGHT_WINDOW_END = 6;
 //     for the night shift differential.
 async function computeAttendanceForPeriod(employeeId, start, end, settings) {
   const rows = await db
-    .prepare("SELECT status, clock_in, clock_out FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ?")
+    .prepare("SELECT date, status, clock_in, clock_out FROM attendance WHERE employee_id = ? AND date BETWEEN ? AND ?")
     .all(employeeId, start, end);
 
   const standardHours = settings.standard_hours_per_day;
@@ -87,24 +112,34 @@ async function computeAttendanceForPeriod(employeeId, start, end, settings) {
   const otEnd = hoursOf(settings.overtime_end_time);
 
   let daysWorked = 0;
+  let shortfallDays = 0;
   let overtimeHours = 0;
   let nightHours = 0;
 
   for (const r of rows) {
+    let dayCredit = 0;
     if (r.clock_in && r.clock_out) {
       const inH = hoursOf(r.clock_in);
       const outH = hoursOf(r.clock_out);
       const regularHours = overlapHours(inH, outH, regularStart, regularEnd);
-      daysWorked += Math.min(1, standardHours > 0 ? regularHours / standardHours : 0);
+      dayCredit = Math.min(1, standardHours > 0 ? regularHours / standardHours : 0);
       overtimeHours += overlapHours(inH, outH, otStart, otEnd);
       nightHours += overlapHours(inH, outH, NIGHT_WINDOW_START, NIGHT_WINDOW_END);
     } else if (r.status === "present" || r.status === "late" || r.status === "leave") {
-      daysWorked += 1;
+      dayCredit = 1;
     } else if (r.status === "half_day") {
-      daysWorked += 0.5;
+      dayCredit = 0.5;
     }
+    daysWorked += dayCredit;
+
+    // How much of an expected working day this record failed to cover. It is
+    // what the 'fixed' basis deducts from a full period's salary. Weekend
+    // records are skipped because no salary was owed for those days in the
+    // first place, so falling short of one cannot cost anything — while the
+    // hours themselves still count toward overtime above.
+    if (!isWeekend(r.date)) shortfallDays += 1 - dayCredit;
   }
-  return { daysWorked, overtimeHours, nightHours };
+  return { daysWorked, shortfallDays, overtimeHours, nightHours };
 }
 
 async function getPayrollSettings() {
@@ -119,18 +154,54 @@ async function getPayrollSettings() {
 async function computeEmployeePayroll(employee, period_month, period_year, period_half, settings) {
   const { start, end } = payrollPeriodRange(period_month, period_year, period_half);
   const expectedDays = countWeekdays(start, end) || 1;
-  const { daysWorked, overtimeHours, nightHours } = await computeAttendanceForPeriod(employee.id, start, end, settings);
-  const dailyRate = employee.base_salary / 2 / expectedDays;
+  const { daysWorked, shortfallDays, overtimeHours, nightHours } = await computeAttendanceForPeriod(
+    employee.id,
+    start,
+    end,
+    settings
+  );
+
+  // The employee record holds a MONTHLY base salary, so one period is worth
+  // that divided by the number of periods in a month — half for semi-monthly,
+  // all of it for monthly. This used to be a hardcoded /2, which paid a
+  // monthly-frequency run half of what it owed.
+  const monthlySalary = Number(employee.base_salary) || 0;
+  const periodSalary = monthlySalary / periodsPerMonth(settings);
+  const dailyRate = periodSalary / expectedDays;
   const hourlyRate = settings.standard_hours_per_day > 0 ? dailyRate / settings.standard_hours_per_day : 0;
-  const base_salary = Math.round(dailyRate * daysWorked * 100) / 100;
+
+  // 'fixed' starts from a full period and takes off recorded absences, so a
+  // salaried employee is paid whether or not anyone uses the time clock.
+  // 'worked_days' pays only for days attendance can account for — under which
+  // a period with no attendance records at all correctly earns nothing.
+  const paidDays =
+    settings.attendance_basis === "worked_days"
+      ? daysWorked
+      : Math.max(0, Math.min(expectedDays, expectedDays - shortfallDays));
+
+  const base_salary = Math.round(dailyRate * paidDays * 100) / 100;
   const overtime_pay = Math.round(overtimeHours * hourlyRate * settings.overtime_multiplier * 100) / 100;
   const night_differential_pay = Math.round(nightHours * hourlyRate * (settings.night_shift_multiplier - 1) * 100) / 100;
   const net_pay = Math.round((base_salary + overtime_pay + night_differential_pay) * 100) / 100;
-  return { base_salary, overtime_pay, night_differential_pay, net_pay };
+  return {
+    base_salary,
+    overtime_pay,
+    night_differential_pay,
+    net_pay,
+    // Returned so a caller can explain the figure rather than just assert it.
+    period_start: start,
+    period_end: end,
+    expected_days: expectedDays,
+    paid_days: Math.round(paidDays * 100) / 100,
+    period_salary: Math.round(periodSalary * 100) / 100,
+    daily_rate: Math.round(dailyRate * 100) / 100,
+  };
 }
 
 module.exports = {
   payrollPeriodRange,
+  periodsPerMonth,
+  periodHalfFor,
   currentPeriodHalf,
   countWeekdays,
   hoursOf,

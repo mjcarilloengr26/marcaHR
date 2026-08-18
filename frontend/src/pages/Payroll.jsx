@@ -33,6 +33,8 @@ export default function Payroll() {
   const [settingsForm, setSettingsForm] = useState(null);
   const [search, setSearch] = useState("");
 
+  const isMonthly = settings?.pay_frequency === "monthly";
+
   const load = () => api.get("/payroll").then(setRecords).catch((err) => setError(err.message));
 
   useEffect(() => {
@@ -42,6 +44,17 @@ export default function Payroll() {
   }, []);
 
   const generate = async () => {
+    if (
+      !confirm(
+        `Generate payroll for ${MONTH_NAMES[month]} ${year}${isMonthly ? "" : half === 1 || half === "1" ? " (1st half)" : " (2nd half)"}?
+
+` +
+          "Draft records for this period will be recalculated from the current salaries, attendance and payroll settings. " +
+          "Finalized and paid records are left untouched."
+      )
+    ) {
+      return;
+    }
     setGenerating(true);
     setError("");
     try {
@@ -120,6 +133,8 @@ export default function Payroll() {
       overtime_start_time: settings.overtime_start_time,
       overtime_end_time: settings.overtime_end_time,
       night_shift_multiplier: settings.night_shift_multiplier,
+      pay_frequency: settings.pay_frequency || "semi_monthly",
+      attendance_basis: settings.attendance_basis || "fixed",
     });
     setEditingSettings(true);
   };
@@ -137,6 +152,8 @@ export default function Payroll() {
         overtime_start_time: settingsForm.overtime_start_time,
         overtime_end_time: settingsForm.overtime_end_time,
         night_shift_multiplier: Number(settingsForm.night_shift_multiplier) || 1,
+        pay_frequency: settingsForm.pay_frequency,
+        attendance_basis: settingsForm.attendance_basis,
       });
       setSettings(updated);
       setEditingSettings(false);
@@ -168,7 +185,7 @@ export default function Payroll() {
         </div>
         {isHr && settings && (
           <button className="btn btn-secondary" onClick={openEditSettings}>
-            {settings.standard_hours_per_day}h/day ({settings.regular_start_time}–{settings.regular_end_time}) · OT ×{settings.overtime_multiplier} · Night ×{settings.night_shift_multiplier}
+            {settings.pay_frequency === "monthly" ? "Monthly" : "Semi-monthly"} · {settings.standard_hours_per_day}h/day ({settings.regular_start_time}–{settings.regular_end_time}) · OT ×{settings.overtime_multiplier} · Night ×{settings.night_shift_multiplier}
           </button>
         )}
       </div>
@@ -185,13 +202,17 @@ export default function Payroll() {
             <label>Year</label>
             <input type="number" value={year} onChange={(e) => setYear(e.target.value)} />
           </div>
-          <div className="form-row">
-            <label>Cut-off</label>
-            <select value={half} onChange={(e) => setHalf(e.target.value)}>
-              <option value={1}>1st half (1–15)</option>
-              <option value={2}>2nd half (16–end)</option>
-            </select>
-          </div>
+          {/* A monthly run covers the whole month, so there is no half to pick.
+              The backend ignores period_half in that case regardless. */}
+          {!isMonthly && (
+            <div className="form-row">
+              <label>Cut-off</label>
+              <select value={half} onChange={(e) => setHalf(e.target.value)}>
+                <option value={1}>1st half (1–15)</option>
+                <option value={2}>2nd half (16–end)</option>
+              </select>
+            </div>
+          )}
           <button className="btn" onClick={generate} disabled={generating}>
             {generating ? "Generating…" : "Generate payroll for period"}
           </button>
@@ -393,6 +414,36 @@ export default function Payroll() {
             <p className="subtitle" style={{ marginTop: -8 }}>
               Used to auto-calculate base pay, overtime, and night differential from attendance when generating payroll
             </p>
+            <div className="grid grid-2">
+              <div className="form-row">
+                <label>Pay frequency</label>
+                <select
+                  value={settingsForm.pay_frequency}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, pay_frequency: e.target.value })}
+                >
+                  <option value="semi_monthly">Semi-monthly (1st–15th, 16th–end)</option>
+                  <option value="monthly">Monthly (whole month)</option>
+                </select>
+                <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  How much of an employee's monthly base salary one payroll run pays out — half of it, or all of it.
+                </p>
+              </div>
+              <div className="form-row">
+                <label>Base pay basis</label>
+                <select
+                  value={settingsForm.attendance_basis}
+                  onChange={(e) => setSettingsForm({ ...settingsForm, attendance_basis: e.target.value })}
+                >
+                  <option value="fixed">Fixed salary, less absences</option>
+                  <option value="worked_days">Pay only for days worked</option>
+                </select>
+                <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  {settingsForm.attendance_basis === "worked_days"
+                    ? "Attendance must be recorded, or base pay comes out as zero."
+                    : "Salaried staff are paid in full unless an absence is recorded against them."}
+                </p>
+              </div>
+            </div>
             <div className="form-row">
               <label>Standard hours per day</label>
               <input

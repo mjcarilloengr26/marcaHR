@@ -3,7 +3,12 @@ const db = require("../db");
 const { requireAuth, requireRole, requireSelfOrRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
-const { currentPeriodHalf } = require("../services/payrollCalc");
+const {
+  currentPeriodHalf,
+  periodsPerMonth,
+  periodHalfFor,
+  getPayrollSettings,
+} = require("../services/payrollCalc");
 
 const router = express.Router();
 
@@ -56,7 +61,8 @@ async function backfillCurrentPayrollIfGenerated(employee) {
   const now = new Date();
   const period_month = now.getMonth() + 1;
   const period_year = now.getFullYear();
-  const period_half = currentPeriodHalf(now);
+  const settings = await getPayrollSettings();
+  const period_half = periodHalfFor(settings, currentPeriodHalf(now));
   const alreadyGenerated = await db
     .prepare("SELECT 1 FROM payroll_records WHERE period_month = ? AND period_year = ? AND period_half = ? LIMIT 1")
     .get(period_month, period_year, period_half);
@@ -69,7 +75,10 @@ async function backfillCurrentPayrollIfGenerated(employee) {
   const cashAdvances = employee.deduction_cash_advances || 0;
   const deductions = sss + hdmf + philhealth + taxes + loans + cashAdvances;
   const pay = {
-    base_salary: Math.round(((employee.base_salary || 0) / 2) * 100) / 100,
+    // One period's share of the monthly salary, which is the whole of it on
+    // a monthly frequency. This was a hardcoded /2 and so underpaid a
+    // monthly-frequency backfill by half.
+    base_salary: Math.round(((employee.base_salary || 0) / periodsPerMonth(settings)) * 100) / 100,
     overtime_pay: 0,
     night_differential_pay: 0,
   };

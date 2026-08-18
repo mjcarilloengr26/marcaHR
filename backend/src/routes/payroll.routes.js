@@ -3,7 +3,16 @@ const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
-const { payrollPeriodRange, countWeekdays, computeEmployeePayroll } = require("../services/payrollCalc");
+const {
+  payrollPeriodRange,
+  countWeekdays,
+  computeEmployeePayroll,
+  periodsPerMonth,
+  periodHalfFor,
+} = require("../services/payrollCalc");
+
+const PAY_FREQUENCIES = ["semi_monthly", "monthly"];
+const ATTENDANCE_BASES = ["fixed", "worked_days"];
 
 const router = express.Router();
 
@@ -33,6 +42,8 @@ router.put(
       overtime_start_time,
       overtime_end_time,
       night_shift_multiplier,
+      pay_frequency,
+      attendance_basis,
     } = req.body || {};
 
     for (const [label, value] of [
@@ -48,12 +59,19 @@ router.put(
     if (night_shift_multiplier !== undefined && !(Number(night_shift_multiplier) > 0)) {
       return res.status(400).json({ error: "night_shift_multiplier must be a positive number" });
     }
+    if (pay_frequency !== undefined && !PAY_FREQUENCIES.includes(pay_frequency)) {
+      return res.status(400).json({ error: `pay_frequency must be one of: ${PAY_FREQUENCIES.join(", ")}` });
+    }
+    if (attendance_basis !== undefined && !ATTENDANCE_BASES.includes(attendance_basis)) {
+      return res.status(400).json({ error: `attendance_basis must be one of: ${ATTENDANCE_BASES.join(", ")}` });
+    }
 
     await db
       .prepare(
         `UPDATE payroll_settings SET standard_hours_per_day = ?, overtime_multiplier = ?,
          regular_start_time = ?, regular_end_time = ?, overtime_start_time = ?, overtime_end_time = ?,
-         night_shift_multiplier = ?, updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') WHERE id = 1`
+         night_shift_multiplier = ?, pay_frequency = ?, attendance_basis = ?,
+         updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') WHERE id = 1`
       )
       .run(
         standard_hours_per_day !== undefined ? standard_hours_per_day : existing.standard_hours_per_day,
@@ -62,7 +80,9 @@ router.put(
         regular_end_time !== undefined ? regular_end_time : existing.regular_end_time,
         overtime_start_time !== undefined ? overtime_start_time : existing.overtime_start_time,
         overtime_end_time !== undefined ? overtime_end_time : existing.overtime_end_time,
-        night_shift_multiplier !== undefined ? night_shift_multiplier : existing.night_shift_multiplier
+        night_shift_multiplier !== undefined ? night_shift_multiplier : existing.night_shift_multiplier,
+        pay_frequency !== undefined ? pay_frequency : existing.pay_frequency,
+        attendance_basis !== undefined ? attendance_basis : existing.attendance_basis
       );
     await logRequestEvent(req, "update_payroll_settings", {
       entityType: "payroll_settings",
@@ -74,6 +94,8 @@ router.put(
         overtime_start_time,
         overtime_end_time,
         night_shift_multiplier,
+        pay_frequency,
+        attendance_basis,
       },
     });
     res.json(await db.prepare("SELECT * FROM payroll_settings WHERE id = 1").get());
@@ -285,19 +307,47 @@ router.post(
   requireRole("admin", "hr"),
   asyncHandler(async (req, res) => {
     const { period_month, period_year, period_half } = req.body || {};
-    if (!period_month || !period_year || ![1, 2].includes(Number(period_half))) {
-      return res.status(400).json({ error: "period_month, period_year and period_half (1 or 2) are required" });
+    if (!period_month || !period_year) {
+      return res.status(400).json({ error: "period_month and period_year are required" });
     }
-    const half = Number(period_half);
     const settings = await db.prepare("SELECT * FROM payroll_settings WHERE id = 1").get();
+
+    // On a monthly frequency there is no first/second half to choose, so the
+    // run is stored as half 0 (the whole month) whatever the caller asked for.
+    // Semi-monthly still requires an explicit half — generating the wrong one
+    // silently would pay the wrong fortnight.
+    const semiMonthly = periodsPerMonth(settings) === 2;
+    if (semiMonthly && ![1, 2].includes(Number(period_half))) {
+      return res.status(400).json({ error: "period_half (1 or 2) is required on a semi-monthly pay frequency" });
+    }
+    const half = periodHalfFor(settings, period_half);
 
     const employees = await db.prepare("SELECT * FROM employees WHERE status = 'active'").all();
     const insert = db.prepare(
       `INSERT INTO payroll_records (employee_id, period_month, period_year, period_half, base_salary, bonuses, overtime_pay, night_differential_pay, deductions, deduction_sss, deduction_hdmf, deduction_philhealth, deduction_taxes, deduction_loans, deduction_cash_advances, net_pay, status)
      VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')
-     ON CONFLICT(employee_id, period_month, period_year, period_half) DO NOTHING`
+     ON CONFLICT(employee_id, period_month, period_year, period_half) DO UPDATE SET
+       base_salary = excluded.base_salary,
+       overtime_pay = excluded.overtime_pay,
+       night_differential_pay = excluded.night_differential_pay,
+       deductions = excluded.deductions,
+       deduction_sss = excluded.deduction_sss,
+       deduction_hdmf = excluded.deduction_hdmf,
+       deduction_philhealth = excluded.deduction_philhealth,
+       deduction_taxes = excluded.deduction_taxes,
+       deduction_loans = excluded.deduction_loans,
+       deduction_cash_advances = excluded.deduction_cash_advances,
+       net_pay = excluded.base_salary + excluded.overtime_pay + excluded.night_differential_pay
+                 + payroll_records.bonuses - excluded.deductions
+     WHERE payroll_records.status = 'draft'`
     );
     const generated = [];
+    // Re-running a period recalculates its DRAFT rows rather than skipping
+    // them, so a corrected salary or a changed payroll setting actually shows
+    // up. It used to skip every existing row, which meant a period generated
+    // once could never be fixed. Finalized and paid runs are left alone by the
+    // WHERE clause, and any bonuses HR typed onto a draft are preserved and
+    // still counted into net pay.
     // Deductions carry forward from each employee's standing amounts (set the
     // last time HR edited a payroll record — see POST /) rather than starting
     // at 0 every cut-off, since SSS/HDMF/PhilHealth/loan amortization etc.
@@ -336,7 +386,13 @@ router.post(
     await runAll(employees);
     await logRequestEvent(req, "generate_payroll", {
       entityType: "payroll",
-      details: { period: `${MONTH_NAMES[period_month]} ${period_year}`, period_half: half, generated_count: generated.length },
+      details: {
+        period: `${MONTH_NAMES[period_month]} ${period_year}`,
+        period_half: half,
+        pay_frequency: settings.pay_frequency,
+        attendance_basis: settings.attendance_basis,
+        generated_count: generated.length,
+      },
     });
     res.status(201).json({ generated_count: generated.length });
   })
