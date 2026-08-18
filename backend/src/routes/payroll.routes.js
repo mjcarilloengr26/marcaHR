@@ -10,6 +10,7 @@ const {
   periodsPerMonth,
   periodHalfFor,
   periodHalfForEmployee,
+  scheduleFor,
 } = require("../services/payrollCalc");
 
 const PAY_FREQUENCIES = ["semi_monthly", "monthly"];
@@ -356,14 +357,18 @@ router.post(
     // finalized and paid rows are history and are never touched.
     const staleCleared = [];
     for (const e of employees) {
-      const keep = periodHalfForEmployee(e, settings, half);
+      // Every half this employee's schedule legitimately uses — NOT just the
+      // one being generated. Deleting on "anything but the requested half"
+      // wiped a bi-monthly employee's other cut-off every time HR generated
+      // one of them, silently halving their month.
+      const valid = scheduleFor(e, settings) === "monthly" ? [0] : [1, 2];
       const removed = await db
         .prepare(
           `DELETE FROM payroll_records
            WHERE employee_id = ? AND period_month = ? AND period_year = ?
-             AND period_half <> ? AND status = 'draft'`
+             AND status = 'draft' AND period_half <> ALL(?::int[])`
         )
-        .run(e.id, period_month, period_year, keep);
+        .run(e.id, period_month, period_year, `{${valid.join(",")}}`);
       if (removed.changes > 0) staleCleared.push({ employee_id: e.id, removed: removed.changes });
     }
 
