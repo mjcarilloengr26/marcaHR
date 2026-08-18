@@ -1,0 +1,42 @@
+name: Keep backend awake
+
+# Pings the API from OUTSIDE Render. The keep-warm timer inside the backend
+# can only stop the instance going to sleep — once the process is down it is
+# down too, so it can never wake anything. A ping from here can, which is the
+# whole point of putting it somewhere else.
+on:
+  schedule:
+    # Every 5 minutes. GitHub queues scheduled jobs on a best-effort basis and
+    # they often run late under load, so treat this as "roughly every 5-15
+    # minutes" — comfortably inside Render's ~15 minute idle window most of
+    # the time, but not a guarantee.
+    - cron: "*/5 * * * *"
+  # So you can also trigger it by hand from the Actions tab when you want the
+  # server woken right now.
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Wake the API and check it answers
+        run: |
+          URL="https://marca-hr-backend.onrender.com/api/health"
+
+          # A cold start can take 30-60s, so allow generous time and retry
+          # rather than reporting failure on the first slow response.
+          for attempt in 1 2 3; do
+            code=$(curl -s -o /tmp/body.txt -w '%{http_code}' --max-time 90 "$URL" || echo "000")
+            body=$(cat /tmp/body.txt 2>/dev/null || true)
+            echo "attempt $attempt -> HTTP $code $body"
+
+            if [ "$code" = "200" ]; then
+              echo "Backend is awake."
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "::error::Backend did not return HTTP 200 after 3 attempts — check https://dashboard.render.com"
+          exit 1
