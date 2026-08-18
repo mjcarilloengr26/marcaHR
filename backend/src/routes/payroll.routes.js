@@ -349,6 +349,24 @@ router.post(
                  + payroll_records.bonuses - excluded.deductions
      WHERE payroll_records.status = 'draft'`
     );
+    // Changing someone's pay schedule leaves their old rows behind in the
+    // half they used to be paid in. Left alone a monthly employee would hold
+    // rows in half 0, 1 AND 2 for the same month and be paid three times over.
+    // Clear the drafts that no longer match the schedule before regenerating;
+    // finalized and paid rows are history and are never touched.
+    const staleCleared = [];
+    for (const e of employees) {
+      const keep = periodHalfForEmployee(e, settings, half);
+      const removed = await db
+        .prepare(
+          `DELETE FROM payroll_records
+           WHERE employee_id = ? AND period_month = ? AND period_year = ?
+             AND period_half <> ? AND status = 'draft'`
+        )
+        .run(e.id, period_month, period_year, keep);
+      if (removed.changes > 0) staleCleared.push({ employee_id: e.id, removed: removed.changes });
+    }
+
     const generated = [];
     // Re-running a period recalculates its DRAFT rows rather than skipping
     // them, so a corrected salary or a changed payroll setting actually shows
@@ -404,9 +422,13 @@ router.post(
         pay_frequency: settings.pay_frequency,
         attendance_basis: settings.attendance_basis,
         generated_count: generated.length,
+        stale_drafts_cleared: staleCleared.reduce((n, r) => n + r.removed, 0),
       },
     });
-    res.status(201).json({ generated_count: generated.length });
+    res.status(201).json({
+      generated_count: generated.length,
+      stale_drafts_cleared: staleCleared.reduce((n, r) => n + r.removed, 0),
+    });
   })
 );
 
