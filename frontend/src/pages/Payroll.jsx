@@ -32,6 +32,8 @@ export default function Payroll() {
   const [editingSettings, setEditingSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState(null);
   const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   const isMonthly = settings?.pay_frequency === "monthly";
 
@@ -63,6 +65,45 @@ export default function Payroll() {
       setError(err.message);
     } finally {
       setGenerating(false);
+    }
+  };
+
+  // Only rows that can actually move are offered: a paid record is settled,
+  // and finalizing something already finalized is a no-op the user should not
+  // be invited to perform.
+  const selectable = (r) => r.status !== "paid";
+
+  const bulkStatus = async (status) => {
+    const chosen = sorted.filter((r) => selectedIds.includes(r.id));
+    const eligible = chosen.filter((r) => (status === "finalized" ? r.status === "draft" : r.status !== "paid"));
+    if (eligible.length === 0) {
+      setError(`None of the selected records can be marked ${status}.`);
+      return;
+    }
+    const total = eligible.reduce((sum, r) => sum + Number(r.net_pay || 0), 0);
+    const verb = status === "finalized" ? "Finalize" : "Mark as paid";
+    if (
+      !confirm(
+        `${verb} ${eligible.length} payroll record${eligible.length > 1 ? "s" : ""}?\n\n` +
+          `Total net pay: ${money(total)}\n\n` +
+          (status === "paid"
+            ? "Records marked paid can no longer be edited or changed in bulk."
+            : "Finalized records can no longer be edited or recalculated by Generate.")
+      )
+    ) {
+      return;
+    }
+    setBulkBusy(true);
+    setError("");
+    try {
+      const res = await api.post("/payroll/bulk-status", { ids: eligible.map((r) => r.id), status });
+      setSelectedIds([]);
+      load();
+      if (res?.already_paid > 0) setError(`${res.updated} updated. ${res.already_paid} were already paid and left alone.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -174,6 +215,11 @@ export default function Payroll() {
   });
   const { sorted, toggleSort, arrow } = useSort(filteredRecords, "period_sort", "desc");
 
+  // Rows a bulk action could actually move. Select-all works off this rather
+  // than every row, so ticking the header never claims to have selected
+  // records that are already paid and will be skipped anyway.
+  const selectableRows = sorted.filter(selectable);
+
   return (
     <div>
       <div className="page-header">
@@ -230,10 +276,44 @@ export default function Payroll() {
         />
       </div>
 
+      {isHr && selectedIds.length > 0 && (
+        <div className="card" style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+          <strong>{selectedIds.length} selected</strong>
+          <button type="button" className="btn btn-sm btn-secondary" onClick={() => setSelectedIds([])}>
+            Clear selection
+          </button>
+          <span style={{ flex: 1 }} />
+          <button type="button" className="btn btn-sm" disabled={bulkBusy} onClick={() => bulkStatus("finalized")}>
+            {bulkBusy ? "Working…" : "Finalize selected"}
+          </button>
+          <button type="button" className="btn btn-sm btn-secondary" disabled={bulkBusy} onClick={() => bulkStatus("paid")}>
+            {bulkBusy ? "Working…" : "Mark selected as paid"}
+          </button>
+        </div>
+      )}
+
       <div className="card">
         <table className="sticky-head">
           <thead>
             <tr>
+              {isHr && (
+                <th style={{ width: 32 }}>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all records shown"
+                    // Ticks only what is listed, so it respects the search
+                    // filter rather than quietly selecting rows off screen.
+                    checked={selectableRows.length > 0 && selectableRows.every((r) => selectedIds.includes(r.id))}
+                    ref={(el) => {
+                      if (el) {
+                        const n = selectableRows.filter((r) => selectedIds.includes(r.id)).length;
+                        el.indeterminate = n > 0 && n < selectableRows.length;
+                      }
+                    }}
+                    onChange={(e) => setSelectedIds(e.target.checked ? selectableRows.map((r) => r.id) : [])}
+                  />
+                </th>
+              )}
               {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
               <SortTh label="Period" sortKey="period_sort" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Base" sortKey="base_salary" toggleSort={toggleSort} arrow={arrow} />
@@ -248,7 +328,21 @@ export default function Payroll() {
           </thead>
           <tbody>
             {sorted.map((r) => (
-              <tr key={r.id}>
+              <tr key={r.id} className={selectedIds.includes(r.id) ? "row-selected" : undefined}>
+                {isHr && (
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${r.employee_name}`}
+                      disabled={!selectable(r)}
+                      title={selectable(r) ? undefined : "Already paid"}
+                      checked={selectedIds.includes(r.id)}
+                      onChange={(e) =>
+                        setSelectedIds((prev) => (e.target.checked ? [...prev, r.id] : prev.filter((id) => id !== r.id)))
+                      }
+                    />
+                  </td>
+                )}
                 {isHr && <td>{r.employee_name}</td>}
                 <td>{periodLabel(r)}</td>
                 <td>{money(r.base_salary)}</td>
