@@ -310,6 +310,52 @@ router.put(
   })
 );
 
+// Bulk status change from the Payroll page's tick boxes. Records already paid
+// are never moved by a bulk action — that is a settled fact and rolling it
+// back should be a deliberate, one-at-a-time decision — and the response says
+// how many were skipped so the UI can tell the user rather than silently
+// doing less than they asked.
+router.post(
+  "/bulk-status",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const { ids, status } = req.body || {};
+    if (!["finalized", "paid"].includes(status)) {
+      return res.status(400).json({ error: "status must be finalized or paid" });
+    }
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: "ids must be a non-empty array" });
+    }
+    if (ids.length > 500) {
+      return res.status(400).json({ error: "Too many records at once — select 500 or fewer" });
+    }
+    const clean = [...new Set(ids.map(Number))].filter((n) => Number.isInteger(n) && n > 0);
+    if (clean.length === 0) return res.status(400).json({ error: "ids must be positive integers" });
+
+    const list = `{${clean.join(",")}}`;
+    const found = await db
+      .prepare("SELECT id, status FROM payroll_records WHERE id = ANY(?::int[])")
+      .all(list);
+
+    const alreadyPaid = found.filter((r) => r.status === "paid").length;
+    const eligible = found.filter((r) => r.status !== "paid").map((r) => r.id);
+    let updated = 0;
+    if (eligible.length > 0) {
+      const result = await db
+        .prepare("UPDATE payroll_records SET status = ? WHERE id = ANY(?::int[]) AND status <> 'paid'")
+        .run(status, `{${eligible.join(",")}}`);
+      updated = result.changes;
+    }
+
+    await logRequestEvent(req, "bulk_payroll_status", {
+      entityType: "payroll",
+      details: { status, requested: clean.length, updated, already_paid: alreadyPaid, missing: clean.length - found.length },
+    });
+    res.json({ updated, already_paid: alreadyPaid, missing: clean.length - found.length });
+  })
+);
+
 router.post(
   "/generate",
   requireAuth,
