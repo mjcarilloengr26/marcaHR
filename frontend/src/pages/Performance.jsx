@@ -12,6 +12,7 @@ export default function Performance() {
   const [showCycleForm, setShowCycleForm] = useState(false);
   const [showReviewForm, setShowReviewForm] = useState(false);
   const [cycleForm, setCycleForm] = useState({ name: "", start_date: "", end_date: "" });
+  const [editingCycleId, setEditingCycleId] = useState(null);
   const [reviewForm, setReviewForm] = useState({
     cycle_id: "",
     employee_id: "",
@@ -32,15 +33,57 @@ export default function Performance() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const loadCycles = () => api.get("/performance/cycles").then(setCycles).catch(() => {});
+
+  const openNewCycle = () => {
+    setEditingCycleId(null);
+    setCycleForm({ name: "", start_date: "", end_date: "" });
+    setShowCycleForm(true);
+  };
+
+  const openEditCycle = (c) => {
+    setEditingCycleId(c.id);
+    setCycleForm({ name: c.name, start_date: c.start_date || "", end_date: c.end_date || "" });
+    setShowCycleForm(true);
+  };
+
+  const setCycleStatus = async (c, status) => {
+    setError("");
+    try {
+      await api.put(`/performance/cycles/${c.id}`, { status });
+      loadCycles();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const deleteCycle = async (c) => {
+    if (!confirm(`Delete the review cycle "${c.name}"?
+
+This cannot be undone. A cycle that already has reviews against it cannot be deleted — close it instead.`)) return;
+    setError("");
+    try {
+      await api.del(`/performance/cycles/${c.id}`);
+      loadCycles();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
   const addCycle = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     try {
-      await api.post("/performance/cycles", cycleForm);
+      if (editingCycleId) {
+        await api.put(`/performance/cycles/${editingCycleId}`, cycleForm);
+      } else {
+        await api.post("/performance/cycles", cycleForm);
+      }
       setShowCycleForm(false);
+      setEditingCycleId(null);
       setCycleForm({ name: "", start_date: "", end_date: "" });
-      api.get("/performance/cycles").then(setCycles);
+      loadCycles();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -91,7 +134,7 @@ export default function Performance() {
         </div>
         {isHr && (
           <div style={{ display: "flex", gap: 8 }}>
-            <button className="btn btn-secondary" onClick={() => setShowCycleForm(true)}>+ Review cycle</button>
+            <button className="btn btn-secondary" onClick={openNewCycle}>+ Review cycle</button>
             <button className="btn" onClick={() => setShowReviewForm(true)}>+ New review</button>
           </div>
         )}
@@ -99,7 +142,49 @@ export default function Performance() {
 
       {error && <div className="error-banner">{error}</div>}
 
+      {/* Cycles were creatable but never shown anywhere except the New review
+          dropdown, so creating one looked like it had done nothing at all. */}
+      {isHr && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2 style={{ marginTop: 0 }}>Review cycles</h2>
+          <table className="sticky-head">
+            <thead>
+              <tr>
+                <th>Cycle</th>
+                <th>Starts</th>
+                <th>Ends</th>
+                <th>Reviews</th>
+                <th>Status</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {cycles.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.name}</td>
+                  <td>{c.start_date || "—"}</td>
+                  <td>{c.end_date || "—"}</td>
+                  <td>{reviews.filter((r) => r.cycle_id === c.id).length}</td>
+                  <td><span className={`badge badge-${c.status === "open" ? "active" : "neutral"}`}>{c.status}</span></td>
+                  <td className="col-actions">
+                    <button className="btn btn-sm btn-secondary" onClick={() => openEditCycle(c)}>Edit</button>
+                    {c.status === "open" ? (
+                      <button className="btn btn-sm btn-secondary" onClick={() => setCycleStatus(c, "closed")}>Close</button>
+                    ) : (
+                      <button className="btn btn-sm btn-secondary" onClick={() => setCycleStatus(c, "open")}>Reopen</button>
+                    )}
+                    <button className="btn btn-sm btn-danger" onClick={() => deleteCycle(c)}>Delete</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {cycles.length === 0 && <div className="empty-state">No review cycles yet — create one to start scheduling reviews.</div>}
+        </div>
+      )}
+
       <div className="card">
+        <h2 style={{ marginTop: 0 }}>Reviews</h2>
         <table className="sticky-head">
           <thead>
             <tr>
@@ -137,9 +222,9 @@ export default function Performance() {
       </div>
 
       {showCycleForm && (
-        <div className="modal-backdrop" onClick={() => setShowCycleForm(false)}>
+        <div className="modal-backdrop" onClick={() => { setShowCycleForm(false); setEditingCycleId(null); }}>
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={addCycle}>
-            <h2>New review cycle</h2>
+            <h2>{editingCycleId ? "Edit review cycle" : "New review cycle"}</h2>
             <div className="form-row">
               <label>Name</label>
               <input value={cycleForm.name} onChange={(e) => setCycleForm({ ...cycleForm, name: e.target.value })} required />
@@ -155,8 +240,8 @@ export default function Performance() {
               </div>
             </div>
             <div className="modal-actions">
-              <button type="button" className="btn btn-secondary" onClick={() => setShowCycleForm(false)}>Cancel</button>
-              <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : "Create cycle"}</button>
+              <button type="button" className="btn btn-secondary" onClick={() => { setShowCycleForm(false); setEditingCycleId(null); }}>Cancel</button>
+              <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : editingCycleId ? "Save changes" : "Create cycle"}</button>
             </div>
           </form>
         </div>
