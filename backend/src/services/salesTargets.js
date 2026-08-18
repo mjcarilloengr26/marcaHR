@@ -1,4 +1,5 @@
 const db = require("../db");
+const { appTimezone } = require("./timezone");
 
 // Sales targets: a revenue goal per employee for a monthly, quarterly, or yearly
 // period, tracked against actual achieved (won deal value + non-cancelled order
@@ -93,7 +94,7 @@ async function getSalesTargetsReport({ period_type, period_year, period_index })
   // created_at is stored as UTC; bucketing uses the Manila wall-clock date so
   // it agrees with everywhere else in the app that's anchored to GMT+8.
   const nowParts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Manila",
+    timeZone: await appTimezone(),
     year: "numeric",
     month: "2-digit",
   })
@@ -107,7 +108,7 @@ async function getSalesTargetsReport({ period_type, period_year, period_index })
   const leadSummaryByOwner = {};
   const ownerDeals = await db.prepare("SELECT owner_id, value, created_at FROM deals WHERE owner_id IS NOT NULL").all();
   for (const d of ownerDeals) {
-    const manilaYM = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit" })
+    const manilaYM = new Intl.DateTimeFormat("en-CA", { timeZone: await appTimezone(), year: "numeric", month: "2-digit" })
       .format(new Date(`${d.created_at.replace(" ", "T")}Z`))
       .split("-")
       .map(Number);

@@ -1,15 +1,9 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-
-function formatManilaTime(dbTimestamp) {
-  if (!dbTimestamp) return "—";
-  const iso = `${dbTimestamp.replace(" ", "T")}${dbTimestamp.endsWith("Z") ? "" : "Z"}`;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return dbTimestamp;
-  return d.toLocaleString("en-US", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short" });
-}
+import { useAppSettings } from "../context/AppSettingsContext";
 
 export default function SecuritySettings() {
+  const { formatDateTime } = useAppSettings();
   const [minutes, setMinutes] = useState("");
   const [updatedAt, setUpdatedAt] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -65,7 +59,7 @@ export default function SecuritySettings() {
         ) : (
           <form onSubmit={save}>
             <p className="subtitle" style={{ margin: "0 0 8px" }}>
-              Last updated: {formatManilaTime(updatedAt)} (GMT+8). Everyone — admin, HR, and employees — is
+              Last updated: {formatDateTime(updatedAt)} (GMT+8). Everyone — admin, HR, and employees — is
               automatically signed out after this many minutes with no mouse, keyboard, or touch activity, so a
               workstation left signed in and unattended doesn't stay open indefinitely.
             </p>

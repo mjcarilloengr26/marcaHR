@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 
 const ACTION_LABELS = {
   login: "Login",
@@ -37,7 +38,7 @@ function actionLabel(action) {
   return ACTION_LABELS[action] || action;
 }
 
-function formatManilaTime(dbTimestamp) {
+function formatEventTime(dbTimestamp, timezone) {
   if (!dbTimestamp) return "—";
   // Stored as "YYYY-MM-DD HH24:MI:SS" in UTC (no timezone marker) — normalize to
   // ISO-8601 UTC before parsing so the browser doesn't assume it's already local time.
@@ -46,7 +47,7 @@ function formatManilaTime(dbTimestamp) {
   if (Number.isNaN(d.getTime())) return dbTimestamp;
   return d
     .toLocaleString("en-CA", {
-      timeZone: "Asia/Manila",
+      timeZone: timezone,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -72,6 +73,7 @@ function formatDetails(detailsJson) {
 }
 
 export default function Events() {
+  const { timezone } = useAppSettings();
   const [events, setEvents] = useState([]);
   const [actions, setActions] = useState([]);
   const [action, setAction] = useState("");
@@ -170,7 +172,7 @@ export default function Events() {
             <tbody>
               {sortedEvents.map((e) => (
                 <tr key={e.id}>
-                  <td>{formatManilaTime(e.created_at)}</td>
+                  <td>{formatEventTime(e.created_at, timezone)}</td>
                   <td>{e.user_email || "—"}</td>
                   <td>{actionLabel(e.action)}</td>
                   <td>{e.entity_type ? `${e.entity_type}${e.entity_id ? ` #${e.entity_id}` : ""}` : "—"}</td>

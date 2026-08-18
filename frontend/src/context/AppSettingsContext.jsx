@@ -4,7 +4,7 @@ import { translate, LOCALE_BY_LANGUAGE } from "../i18n/translations";
 
 const AppSettingsContext = createContext(null);
 
-const DEFAULTS = { currency_code: "PHP", language: "en" };
+const DEFAULTS = { currency_code: "PHP", language: "en", timezone: "Asia/Manila" };
 
 // App-wide currency and language, set by an admin at Administration >
 // Localization. Loaded from a public endpoint so the sign-in screen is
@@ -15,7 +15,13 @@ export function AppSettingsProvider({ children }) {
   const load = useCallback(() => {
     api
       .get("/app-settings")
-      .then((d) => setSettings({ currency_code: d.currency_code, language: d.language }))
+      .then((d) =>
+        setSettings({
+          currency_code: d.currency_code,
+          language: d.language,
+          timezone: d.timezone || DEFAULTS.timezone,
+        })
+      )
       .catch(() => {});
   }, []);
 
@@ -29,6 +35,7 @@ export function AppSettingsProvider({ children }) {
 
   const value = useMemo(() => {
     const locale = LOCALE_BY_LANGUAGE[settings.language] || "en-US";
+    const timezone = settings.timezone || DEFAULTS.timezone;
     const currency = settings.currency_code || "PHP";
 
     // Built once per settings change rather than per call — constructing an
@@ -73,9 +80,23 @@ export function AppSettingsProvider({ children }) {
       return `${sym}${v}`;
     };
 
+    // Every screen showing a stored timestamp had its own hardcoded
+    // Asia/Manila call. Centralising it means changing the setting moves all
+    // of them together, rather than leaving stragglers behind in some corner.
+    const formatDateTime = (dbTimestamp) => {
+      if (!dbTimestamp) return "—";
+      const raw = String(dbTimestamp);
+      const iso = `${raw.replace(" ", "T")}${raw.endsWith("Z") ? "" : "Z"}`;
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return raw;
+      return d.toLocaleString(locale, { timeZone: timezone, dateStyle: "medium", timeStyle: "short" });
+    };
+
     return {
       ...settings,
       locale,
+      timezone,
+      formatDateTime,
       // Bare symbol, for labelling amount inputs so a form field reads in the
       // same currency the tables around it display.
       currencySymbol: money(0).replace(/[\d.,\s]/g, ""),

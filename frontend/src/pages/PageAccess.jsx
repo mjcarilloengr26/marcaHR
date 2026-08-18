@@ -1,13 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-
-function formatManilaTime(dbTimestamp) {
-  if (!dbTimestamp) return "—";
-  const iso = `${dbTimestamp.replace(" ", "T")}${dbTimestamp.endsWith("Z") ? "" : "Z"}`;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return dbTimestamp;
-  return d.toLocaleString("en-US", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short" });
-}
+import { useAppSettings } from "../context/AppSettingsContext";
 
 // "in 4 days" / "in 3 hours" / "expired" — the number on its own doesn't say
 // much without knowing today's date.
@@ -23,6 +16,7 @@ function relativeToNow(dbTimestamp) {
 }
 
 export default function PageAccess() {
+  const { formatDateTime } = useAppSettings();
   const [grants, setGrants] = useState([]);
   const [pages, setPages] = useState([]);
   const [users, setUsers] = useState([]);
@@ -202,7 +196,7 @@ export default function PageAccess() {
                   <td>{pageLabel(g.page_key)}</td>
                   <td>{g.role_label || "—"}</td>
                   <td>
-                    {formatManilaTime(g.expires_at)}
+                    {formatDateTime(g.expires_at)}
                     {g.is_active && (
                       <span className="subtitle" style={{ marginLeft: 6 }}>({relativeToNow(g.expires_at)})</span>
                     )}

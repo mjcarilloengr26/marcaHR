@@ -4,6 +4,8 @@ import { compressLogoFile } from "../utils/image";
 
 export default function BrandingSettings() {
   const [logoData, setLogoData] = useState(null);
+  const [companyName, setCompanyName] = useState("");
+  const [savingName, setSavingName] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -14,7 +16,10 @@ export default function BrandingSettings() {
     setLoading(true);
     api
       .get("/branding")
-      .then((data) => setLogoData(data.logo_data))
+      .then((data) => {
+        setLogoData(data.logo_data);
+        setCompanyName(data.company_name || "");
+      })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   };
@@ -26,7 +31,7 @@ export default function BrandingSettings() {
     setError("");
     setSaved(false);
     try {
-      const data = await api.put("/branding", { logo_data: newLogoData });
+      const data = await api.put("/branding", { logo_data: newLogoData, company_name: companyName });
       setLogoData(data.logo_data);
       setSaved(true);
       // Tell the sidebar header (Layout.jsx) to re-fetch so it swaps to the
@@ -57,12 +62,52 @@ export default function BrandingSettings() {
       <div className="page-header">
         <div>
           <h1>Branding</h1>
-          <p className="subtitle">Company logo shown on the sign-in screen and the sidebar header</p>
+          <p className="subtitle">Company name and logo, shown on the sign-in screen, the sidebar, emails and exported reports</p>
         </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
       {saved && <div className="success-banner">Saved.</div>}
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h2 style={{ marginTop: 0 }}>Company name</h2>
+        <p className="subtitle" style={{ margin: "0 0 12px" }}>
+          Used wherever the application names the company — the sign-in screen, the sidebar, notification emails and
+          the author field of every exported spreadsheet.
+        </p>
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <input
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            placeholder="MARCA GROUP"
+            style={{ flex: 1, minWidth: 220 }}
+          />
+          <button
+            type="button"
+            className="btn"
+            disabled={savingName || !companyName.trim()}
+            onClick={async () => {
+              setSavingName(true);
+              setError("");
+              setSaved(false);
+              try {
+                // Sends the logo unchanged alongside it — the endpoint takes
+                // both together, and omitting the logo would clear it.
+                const data = await api.put("/branding", { logo_data: logoData, company_name: companyName.trim() });
+                setCompanyName(data.company_name || "");
+                setSaved(true);
+                window.dispatchEvent(new Event("branding-updated"));
+              } catch (err) {
+                setError(err.message);
+              } finally {
+                setSavingName(false);
+              }
+            }}
+          >
+            {savingName ? "Saving…" : "Save name"}
+          </button>
+        </div>
+      </div>
 
       <div className="card">
         {loading ? (

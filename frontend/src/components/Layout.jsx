@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../api/client";
@@ -6,23 +6,38 @@ import { NAV_ITEMS, applyNavOrder } from "../config/navItems";
 import { useAppSettings } from "../context/AppSettingsContext";
 import ThemeToggle from "./ThemeToggle";
 
-const MANILA_TZ = "Asia/Manila";
-const clockFormatter = new Intl.DateTimeFormat("en-US", {
-  timeZone: MANILA_TZ,
-  weekday: "short",
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-  hour: "numeric",
-  minute: "2-digit",
-  hour12: true,
-});
+// Built per timezone rather than once at module load, so changing the setting
+// re-renders the clock in the new zone instead of needing a page reload.
+const makeClockFormatter = (tz) =>
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
 
-// Always Philippine time regardless of the viewer's own device timezone —
-// matches how attendance/leave/expense timestamps are anchored server-side,
-// so what's on screen agrees with what got recorded.
+// The offset label beside the clock, derived rather than hardcoded — it used
+// to read GMT+8 always, which would have quietly lied in any other zone.
+const offsetLabel = (tz) => {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, timeZoneName: "shortOffset" }).formatToParts(new Date());
+    return parts.find((p) => p.type === "timeZoneName")?.value || "";
+  } catch {
+    return "";
+  }
+};
+
+// Shows the company's own timezone regardless of the viewer's device — it
+// matches how attendance and expense timestamps are anchored server-side, so
+// what's on screen agrees with what got recorded.
 function TopbarClock() {
+  const { timezone } = useAppSettings();
   const [now, setNow] = useState(() => new Date());
+  const clockFormatter = useMemo(() => makeClockFormatter(timezone), [timezone]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -31,7 +46,7 @@ function TopbarClock() {
 
   return (
     <div className="topbar-clock">
-      {clockFormatter.format(now)} <span className="topbar-clock-tz">GMT+8</span>
+      {clockFormatter.format(now)} <span className="topbar-clock-tz">{offsetLabel(timezone)}</span>
     </div>
   );
 }
@@ -85,6 +100,7 @@ export default function Layout({ children }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const { t } = useAppSettings();
   const [logoData, setLogoData] = useState(null);
+  const [companyName, setCompanyName] = useState("MARCA GROUP");
   const [navOrder, setNavOrder] = useState({});
 
   // Admin-defined menu order (Administration > Menu Order). Re-fetched on
@@ -106,7 +122,13 @@ export default function Layout({ children }) {
   // new logo immediately, instead of showing the stale one until a full reload.
   useEffect(() => {
     const loadLogo = () =>
-      api.get("/branding").then((data) => setLogoData(data.logo_data)).catch(() => {});
+      api
+        .get("/branding")
+        .then((data) => {
+          setLogoData(data.logo_data);
+          if (data.company_name) setCompanyName(data.company_name);
+        })
+        .catch(() => {});
     loadLogo();
     window.addEventListener("branding-updated", loadLogo);
     return () => window.removeEventListener("branding-updated", loadLogo);
@@ -180,11 +202,11 @@ export default function Layout({ children }) {
       <aside className={menuOpen ? "sidebar open" : "sidebar"}>
         <div className="brand">
           {logoData ? (
-            <img src={logoData} alt="MARCA GROUP" className="brand-mark brand-mark-img" />
+            <img src={logoData} alt={companyName} className="brand-mark brand-mark-img" />
           ) : (
-            <span className="brand-mark">M</span>
+            <span className="brand-mark">{companyName.trim().charAt(0).toUpperCase() || "M"}</span>
           )}
-          <span>MARCA GROUP</span>
+          <span>{companyName}</span>
         </div>
         <nav>
           {visibleNavItems.map((item) =>

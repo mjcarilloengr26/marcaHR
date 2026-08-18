@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 import { compressImageFile } from "../utils/image";
 import { compareFaces } from "../faceRecognition";
@@ -23,12 +24,12 @@ function getPosition() {
   });
 }
 
-// Must match the backend's date anchoring (Asia/Manila, GMT+8) so "today" here
-// is the same calendar day the server just recorded a clock-in against —
-// otherwise the Clock in/out buttons could enable/disable on the wrong side
-// of midnight for a device not set to Philippine local time.
-function manilaToday() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+// Must match the backend's date anchoring so "today" here is the same calendar
+// day the server just recorded a clock-in against — otherwise the Clock in/out
+// buttons could enable or disable on the wrong side of midnight for a device
+// set to a different zone from the company's.
+function todayIn(timezone) {
+  return new Date().toLocaleDateString("en-CA", { timeZone: timezone });
 }
 
 function formatDistance(m) {
@@ -97,6 +98,7 @@ function PhotoCell({ recordId, hasPhoto, which, onOpen, onError }) {
 }
 
 export default function Attendance() {
+  const { timezone } = useAppSettings();
   const { user, employee } = useAuth();
   const isHr = user.role === "admin" || user.role === "hr";
   const [records, setRecords] = useState([]);
@@ -133,7 +135,7 @@ export default function Attendance() {
     }
   };
 
-  const today = manilaToday();
+  const today = todayIn(timezone);
   const todayRecord = records.find((r) => r.date === today && r.employee_id === user.employee_id);
 
   let filtered = records;

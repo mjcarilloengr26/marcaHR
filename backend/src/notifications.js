@@ -1,4 +1,5 @@
 const db = require("./db");
+const { companyName } = require("./services/branding");
 const { sendMail } = require("./mailer");
 
 async function getEmployee(employeeId) {
@@ -34,7 +35,7 @@ const notifyLeaveSubmitted = guarded(async ({ employee_id, leave_type_name, star
   sendMail({
     to: await getHrEmails(),
     subject: `New leave request — ${fullName(emp)}`,
-    text: `${fullName(emp)} requested ${days} day(s) of ${leave_type_name} leave, ${start_date} to ${end_date}.\n\nReview it in MARCA GROUP.`,
+    text: `${fullName(emp)} requested ${days} day(s) of ${leave_type_name} leave, ${start_date} to ${end_date}.\n\nReview it in ${await companyName()}.`,
   });
 });
 
@@ -54,7 +55,7 @@ const notifyExpenseSubmitted = guarded(async ({ employee_id, title }) => {
   sendMail({
     to: await getHrEmails(),
     subject: `New expense report submitted — ${fullName(emp)}`,
-    text: `${fullName(emp)} submitted an expense report: "${title}".\n\nReview it in MARCA GROUP.`,
+    text: `${fullName(emp)} submitted an expense report: "${title}".\n\nReview it in ${await companyName()}.`,
   });
 });
 
@@ -102,7 +103,7 @@ const notifyLowStockAlarm = guarded(async ({ sku, name, quantity_on_hand, unit, 
   sendMail({
     to: await getHrEmails(),
     subject: `Low stock alarm — ${name}`,
-    text: `${name} (SKU ${sku}) has dropped into the alarm zone: ${quantity_on_hand} ${unit} on hand (reorder level ${reorder_level} ${unit}).\n\nReview it in MARCA GROUP Inventory.`,
+    text: `${name} (SKU ${sku}) has dropped into the alarm zone: ${quantity_on_hand} ${unit} on hand (reorder level ${reorder_level} ${unit}).\n\nReview it in ${await companyName()} Inventory.`,
   });
 });
 

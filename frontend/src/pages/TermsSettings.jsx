@@ -1,15 +1,9 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-
-function formatManilaTime(dbTimestamp) {
-  if (!dbTimestamp) return "—";
-  const iso = `${dbTimestamp.replace(" ", "T")}${dbTimestamp.endsWith("Z") ? "" : "Z"}`;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return dbTimestamp;
-  return d.toLocaleString("en-US", { timeZone: "Asia/Manila", dateStyle: "medium", timeStyle: "short" });
-}
+import { useAppSettings } from "../context/AppSettingsContext";
 
 export default function TermsSettings() {
+  const { formatDateTime } = useAppSettings();
   const [content, setContent] = useState("");
   const [updatedAt, setUpdatedAt] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -127,7 +121,7 @@ export default function TermsSettings() {
         ) : (
           <form onSubmit={save}>
             <p className="subtitle" style={{ margin: "0 0 8px" }}>
-              Last updated: {formatManilaTime(updatedAt)} (GMT+8). Plain text — leave a blank line between
+              Last updated: {formatDateTime(updatedAt)} (GMT+8). Plain text — leave a blank line between
               paragraphs. Saving mints a new version, so everyone — even users who already agreed — will see this
               notice again and must re-accept before continuing to use the app.
             </p>

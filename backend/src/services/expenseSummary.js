@@ -1,4 +1,5 @@
 const db = require("../db");
+const { appTimezone } = require("./timezone");
 
 // Expense summary per employee — every liquidated/claimed expense item,
 // bucketed by its expense_date: current month, current quarter, current
@@ -9,7 +10,7 @@ const db = require("../db");
 //
 // Shared by the Overview dashboard stats and the sales/finance Excel export.
 async function getExpenseSummary() {
-  const nowParts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Manila", year: "numeric", month: "2-digit" })
+  const nowParts = new Intl.DateTimeFormat("en-CA", { timeZone: await appTimezone(), year: "numeric", month: "2-digit" })
     .format(new Date())
     .split("-")
     .map(Number);

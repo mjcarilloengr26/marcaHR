@@ -15,12 +15,19 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [loginNotice, setLoginNotice] = useState("");
   const [logoData, setLogoData] = useState(null);
+  const [companyName, setCompanyName] = useState("MARCA GROUP");
 
   // Public, unauthenticated endpoints — editable at Administration > Terms &
   // Conditions and Administration > Branding, rather than hardcoded here.
   useEffect(() => {
     api.get("/terms/login-notice").then((data) => setLoginNotice(data.login_notice)).catch(() => {});
-    api.get("/branding").then((data) => setLogoData(data.logo_data)).catch(() => {});
+    api
+      .get("/branding")
+      .then((data) => {
+        setLogoData(data.logo_data);
+        if (data.company_name) setCompanyName(data.company_name);
+      })
+      .catch(() => {});
   }, []);
 
   // Deliberately no redirect-when-already-signed-in here. Bouncing straight to
@@ -47,11 +54,11 @@ export default function Login() {
     <div className="login-screen">
       <form className="login-card" onSubmit={handleSubmit}>
         {logoData ? (
-          <img src={logoData} alt="MARCA GROUP" className="brand-mark login-brand-mark brand-mark-img" />
+          <img src={logoData} alt={companyName} className="brand-mark login-brand-mark brand-mark-img" />
         ) : (
-          <div className="brand-mark login-brand-mark">M</div>
+          <div className="brand-mark login-brand-mark">{companyName.trim().charAt(0).toUpperCase() || "M"}</div>
         )}
-        <h1>MARCA GROUP</h1>
+        <h1>{companyName}</h1>
         <p className="subtitle">{t("Sign in to continue")}</p>
         {location.state?.idleLogout && (
           <div className="error-banner">You were signed out due to inactivity. Please sign in again.</div>

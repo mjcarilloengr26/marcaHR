@@ -35,7 +35,39 @@ const { router: appSettingsRoutes } = require("./routes/appsettings.routes");
 const exchangeRateRoutes = require("./routes/exchangerate.routes");
 
 const app = express();
-app.use(cors());
+// Restricted to the front ends that are meant to call this API. Left open
+// when CORS_ORIGIN is unset so a fresh clone still runs locally without
+// configuration — but a deployed install should always set it, and says so
+// loudly at boot if it hasn't.
+const corsOrigins = (process.env.CORS_ORIGIN || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+if (corsOrigins.length === 0) {
+  console.warn(
+    "WARNING: CORS_ORIGIN is not set — this API will accept browser requests from any site. " +
+      "Set it to your front end's URL (comma-separated for more than one)."
+  );
+  app.use(cors());
+} else {
+  console.log(`CORS restricted to: ${corsOrigins.join(", ")}`);
+  app.use(
+    cors({
+      origin(origin, callback) {
+        // No Origin header at all means a same-origin or non-browser caller
+        // (curl, a health check, a mobile app) — CORS is not what guards those,
+        // authentication is, so they are not the thing to block here.
+        if (!origin || corsOrigins.includes(origin)) return callback(null, true);
+        // Refuse by simply not sending the allow header, rather than throwing.
+        // The browser blocks the response either way, but throwing turned every
+        // probe from an unknown origin into a logged 500, which buries real
+        // errors and misreports a working policy as a server fault.
+        return callback(null, false);
+      },
+    })
+  );
+}
 // Raised from Express's 100kb default so clock-in/out photo attachments
 // (base64-encoded, compressed client-side) fit in the request body.
 app.use(express.json({ limit: "8mb" }));

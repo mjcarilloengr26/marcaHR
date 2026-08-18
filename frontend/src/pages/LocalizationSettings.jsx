@@ -4,8 +4,8 @@ import { useAppSettings } from "../context/AppSettingsContext";
 
 export default function LocalizationSettings() {
   const { money, t } = useAppSettings();
-  const [options, setOptions] = useState({ currencies: [], languages: [] });
-  const [form, setForm] = useState({ currency_code: "", language: "" });
+  const [options, setOptions] = useState({ currencies: [], languages: [], timezones: [] });
+  const [form, setForm] = useState({ currency_code: "", language: "", timezone: "" });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -13,7 +13,9 @@ export default function LocalizationSettings() {
 
   useEffect(() => {
     Promise.all([
-      api.get("/app-settings").then((d) => setForm({ currency_code: d.currency_code, language: d.language })),
+      api
+        .get("/app-settings")
+        .then((d) => setForm({ currency_code: d.currency_code, language: d.language, timezone: d.timezone })),
       api.get("/app-settings/options").then(setOptions),
     ])
       .catch((err) => setError(err.message))
@@ -48,7 +50,7 @@ export default function LocalizationSettings() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
-      {saved && <div className="success-banner">Saved — the new currency and language are now in use.</div>}
+      {saved && <div className="success-banner">Saved — the new currency, language and timezone are now in use.</div>}
 
       {loading ? (
         <div className="page-loading">Loading…</div>
@@ -76,6 +78,18 @@ export default function LocalizationSettings() {
                     <option key={l.code} value={l.code}>{l.label}</option>
                   ))}
                 </select>
+              </div>
+              <div className="form-row">
+                <label>Timezone</label>
+                <select value={form.timezone} onChange={(e) => setForm({ ...form, timezone: e.target.value })}>
+                  {options.timezones.map((t) => (
+                    <option key={t.code} value={t.code}>{t.label}</option>
+                  ))}
+                </select>
+                <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  Decides what counts as "today" for attendance, and the zone every date and time on screen is
+                  shown in. Set it to where the staff actually work, not where the server runs.
+                </p>
               </div>
             </div>
 

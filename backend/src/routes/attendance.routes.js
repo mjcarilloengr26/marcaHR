@@ -2,25 +2,26 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole, requireSelfOrRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
+const { appTimezone } = require("../services/timezone");
 
 const router = express.Router();
 
 // The server's system clock (UTC on Render) isn't the employees' clock —
-// attendance date/time must be anchored to Philippine local time (GMT+8,
-// no DST) regardless of what timezone the process actually runs in, or a
-// clock-in near midnight gets filed under the wrong calendar date.
-const MANILA_TZ = "Asia/Manila";
-function manilaToday() {
-  return new Date().toLocaleDateString("en-CA", { timeZone: MANILA_TZ }); // YYYY-MM-DD
+// attendance date/time must be anchored to the company's own timezone,
+// whatever zone the process happens to run in, or a clock-in near midnight
+// gets filed under the wrong calendar date. That zone is a setting now
+// (Administration > Localization), defaulting to Asia/Manila as before.
+async function localToday() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: await appTimezone() }); // YYYY-MM-DD
 }
-function manilaNow() {
-  return new Date().toLocaleTimeString("en-GB", { timeZone: MANILA_TZ, hour12: false }); // HH:MM:SS
+async function localNow() {
+  return new Date().toLocaleTimeString("en-GB", { timeZone: await appTimezone(), hour12: false }); // HH:MM:SS
 }
 // Calendar arithmetic on an already-resolved Manila date string, not a second
 // timezone conversion — avoids DST/offset edge cases from subtracting days off
 // a raw `new Date()` in a different zone.
-function manilaDaysAgo(days) {
-  const [y, m, d] = manilaToday().split("-").map(Number);
+async function localDaysAgo(days) {
+  const [y, m, d] = (await localToday()).split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));
   dt.setUTCDate(dt.getUTCDate() - days);
   return dt.toISOString().slice(0, 10);
@@ -168,7 +169,7 @@ router.get(
       params.push(employeeIdFilter);
     }
 
-    const today = manilaToday();
+    const today = (await localToday());
     // A newly-added employee has no attendance row until they clock in (or HR
     // records one), so the records-only query above would silently omit them —
     // only surface that gap for "today", since backfilling absent placeholders
@@ -188,7 +189,7 @@ router.get(
       // the entire all-time history — callers who genuinely want older records
       // can still pass an explicit date or from/to range.
       sql += " AND a.date BETWEEN ? AND ?";
-      params.push(manilaDaysAgo(30), today);
+      params.push(await localDaysAgo(30), today);
       includeTodayPlaceholders = true;
     }
 
@@ -257,8 +258,8 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     if (!req.user.employee_id) return res.status(400).json({ error: "No employee profile linked to this user" });
-    const today = manilaToday();
-    const now = manilaNow();
+    const today = (await localToday());
+    const now = (await localNow());
     const loc = await parseLocation(req.body, req.user.employee_id);
     const geofenceError = await checkGeofence(loc, req.user.employee_id);
     if (geofenceError) return res.status(403).json({ error: geofenceError });
@@ -283,8 +284,8 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     if (!req.user.employee_id) return res.status(400).json({ error: "No employee profile linked to this user" });
-    const today = manilaToday();
-    const now = manilaNow();
+    const today = (await localToday());
+    const now = (await localNow());
     const record = await db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND date = ?").get(req.user.employee_id, today);
     if (!record) return res.status(400).json({ error: "You have not clocked in today" });
     const loc = await parseLocation(req.body, req.user.employee_id);

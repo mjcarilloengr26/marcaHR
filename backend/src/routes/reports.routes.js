@@ -5,6 +5,7 @@ const { requireAuth } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { getSalesTargetsReport, parsePeriod, periodDateRange } = require("../services/salesTargets");
 const { getExpenseSummary } = require("../services/expenseSummary");
+const { companyName } = require("../services/branding");
 const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
@@ -69,7 +70,7 @@ router.get(
     const rows = await db.prepare(sql).all(...params);
 
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "MARCA GROUP";
+    workbook.creator = await companyName();
     workbook.created = new Date();
     const sheet = workbook.addWorksheet("Payroll");
     sheet.columns = [
@@ -135,7 +136,7 @@ router.get(
     const period = periodLabel(period_type, period_year, period_index);
 
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "MARCA GROUP";
+    workbook.creator = await companyName();
     workbook.created = new Date();
 
     const addSheet = (name, columns, rows) => {
@@ -257,7 +258,7 @@ router.get(
       .all(start, end);
 
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "MARCA GROUP";
+    workbook.creator = await companyName();
     workbook.created = new Date();
     const sheet = workbook.addWorksheet("Purchase Orders");
     sheet.columns = [
@@ -353,7 +354,7 @@ router.get(
     }));
 
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "MARCA GROUP";
+    workbook.creator = await companyName();
     workbook.created = new Date();
 
     const addSheet = (name, columns, sheetRows) => {
@@ -495,7 +496,7 @@ router.get(
       .all(`${start} 00:00:00`, `${end} 23:59:59`);
 
     const workbook = new ExcelJS.Workbook();
-    workbook.creator = "MARCA GROUP";
+    workbook.creator = await companyName();
     workbook.created = new Date();
 
     const stockSheet = workbook.addWorksheet("Stock On Hand");

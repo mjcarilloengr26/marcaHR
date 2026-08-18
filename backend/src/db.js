@@ -29,7 +29,14 @@ const pool = new Pool({
   // the TCP socket alive so an idle one is not dropped by anything in between.
   keepAlive: true,
   idleTimeoutMillis: 0,
-  max: 10,
+  // Supabase's session-mode pooler allows 15 client connections in total, and
+  // holding connections open (above) means an instance keeps its whole
+  // allocation for as long as it runs. Two instances therefore have to fit
+  // inside 15 — and they routinely coexist, because a deploy runs the new
+  // instance before retiring the old one. At 10 each that overlap exhausted
+  // the pooler and every request failed; 5 leaves room for the overlap plus a
+  // migration or a psql session.
+  max: 5,
 });
 
 // Holding idle connections open means a connection killed at the far end (a
@@ -727,6 +734,17 @@ async function ensureEmployeeStandingDeductions() {
   await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS supplier_name TEXT");
   await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS supplier_address TEXT");
   await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS supplier_tin TEXT");
+
+  // The company this installation belongs to. Kept in the database rather
+  // than hardcoded so the same build can be deployed for a different
+  // company without touching the source.
+  await pool.query("ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS company_name TEXT NOT NULL DEFAULT 'MARCA GROUP'");
+
+  // The timezone this installation operates in. Attendance decides what
+  // "today" means from it, and every displayed timestamp is rendered in it,
+  // so it has to be one setting rather than a constant repeated per file.
+  // Defaults to Asia/Manila, which is what it was hardcoded to.
+  await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'Asia/Manila'");
 }
 
 // Seeded once on first boot only (ON CONFLICT DO NOTHING) — after that this

@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
+const { appTimezone } = require("../services/timezone");
 const { getSalesTargetsReport, parsePeriod, periodDateRange } = require("../services/salesTargets");
 const { logRequestEvent } = require("../services/auditLog");
 
@@ -32,7 +33,7 @@ router.get(
     // Every query below is independent, so they're issued together instead of
     // awaited one at a time — against a hosted database the sequential version
     // cost the sum of ~10 round-trips rather than roughly one.
-    const todayManila = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+    const todayManila = new Date().toLocaleDateString("en-CA", { timeZone: await appTimezone() });
     const [todayYear, todayMonth, todayDay] = todayManila.split("-");
     const lastYear = String(Number(todayYear) - 1);
 
@@ -142,7 +143,7 @@ router.get(
   asyncHandler(async (req, res) => {
     // Anchored to Manila "today" like the rest of the app's date logic, so the
     // "this year" label always matches what the user's clock in the header shows.
-    const todayManila = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+    const todayManila = new Date().toLocaleDateString("en-CA", { timeZone: await appTimezone() });
     const thisYear = Number(todayManila.split("-")[0]);
     const lastYear = thisYear - 1;
 
