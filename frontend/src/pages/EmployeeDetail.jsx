@@ -144,7 +144,7 @@ export default function EmployeeDetail() {
               <div>
                 {money(employee.base_salary)}{" "}
                 <span className="subtitle" style={{ fontSize: 12 }}>
-                  {employee.salary_basis === "semi_monthly" ? "per cut-off" : "per month"}
+                  {employee.salary_basis === "semi_monthly" ? "per cut-off, paid twice a month" : "per month, paid once a month"}
                 </span>
               </div>
             </div>
@@ -235,13 +235,13 @@ export default function EmployeeDetail() {
               <input type="number" value={form.base_salary || ""} onChange={handleChange("base_salary")} />
             </div>
             <div className="form-row">
-              <label>Salary is</label>
+              <label>Pay schedule</label>
               <select value={form.salary_basis || "monthly"} onChange={handleChange("salary_basis")}>
-                <option value="monthly">Per month</option>
-                <option value="semi_monthly">Per cut-off (bi-monthly)</option>
+                <option value="monthly">Monthly — paid once a month</option>
+                <option value="semi_monthly">Bi-monthly — paid each cut-off</option>
               </select>
               <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                Changing this recalculates their unpaid draft payroll.
+                Base salary is the amount for one of these periods. Changing this recalculates their unpaid draft payroll.
               </p>
             </div>
           </div>

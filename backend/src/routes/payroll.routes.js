@@ -9,6 +9,7 @@ const {
   computeEmployeePayroll,
   periodsPerMonth,
   periodHalfFor,
+  periodHalfForEmployee,
 } = require("../services/payrollCalc");
 
 const PAY_FREQUENCIES = ["semi_monthly", "monthly"];
@@ -355,6 +356,10 @@ router.post(
     const runAll = db.transaction(async (rows) => {
       for (const e of rows) {
         const pay = await computeEmployeePayroll(e, period_month, period_year, half, settings);
+        // Monthly-schedule staff are stored against the whole month (half 0)
+        // no matter which cut-off was asked for, so they get one record a
+        // month instead of showing up in both halves at half the money.
+        const empHalf = periodHalfForEmployee(e, settings, half);
         const sss = e.deduction_sss || 0;
         const hdmf = e.deduction_hdmf || 0;
         const philhealth = e.deduction_philhealth || 0;
@@ -367,7 +372,7 @@ router.post(
           e.id,
           period_month,
           period_year,
-          half,
+          empHalf,
           pay.base_salary,
           pay.overtime_pay,
           pay.night_differential_pay,

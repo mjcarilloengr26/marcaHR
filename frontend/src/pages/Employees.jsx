@@ -203,15 +203,15 @@ export default function Employees() {
                 <input type="number" value={form.base_salary} onChange={handleChange("base_salary")} />
               </div>
               <div className="form-row">
-                <label>Salary is</label>
+                <label>Pay schedule</label>
                 <select value={form.salary_basis} onChange={handleChange("salary_basis")}>
-                  <option value="monthly">Per month</option>
-                  <option value="semi_monthly">Per cut-off (bi-monthly)</option>
+                  <option value="monthly">Monthly — paid once a month</option>
+                  <option value="semi_monthly">Bi-monthly — paid each cut-off</option>
                 </select>
                 <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
                   {form.salary_basis === "semi_monthly"
-                    ? "The amount handed over each cut-off, so a month is twice this."
-                    : "A whole month's pay, split across the cut-offs when payroll runs."}
+                    ? "Base salary is the amount for one cut-off. Two payroll records a month."
+                    : "Base salary is the amount for the whole month. One payroll record a month."}
                 </p>
               </div>
             </div>

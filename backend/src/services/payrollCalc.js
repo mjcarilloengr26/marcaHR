@@ -22,21 +22,35 @@ function payrollPeriodRange(period_month, period_year, period_half) {
 
 // How many payroll periods a month is split into, and so what share of the
 // monthly base salary one period is worth.
-// The employee's stated salary expressed as a monthly amount, whichever way
-// it was entered. A per-cut-off figure is two of those to the month.
-function monthlyEquivalentSalary(employee) {
-  const stated = Number(employee?.base_salary) || 0;
-  return employee?.salary_basis === "semi_monthly" ? stated * 2 : stated;
+// An employee's own pay schedule wins; the company setting is only the default
+// for anyone who has not been given one. Someone on a monthly schedule is paid
+// once for the whole month even at a company that otherwise runs twice a month.
+function scheduleFor(employee, settings) {
+  return employee?.salary_basis || settings?.pay_frequency || "semi_monthly";
 }
 
 function periodsPerMonth(settings) {
   return settings?.pay_frequency === "monthly" ? 1 : 2;
 }
 
-// Which period_half value a given pay frequency uses. Monthly runs are stored
-// as half 0 (the whole month) so they never collide with a semi-monthly run.
+// The period this employee is actually paid over. Monthly is stored as half 0
+// (the whole month) so it can never collide with a semi-monthly run, and so a
+// monthly employee gets ONE record per month rather than appearing in both
+// cut-offs at half the money.
+function periodHalfForEmployee(employee, settings, requestedHalf) {
+  return scheduleFor(employee, settings) === "monthly" ? 0 : Number(requestedHalf);
+}
+
+// Kept for callers that still ask about the company-wide default.
 function periodHalfFor(settings, requestedHalf) {
   return periodsPerMonth(settings) === 1 ? 0 : Number(requestedHalf);
+}
+
+// The stated salary IS the pay for one of that employee's own periods —
+// P30,000 monthly means P30,000 for the month, P15,000 semi-monthly means
+// P15,000 each cut-off. No dividing: the schedule already says which.
+function salaryForOnePeriod(employee) {
+  return Number(employee?.base_salary) || 0;
 }
 
 function isWeekend(dateStr) {
@@ -159,7 +173,10 @@ async function getPayrollSettings() {
 // (that drift is what caused base pay to come out as 0/wrong for employees
 // backfilled after the fact).
 async function computeEmployeePayroll(employee, period_month, period_year, period_half, settings) {
-  const { start, end } = payrollPeriodRange(period_month, period_year, period_half);
+  // The employee's own schedule decides the span, not whatever half the caller
+  // asked for: a monthly employee is always computed over the whole month.
+  const half = periodHalfForEmployee(employee, settings, period_half);
+  const { start, end } = payrollPeriodRange(period_month, period_year, half);
   const expectedDays = countWeekdays(start, end) || 1;
   const { daysWorked, shortfallDays, overtimeHours, nightHours } = await computeAttendanceForPeriod(
     employee.id,
@@ -168,14 +185,7 @@ async function computeEmployeePayroll(employee, period_month, period_year, perio
     settings
   );
 
-  // Two independent things decide what one period is worth. The employee's
-  // salary_basis says what the figure on their record means — a whole month,
-  // or the amount handed over each cut-off. pay_frequency says how often the
-  // company runs payroll. Normalise to a monthly figure first, then divide it
-  // across the periods in a month. (The divisor used to be a hardcoded /2,
-  // which paid a monthly-frequency run half of what it owed.)
-  const monthlySalary = monthlyEquivalentSalary(employee);
-  const periodSalary = monthlySalary / periodsPerMonth(settings);
+  const periodSalary = salaryForOnePeriod(employee);
   const dailyRate = periodSalary / expectedDays;
   const hourlyRate = settings.standard_hours_per_day > 0 ? dailyRate / settings.standard_hours_per_day : 0;
 
@@ -200,6 +210,8 @@ async function computeEmployeePayroll(employee, period_month, period_year, perio
     // Returned so a caller can explain the figure rather than just assert it.
     period_start: start,
     period_end: end,
+    period_half: half,
+    schedule: scheduleFor(employee, settings),
     expected_days: expectedDays,
     paid_days: Math.round(paidDays * 100) / 100,
     period_salary: Math.round(periodSalary * 100) / 100,
@@ -211,7 +223,9 @@ module.exports = {
   payrollPeriodRange,
   periodsPerMonth,
   periodHalfFor,
-  monthlyEquivalentSalary,
+  scheduleFor,
+  periodHalfForEmployee,
+  salaryForOnePeriod,
   currentPeriodHalf,
   countWeekdays,
   hoursOf,

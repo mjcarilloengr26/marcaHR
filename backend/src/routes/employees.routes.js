@@ -5,11 +5,10 @@ const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
 const {
   currentPeriodHalf,
-  periodsPerMonth,
-  periodHalfFor,
+  periodHalfForEmployee,
+  salaryForOnePeriod,
   getPayrollSettings,
   computeEmployeePayroll,
-  monthlyEquivalentSalary,
 } = require("../services/payrollCalc");
 
 const SALARY_BASES = ["monthly", "semi_monthly"];
@@ -67,7 +66,7 @@ async function backfillCurrentPayrollIfGenerated(employee) {
   const period_month = now.getMonth() + 1;
   const period_year = now.getFullYear();
   const settings = await getPayrollSettings();
-  const period_half = periodHalfFor(settings, currentPeriodHalf(now));
+  const period_half = periodHalfForEmployee(employee, settings, currentPeriodHalf(now));
   const alreadyGenerated = await db
     .prepare("SELECT 1 FROM payroll_records WHERE period_month = ? AND period_year = ? AND period_half = ? LIMIT 1")
     .get(period_month, period_year, period_half);
@@ -80,10 +79,10 @@ async function backfillCurrentPayrollIfGenerated(employee) {
   const cashAdvances = employee.deduction_cash_advances || 0;
   const deductions = sss + hdmf + philhealth + taxes + loans + cashAdvances;
   const pay = {
-    // One period's share of the salary once it is normalised to a monthly
-    // figure, which is the whole of it on a monthly frequency. This was a
-    // hardcoded /2 and so underpaid a monthly-frequency backfill by half.
-    base_salary: Math.round((monthlyEquivalentSalary(employee) / periodsPerMonth(settings)) * 100) / 100,
+    // The stated salary already is one period's pay for this employee's own
+    // schedule, so there is nothing to divide. This was a hardcoded /2, which
+    // halved anyone paid monthly.
+    base_salary: Math.round(salaryForOnePeriod(employee) * 100) / 100,
     overtime_pay: 0,
     night_differential_pay: 0,
   };
