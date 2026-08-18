@@ -182,15 +182,15 @@ router.post(
   asyncHandler(loadEditableReport),
   asyncHandler(async (req, res) => {
     const body = req.body || {};
-    const { expense_date, category, description, amount, receipt_ref } = body;
+    const { expense_date, category, description, amount, receipt_ref, supplier_name, supplier_address, supplier_tin } = body;
     if (!expense_date || amount === undefined) {
       return res.status(400).json({ error: "expense_date and amount are required" });
     }
     const receipt = parseReceipt(body);
     const info = await db
       .prepare(
-        `INSERT INTO expense_items (report_id, expense_date, category, description, amount, receipt_ref, receipt_name, receipt_type, receipt_data)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO expense_items (report_id, expense_date, category, description, amount, receipt_ref, receipt_name, receipt_type, receipt_data, supplier_name, supplier_address, supplier_tin)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         req.expenseReport.id,
@@ -201,7 +201,10 @@ router.post(
         receipt_ref || null,
         receipt.name,
         receipt.type,
-        receipt.data
+        receipt.data,
+        supplier_name?.trim() || null,
+        supplier_address?.trim() || null,
+        supplier_tin?.trim() || null
       );
     res.status(201).json(await db.prepare("SELECT * FROM expense_items WHERE id = ?").get(info.lastInsertRowid));
   })

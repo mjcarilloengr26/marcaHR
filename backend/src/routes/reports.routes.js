@@ -304,7 +304,7 @@ router.get(
 
     const rows = await db
       .prepare(
-        `SELECT er.title, er.expense_type, er.cost_center, er.cash_advance_amount, er.status,
+        `SELECT er.id, er.title, er.expense_type, er.cost_center, er.cash_advance_amount, er.status,
                 er.created_at, er.submitted_at,
                 (e.first_name || ' ' || e.last_name) AS employee_name,
                 COALESCE((SELECT SUM(ei.amount) FROM expense_items ei WHERE ei.report_id = er.id), 0) AS total_expenses
@@ -315,10 +315,41 @@ router.get(
       )
       .all(start, end);
 
+    // Every individual expense behind those reports, with the date it was
+    // actually incurred. The report's own created_at says when the claim was
+    // raised, which is often a different month from the spending itself — so
+    // a report that only carries the created date cannot be reconciled
+    // against a bank or fuel statement.
+    const items = await db
+      .prepare(
+        `SELECT ei.expense_date, ei.category, ei.description, ei.amount,
+                ei.supplier_name, ei.supplier_address, ei.supplier_tin, ei.receipt_ref,
+                er.id AS report_id, er.title, er.expense_type, er.cost_center, er.status,
+                (e.first_name || ' ' || e.last_name) AS employee_name
+         FROM expense_items ei
+         JOIN expense_reports er ON er.id = ei.report_id
+         JOIN employees e ON e.id = er.employee_id
+         WHERE er.created_at::date BETWEEN ? AND ?
+         ORDER BY ei.expense_date, er.id`
+      )
+      .all(start, end);
+
+    // Earliest and latest spend per report, so the summary sheet carries the
+    // dates too without having to cross-reference the item sheet.
+    const span = new Map();
+    for (const it of items) {
+      const cur = span.get(it.report_id) || { first: it.expense_date, last: it.expense_date };
+      if (it.expense_date < cur.first) cur.first = it.expense_date;
+      if (it.expense_date > cur.last) cur.last = it.expense_date;
+      span.set(it.report_id, cur);
+    }
+
     const withBalance = rows.map((r) => ({
       ...r,
       expense_type: r.expense_type || "Unspecified",
       balance: Number((r.cash_advance_amount - r.total_expenses).toFixed(2)),
+      first_expense_date: span.get(r.id)?.first || "",
+      last_expense_date: span.get(r.id)?.last || "",
     }));
 
     const workbook = new ExcelJS.Workbook();
@@ -344,9 +375,41 @@ router.get(
         { header: "Total Expenses", key: "total_expenses", width: 15 },
         { header: "Balance", key: "balance", width: 14 },
         { header: "Status", key: "status", width: 12 },
-        { header: "Created", key: "created_at", width: 18 },
+        { header: "First Expense", key: "first_expense_date", width: 14 },
+        { header: "Last Expense", key: "last_expense_date", width: 14 },
+        { header: "Date Created", key: "created_at", width: 18 },
       ],
       withBalance.map((r) => ({ ...r, cost_center: r.cost_center || "—" }))
+    );
+
+    addSheet(
+      "Expense Items",
+      [
+        { header: "Expense Date", key: "expense_date", width: 14 },
+        { header: "Employee", key: "employee_name", width: 24 },
+        { header: "Report Title / Purpose", key: "title", width: 22 },
+        { header: "Expenses Type", key: "expense_type", width: 18 },
+        { header: "Cost Center", key: "cost_center", width: 16 },
+        { header: "Category", key: "category", width: 18 },
+        { header: "Description", key: "description", width: 34 },
+        { header: "Supplier", key: "supplier_name", width: 26 },
+        { header: "Supplier Address", key: "supplier_address", width: 32 },
+        { header: "Supplier TIN", key: "supplier_tin", width: 16 },
+        { header: "Receipt #", key: "receipt_ref", width: 14 },
+        { header: "Amount", key: "amount", width: 14 },
+        { header: "Report Status", key: "status", width: 13 },
+      ],
+      items.map((it) => ({
+        ...it,
+        expense_type: it.expense_type || "Unspecified",
+        cost_center: it.cost_center || "—",
+        category: it.category || "—",
+        description: it.description || "—",
+        supplier_name: it.supplier_name || "—",
+        supplier_address: it.supplier_address || "—",
+        supplier_tin: it.supplier_tin || "—",
+        receipt_ref: it.receipt_ref || "—",
+      }))
     );
 
     // Two independent breakdowns of the same rows, one per "type" grouping the

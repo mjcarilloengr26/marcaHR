@@ -720,6 +720,13 @@ async function ensureEmployeeStandingDeductions() {
   // company runs payroll. One is how the number was written down, the other
   // is how often it is paid out, and they are not always the same.
   await pool.query("ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary_basis TEXT NOT NULL DEFAULT 'monthly'");
+
+  // Who the money was actually paid to. Kept per expense item rather than per
+  // report because a single liquidation routinely covers several suppliers,
+  // and a TIN is only meaningful next to the specific purchase it belongs to.
+  await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS supplier_name TEXT");
+  await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS supplier_address TEXT");
+  await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS supplier_tin TEXT");
 }
 
 // Seeded once on first boot only (ON CONFLICT DO NOTHING) — after that this
