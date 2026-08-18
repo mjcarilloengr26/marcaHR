@@ -103,6 +103,7 @@ export default function Expenses() {
               <SortTh label="Expenses" sortKey="total_expenses" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Balance" sortKey="balance" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Date created" sortKey="created_at" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
           </thead>
@@ -119,6 +120,11 @@ export default function Expenses() {
                   {r.balance > 0 ? `${money(r.balance)} due to company` : r.balance < 0 ? `${money(-r.balance)} due to employee` : money(0)}
                 </td>
                 <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
+                {/* Stored as UTC "YYYY-MM-DD HH:MM:SS"; only the day is useful
+                    in a list this wide, and the full stamp is on hover. */}
+                <td title={r.created_at || ""} style={{ whiteSpace: "nowrap" }}>
+                  {r.created_at ? r.created_at.slice(0, 10) : "—"}
+                </td>
                 <td>
                   <button className="link-btn" onClick={() => setOpenId(r.id)}>
                     Open →
@@ -227,7 +233,16 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
   const [report, setReport] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [itemForm, setItemForm] = useState({ expense_date: "", category: "", description: "", amount: "", receipt_ref: "" });
+  const [itemForm, setItemForm] = useState({
+    expense_date: "",
+    category: "",
+    description: "",
+    amount: "",
+    receipt_ref: "",
+    supplier_name: "",
+    supplier_address: "",
+    supplier_tin: "",
+  });
   const [receipt, setReceipt] = useState(null); // { name, type, data }
   const [attaching, setAttaching] = useState(false);
   const [reviewNote, setReviewNote] = useState("");
@@ -274,7 +289,7 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
         receipt_type: receipt?.type,
         receipt_data: receipt?.data,
       });
-      setItemForm({ expense_date: "", category: "", description: "", amount: "", receipt_ref: "" });
+      setItemForm({ expense_date: "", category: "", description: "", amount: "", receipt_ref: "", supplier_name: "", supplier_address: "", supplier_tin: "" });
       setReceipt(null);
       await load();
       onChanged();
@@ -370,6 +385,7 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                   <th>Date</th>
                   <th>Category</th>
                   <th>Description</th>
+                  <th>Supplier</th>
                   <th>Receipt</th>
                   <th>Amount</th>
                   {canEdit && <th></th>}
@@ -380,7 +396,15 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                   <tr key={it.id}>
                     <td>{it.expense_date}</td>
                     <td>{it.category || "—"}</td>
+                    {/* Address and TIN are on hover rather than in their own
+                        columns — they matter at audit time, not at a glance. */}
                     <td>{it.description || "—"}</td>
+                    <td title={[it.supplier_address, it.supplier_tin && `TIN ${it.supplier_tin}`].filter(Boolean).join(" · ")}>
+                      {it.supplier_name || "—"}
+                      {it.supplier_tin && (
+                        <div className="subtitle" style={{ fontSize: 11 }}>TIN {it.supplier_tin}</div>
+                      )}
+                    </td>
                     <td>
                       {it.receipt_ref || ""}
                       {it.receipt_data && (
@@ -428,6 +452,29 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                 <div className="form-row">
                   <label>Receipt #</label>
                   <input value={itemForm.receipt_ref} onChange={(e) => setItemForm({ ...itemForm, receipt_ref: e.target.value })} />
+                </div>
+                <div className="form-row">
+                  <label>Supplier / company</label>
+                  <input
+                    value={itemForm.supplier_name}
+                    onChange={(e) => setItemForm({ ...itemForm, supplier_name: e.target.value })}
+                    placeholder="Who was paid"
+                  />
+                </div>
+                <div className="form-row">
+                  <label>Supplier address</label>
+                  <input
+                    value={itemForm.supplier_address}
+                    onChange={(e) => setItemForm({ ...itemForm, supplier_address: e.target.value })}
+                  />
+                </div>
+                <div className="form-row">
+                  <label>Supplier TIN</label>
+                  <input
+                    value={itemForm.supplier_tin}
+                    onChange={(e) => setItemForm({ ...itemForm, supplier_tin: e.target.value })}
+                    placeholder="000-000-000-000"
+                  />
                 </div>
                 <div className="form-row">
                   <label>Amount</label>
