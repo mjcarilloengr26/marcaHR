@@ -8,6 +8,7 @@ const {
   periodsPerMonth,
   periodHalfFor,
   getPayrollSettings,
+  computeEmployeePayroll,
 } = require("../services/payrollCalc");
 
 const router = express.Router();
@@ -160,6 +161,40 @@ router.get(
   })
 );
 
+// Changing someone's salary has to reach the payroll they have not been paid
+// yet, or the Payroll page keeps showing the figure from before the change and
+// looks like it was never wired to the employee record at all. Recalculates
+// their DRAFT records only — finalized and paid runs are history and must not
+// move — and preserves any bonuses HR typed onto the draft.
+async function refreshDraftPayrollFor(employee) {
+  const settings = await getPayrollSettings();
+  const drafts = await db
+    .prepare(
+      "SELECT id, period_month, period_year, period_half FROM payroll_records WHERE employee_id = ? AND status = 'draft'"
+    )
+    .all(employee.id);
+  for (const d of drafts) {
+    const pay = await computeEmployeePayroll(employee, d.period_month, d.period_year, d.period_half, settings);
+    await db
+      .prepare(
+        `UPDATE payroll_records
+         SET base_salary = ?, overtime_pay = ?, night_differential_pay = ?,
+             net_pay = ? + ? + ? + bonuses - deductions
+         WHERE id = ? AND status = 'draft'`
+      )
+      .run(
+        pay.base_salary,
+        pay.overtime_pay,
+        pay.night_differential_pay,
+        pay.base_salary,
+        pay.overtime_pay,
+        pay.night_differential_pay,
+        d.id
+      );
+  }
+  return drafts.length;
+}
+
 router.post(
   "/",
   requireAuth,
@@ -226,12 +261,21 @@ router.put(
       }
       return res.status(400).json({ error: "Could not update employee" });
     }
+    const updated = await db.prepare("SELECT * FROM employees WHERE id = ?").get(req.params.id);
+
+    // Only when something that actually drives pay moved, so an edit to a
+    // phone number does not quietly rewrite payroll.
+    let refreshed = 0;
+    if (cols.includes("base_salary") && Number(existing.base_salary) !== Number(updated.base_salary)) {
+      refreshed = await refreshDraftPayrollFor(updated);
+    }
+
     await logRequestEvent(req, "update_employee", {
       entityType: "employee",
       entityId: Number(req.params.id),
-      details: { fields: cols },
+      details: { fields: cols, drafts_recalculated: refreshed },
     });
-    res.json(await db.prepare("SELECT * FROM employees WHERE id = ?").get(req.params.id));
+    res.json(updated);
   })
 );
 

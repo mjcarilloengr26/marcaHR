@@ -94,7 +94,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 
 .app-shell {
   display: flex;
-  min-height: 100vh;
+  /* A fixed-height frame, so scrolling happens inside .content rather than on
+     the window. That is what lets a table header stay put with position:
+     sticky — .content already had overflow-x, which made it the sticky
+     containing block, and a block that never scrolls vertically can never
+     hold anything sticky in place. It keeps the sidebar and topbar on screen
+     while a long list scrolls, too. */
+  height: 100vh;
+  height: 100dvh;
 }
 
 .sidebar {
@@ -211,6 +218,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0; /* without this the column refuses to shrink and .content never scrolls */
 }
 
 .topbar {
@@ -349,8 +357,10 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 [data-theme="dark"] .theme-toggle-knob { transform: translateX(24px); }
 
 .content {
-  padding: 24px;
-  overflow-x: auto;
+  --content-pad: 24px;
+  flex: 1;
+  padding: var(--content-pad);
+  overflow: auto;
 }
 
 .page-loading {
@@ -430,6 +440,23 @@ tbody tr:last-child td { border-bottom: none; }
 /* Lets a table grow past its card rather than crushing columns to fit. Opt-in
    per table, since most cards hold popovers that need overflow left visible. */
 .table-scroll { overflow-x: auto; }
+
+/* Opt-in docked table header: the column names stay visible while a long list
+   scrolls under them. The offset is negative because sticky measures from the
+   scrollport's content box, inside .content's padding — at top: 0 the header
+   parks one padding-width down and rows scroll through the gap above it.
+   A background is required (the header would otherwise be transparent with
+   rows showing through) and the bottom rule has to be an inset shadow, since
+   a border on a collapsed-border table stops painting once the cell sticks.
+   Not for use on a table inside .table-scroll: that card is its own scroll
+   container and would trap the header the same way .content used to. */
+.sticky-head thead th {
+  position: sticky;
+  top: calc(var(--content-pad, 0px) * -1);
+  z-index: 2;
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--border);
+}
 
 /* Item codes run up to 20 characters, so the column never breaks one across
    two lines — it widens to fit the longest code present and the card scrolls
@@ -974,7 +1001,7 @@ input[type="date"]::-webkit-datetime-edit-year-field {
   .user-name { display: none; }
   .topbar-clock { display: none; }
 
-  .content { padding: 14px; }
+  .content { --content-pad: 14px; }
 
   .page-header {
     flex-direction: column;
