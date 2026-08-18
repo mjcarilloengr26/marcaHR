@@ -46,11 +46,10 @@ export default function Payroll() {
   const generate = async () => {
     if (
       !confirm(
-        `Generate payroll for ${MONTH_NAMES[month]} ${year}${isMonthly ? "" : half === 1 || half === "1" ? " (1st half)" : " (2nd half)"}?
-
-` +
-          "Draft records for this period will be recalculated from the current salaries, attendance and payroll settings. " +
-          "Finalized and paid records are left untouched."
+        `Generate payroll for ${MONTH_NAMES[month]} ${year}${isMonthly ? "" : half === 1 || half === "1" ? " (1st half)" : " (2nd half)"}?\n\n` +
+          "Staff paid each cut-off get this half; staff on a monthly schedule get the whole month.\n\n" +
+          "Draft records are recalculated from the current salaries, attendance and payroll settings, and any draft " +
+          "left over from a different schedule is removed. Finalized and paid records are left untouched."
       )
     ) {
       return;
@@ -210,6 +209,10 @@ export default function Payroll() {
                 <option value={1}>1st half (1–15)</option>
                 <option value={2}>2nd half (16–end)</option>
               </select>
+              <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                Applies to staff paid each cut-off. Anyone on a monthly schedule is generated
+                for the whole month whichever you pick.
+              </p>
             </div>
           )}
           <button className="btn" onClick={generate} disabled={generating}>
