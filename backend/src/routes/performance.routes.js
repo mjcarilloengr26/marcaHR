@@ -3,6 +3,7 @@ const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { notifyReviewSubmitted } = require("../notifications");
 const asyncHandler = require("../middleware/asyncHandler");
+const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
 
@@ -38,6 +39,66 @@ router.put(
     if (!["open", "closed"].includes(status)) return res.status(400).json({ error: "status must be open or closed" });
     await db.prepare("UPDATE review_cycles SET status = ? WHERE id = ?").run(status, req.params.id);
     res.json(await db.prepare("SELECT * FROM review_cycles WHERE id = ?").get(req.params.id));
+  })
+);
+
+router.put(
+  "/cycles/:id",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const existing = await db.prepare("SELECT * FROM review_cycles WHERE id = ?").get(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Review cycle not found" });
+
+    const { name, start_date, end_date, status } = req.body || {};
+    if (name !== undefined && !String(name).trim()) {
+      return res.status(400).json({ error: "Name cannot be empty" });
+    }
+    if (status !== undefined && !["open", "closed"].includes(status)) {
+      return res.status(400).json({ error: "status must be open or closed" });
+    }
+    await db
+      .prepare("UPDATE review_cycles SET name = ?, start_date = ?, end_date = ?, status = ? WHERE id = ?")
+      .run(
+        name !== undefined ? String(name).trim() : existing.name,
+        start_date !== undefined ? start_date || null : existing.start_date,
+        end_date !== undefined ? end_date || null : existing.end_date,
+        status !== undefined ? status : existing.status,
+        req.params.id
+      );
+    const updated = await db.prepare("SELECT * FROM review_cycles WHERE id = ?").get(req.params.id);
+    await logRequestEvent(req, "update_review_cycle", {
+      entityType: "review_cycle",
+      entityId: Number(req.params.id),
+      details: { name: updated.name, status: updated.status },
+    });
+    res.json(updated);
+  })
+);
+
+// Refuses rather than cascading: reviews carry the ratings and written
+// feedback people actually wrote, and losing those to a tidy-up of the cycle
+// list would be silent and unrecoverable. Close the cycle instead.
+router.delete(
+  "/cycles/:id",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const existing = await db.prepare("SELECT * FROM review_cycles WHERE id = ?").get(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Review cycle not found" });
+    const used = await db.prepare("SELECT COUNT(*) AS n FROM performance_reviews WHERE cycle_id = ?").get(req.params.id);
+    if (used.n > 0) {
+      return res.status(400).json({
+        error: `This cycle has ${used.n} review${used.n > 1 ? "s" : ""} against it. Close it instead of deleting, or remove those reviews first.`,
+      });
+    }
+    await db.prepare("DELETE FROM review_cycles WHERE id = ?").run(req.params.id);
+    await logRequestEvent(req, "delete_review_cycle", {
+      entityType: "review_cycle",
+      entityId: Number(req.params.id),
+      details: { name: existing.name },
+    });
+    res.status(204).end();
   })
 );
 
