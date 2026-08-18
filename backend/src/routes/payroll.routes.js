@@ -162,7 +162,6 @@ router.post(
       employee_id,
       period_month,
       period_year,
-      base_salary,
       bonuses,
       overtime_pay,
       night_differential_pay,
@@ -190,7 +189,15 @@ router.post(
       return res.status(400).json({ error: "Only draft payroll records can be edited" });
     }
 
-    const base = base_salary ?? employee.base_salary;
+    // Base pay is derived, never accepted from the caller. It comes from the
+    // employee's declared salary, their pay schedule and the attendance for
+    // this period — the same function bulk generation uses — so an edit here
+    // can never drift from the employee record or from a run generated later.
+    // Note the old code took employee.base_salary raw, which ignored the
+    // period and the attendance entirely.
+    const settings = await db.prepare("SELECT * FROM payroll_settings WHERE id = 1").get();
+    const computed = await computeEmployeePayroll(employee, period_month, period_year, half, settings);
+    const base = computed.base_salary;
     const bonus = bonuses || 0;
     const overtime = overtime_pay || 0;
     const nightDiff = night_differential_pay || 0;

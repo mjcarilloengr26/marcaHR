@@ -103,7 +103,6 @@ export default function Payroll() {
         period_month: editingRecord.period_month,
         period_year: editingRecord.period_year,
         period_half: editingRecord.period_half,
-        base_salary: Number(editForm.base_salary) || 0,
         bonuses: Number(editForm.bonuses) || 0,
         overtime_pay: Number(editForm.overtime_pay) || 0,
         night_differential_pay: Number(editForm.night_differential_pay) || 0,
@@ -285,11 +284,14 @@ export default function Payroll() {
             <div className="grid grid-2">
               <div className="form-row">
                 <label>Base salary</label>
-                <input
-                  type="number"
-                  value={editForm.base_salary}
-                  onChange={(e) => setEditForm({ ...editForm, base_salary: e.target.value })}
-                />
+                {/* Derived, never typed: it comes from the employee's declared
+                    salary, their pay schedule and the attendance for this
+                    period. Editing it here would desync the payroll from the
+                    employee record and quietly break the formula. */}
+                <input type="number" value={editForm.base_salary} readOnly disabled />
+                <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  Set by the employee's base salary and pay schedule. Change it on the employee's page.
+                </p>
               </div>
               <div className="form-row">
                 <label>Bonuses</label>
