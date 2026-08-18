@@ -5,10 +5,37 @@ import { readFileAsDataUrl } from "../utils/image";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 
-const emptyForm = { sku: "", name: "", category: "", unit: "pcs", quantity_on_hand: "", reorder_level: "", unit_cost: "", unit_price: "", location_id: "", notes: "" };
+const DEFAULT_MARGIN = 50;
+
+// Margin is taken on the selling price, not on the cost: it is the share of
+// each peso of revenue left after paying for the goods. So the price is the
+// cost grossed up, price = cost / (1 - margin/100), and 50% doubles the cost.
+// Margin itself is not stored — it is recovered from cost and price whenever
+// the form opens, so those two remain the single source of truth and no
+// migration is needed to support this.
+const priceFromMargin = (cost, margin, current) => {
+  const m = Number(margin);
+  // A half-typed or cleared box should not rewrite the other fields — leave
+  // the price where it is until there is a real number to work from.
+  if (cost === "" || margin === "" || !Number.isFinite(m)) return current;
+  // At 100% the price would be infinite, and beyond it negative: no selling
+  // price can leave more margin than the whole of itself. Hold steady instead
+  // of showing a nonsense figure while the box is being typed into.
+  if (m >= 100) return current;
+  return Math.round(((Number(cost) || 0) / (1 - m / 100)) * 100) / 100;
+};
+const marginFromPrice = (cost, price, current) => {
+  const c = Number(cost) || 0;
+  if (price === "") return current;
+  const pr = Number(price) || 0;
+  if (pr <= 0) return ""; // a share of a zero price is undefined
+  return Math.round(((pr - c) / pr) * 1000) / 10;
+};
+
+const emptyForm = { sku: "", name: "", category: "", unit: "pcs", quantity_on_hand: "", reorder_level: "", unit_cost: "", unit_price: "", margin: DEFAULT_MARGIN, location_id: "", notes: "" };
 
 export default function Inventory() {
-  const { money, currencySymbol } = useAppSettings();
+  const { money, moneyPrecise, currencySymbol } = useAppSettings();
   const [items, setItems] = useState([]);
   const [locations, setLocations] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -74,6 +101,7 @@ export default function Inventory() {
       reorder_level: item.reorder_level,
       unit_cost: item.unit_cost,
       unit_price: item.unit_price,
+      margin: item.unit_price > 0 ? marginFromPrice(item.unit_cost, item.unit_price) : DEFAULT_MARGIN,
       location_id: item.location_id || "",
       notes: item.notes || "",
     });
@@ -93,6 +121,7 @@ export default function Inventory() {
         unit_price: Number(form.unit_price) || 0,
         location_id: form.location_id || null,
       };
+      delete payload.margin;
       // Create records it as an opening balance; update records the difference
       // as an adjustment. Either way the change lands in the item's History.
       if (editingId) {
@@ -387,7 +416,7 @@ export default function Inventory() {
         </div>
       )}
 
-      <div className="card">
+      <div className="card table-scroll">
         <table>
           <thead>
             <tr>
@@ -410,11 +439,11 @@ export default function Inventory() {
                   }
                 />
               </th>
-              <SortTh label="SKU" sortKey="sku" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="SKU" sortKey="sku" toggleSort={toggleSort} arrow={arrow} className="col-sku" />
               <SortTh label="Name" sortKey="name" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Category" sortKey="category" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="On hand" sortKey="quantity_on_hand" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Reorder level" sortKey="reorder_level" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="On hand" sortKey="quantity_on_hand" toggleSort={toggleSort} arrow={arrow} className="col-qty" />
+              <SortTh label="Reorder level" sortKey="reorder_level" toggleSort={toggleSort} arrow={arrow} className="col-qty" />
               <SortTh label="Unit cost" sortKey="unit_cost" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Stock value" sortKey="total_value" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Location" sortKey="location_name" toggleSort={toggleSort} arrow={arrow} />
@@ -437,16 +466,16 @@ export default function Inventory() {
                     }
                   />
                 </td>
-                <td>{i.sku}</td>
+                <td className="col-sku" title={i.sku}><span>{i.sku}</span></td>
                 <td>{i.name}</td>
                 <td>{i.category || "—"}</td>
-                <td>{i.quantity_on_hand} {i.unit}</td>
-                <td>{i.reorder_level} {i.unit}</td>
+                <td className="col-qty" title={`${i.quantity_on_hand} ${i.unit}`}><span>{i.quantity_on_hand} {i.unit}</span></td>
+                <td className="col-qty" title={`${i.reorder_level} ${i.unit}`}><span>{i.reorder_level} {i.unit}</span></td>
                 <td>{money(i.unit_cost)}</td>
                 <td>{money(i.total_value)}</td>
                 <td>{i.location_name || "—"}</td>
                 <td>{statusBadge(i.stock_status)}</td>
-                <td style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <td className="col-actions">
                   <button className="btn btn-sm" onClick={() => openStock(i, "in")}>Stock in</button>
                   <button className="btn btn-sm btn-secondary" onClick={() => openStock(i, "out")}>Stock out</button>
                   <button className="btn btn-sm btn-secondary" onClick={() => openStock(i, "adjust")}>Adjust</button>
@@ -512,13 +541,53 @@ export default function Inventory() {
                   Alerts you when stock falls this low. Leave at 0 for no alert.
                 </p>
               </div>
+              {/* Cost, margin and price are three views of the same pair of
+                  numbers. Editing any one updates the others so the trio is
+                  never left contradicting itself — margin and price follow the
+                  cost, and typing a price over the top re-derives the margin. */}
               <div className="form-row">
                 <label>Unit cost ({currencySymbol})</label>
-                <input type="number" value={form.unit_cost} onChange={(e) => setForm({ ...form, unit_cost: e.target.value })} />
+                <input
+                  type="number"
+                  value={form.unit_cost}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, unit_cost: e.target.value, unit_price: priceFromMargin(e.target.value, f.margin, f.unit_price) }))
+                  }
+                />
+                <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  What you pay per {form.unit || "unit"}.
+                </p>
+              </div>
+              <div className="form-row">
+                <label>Margin % (of selling price)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={form.margin}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, margin: e.target.value, unit_price: priceFromMargin(f.unit_cost, e.target.value, f.unit_price) }))
+                  }
+                />
+                <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  The share of the selling price kept as gross profit. Must be under 100%.
+                  Default {DEFAULT_MARGIN}%.
+                </p>
               </div>
               <div className="form-row">
                 <label>Unit price ({currencySymbol})</label>
-                <input type="number" value={form.unit_price} onChange={(e) => setForm({ ...form, unit_price: e.target.value })} />
+                <input
+                  type="number"
+                  value={form.unit_price}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, unit_price: e.target.value, margin: marginFromPrice(f.unit_cost, e.target.value, f.margin) }))
+                  }
+                />
+                <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  {Number(form.unit_price) > 0
+                    ? `${moneyPrecise(Number(form.unit_cost) || 0)} cost → ${moneyPrecise(Number(form.unit_price))} price, ` +
+                      `${moneyPrecise(Number(form.unit_price) - (Number(form.unit_cost) || 0))} gross profit per ${form.unit || "unit"}`
+                    : "Type a price directly, or enter a unit cost and margin to have it calculated."}
+                </p>
               </div>
               <div className="form-row">
                 <label>Location</label>
