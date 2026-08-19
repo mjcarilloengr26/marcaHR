@@ -3,7 +3,7 @@ const express = require("express");
 const cors = require("cors");
 
 const db = require("./db");
-const seed = require("./seed");
+const { firstRunSetup } = require("./firstRun");
 
 const authRoutes = require("./routes/auth.routes");
 const employeeRoutes = require("./routes/employees.routes");
@@ -116,16 +116,10 @@ app.use((err, req, res, next) => {
 async function start() {
   await db.migrate();
 
-  // First-boot convenience for fresh deployments where there's no interactive
-  // shell to run `npm run seed` manually: seed automatically, but only when
-  // the database is genuinely empty, so it never touches real data. Now that
-  // storage is Supabase Postgres (persistent) rather than Render's ephemeral
-  // disk, this should only ever fire on a truly first-ever boot.
-  const employeeCount = (await db.prepare("SELECT COUNT(*) AS c FROM employees").get()).c;
-  if (employeeCount === 0) {
-    console.log("No employees found — running first-boot seed...");
-    await seed();
-  }
+  // Sets up an empty database: one administrator by default, or the full
+  // demonstration dataset when SEED_DEMO_DATA is explicitly enabled. Does
+  // nothing at all once any user exists.
+  await firstRunSetup();
 
   const PORT = process.env.PORT || 4000;
   app.listen(PORT, () => console.log(`HR app backend listening on http://localhost:${PORT}`));
