@@ -197,12 +197,22 @@ router.get(
     const records = await db.prepare(sql).all(...params);
 
     if (includeTodayPlaceholders) {
-      let placeholderSql = `SELECT e.id AS employee_id, (e.first_name || ' ' || e.last_name) AS employee_name
+      // Someone on approved leave has no attendance row either, and calling
+      // that "absent" is wrong — they are away with permission, and on the
+      // Attendance page it reads as though they failed to show up. Pull the
+      // covering leave, if any, so the placeholder can say what it actually is.
+      let placeholderSql = `SELECT e.id AS employee_id, (e.first_name || ' ' || e.last_name) AS employee_name,
+                                  lt.name AS leave_type_name
                            FROM employees e
+                           LEFT JOIN leave_requests lr
+                             ON lr.employee_id = e.id
+                            AND lr.status = 'approved'
+                            AND ? BETWEEN lr.start_date AND lr.end_date
+                           LEFT JOIN leave_types lt ON lt.id = lr.leave_type_id
                            WHERE e.status = 'active'
                              AND (e.hire_date IS NULL OR e.hire_date <= ?)
                              AND NOT EXISTS (SELECT 1 FROM attendance a WHERE a.employee_id = e.id AND a.date = ?)`;
-      const placeholderParams = [today, today];
+      const placeholderParams = [today, today, today];
       if (employeeIdFilter) {
         placeholderSql += " AND e.id = ?";
         placeholderParams.push(employeeIdFilter);
@@ -214,7 +224,8 @@ router.get(
           employee_id: m.employee_id,
           employee_name: m.employee_name,
           date: today,
-          status: "absent",
+          status: m.leave_type_name ? "leave" : "absent",
+          leave_type_name: m.leave_type_name || null,
           clock_in: null,
           clock_in_lat: null,
           clock_in_lng: null,
@@ -227,7 +238,7 @@ router.get(
           clock_out_distance_m: null,
           has_clock_in_photo: false,
           has_clock_out_photo: false,
-          note: null,
+          note: m.leave_type_name ? `On ${m.leave_type_name}` : null,
         });
       }
     }

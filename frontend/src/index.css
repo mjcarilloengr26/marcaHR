@@ -597,6 +597,10 @@ input[type="date"]::-webkit-datetime-edit-year-field {
 }
 .badge-rejected, .badge-inactive, .badge-absent, .badge-overdue { background: var(--badge-danger-bg); color: var(--danger); }
 .badge-draft, .badge-submitted, .badge-late, .badge-cancelled, .badge-sent, .badge-open, .badge-assigned { background: var(--badge-neutral-bg); color: var(--text-muted); }
+/* Approved leave is neither a success nor a failure — someone is away with
+   permission. Given its own treatment so it never reads as an absence, which
+   is what the red badge said before. */
+.badge-leave, .badge-half_day { background: var(--primary-light); color: var(--primary); }
 
 .error-banner {
   background: var(--error-banner-bg);
