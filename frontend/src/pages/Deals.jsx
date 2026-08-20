@@ -5,7 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 
-const emptyForm = { title: "", customer_name: "", value: "", stage: "lead", owner_id: "", expected_close_date: "", notes: "" };
+const emptyForm = { title: "", customer_name: "", value: "", stage: "lead", owner_id: "", expected_close_date: "", notes: "", competitor: "" };
 const STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"];
 
 export default function Deals() {
@@ -41,6 +41,7 @@ export default function Deals() {
     setForm({
       title: deal.title,
       customer_name: deal.customer_name,
+      competitor: deal.competitor || "",
       value: deal.value,
       stage: deal.stage,
       owner_id: deal.owner_id || "",
@@ -102,7 +103,7 @@ export default function Deals() {
   const filteredDeals = deals.filter((d) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
-    return [d.title, d.customer_name, d.owner_name, d.stage, d.linked_order_number].some((v) => (v || "").toLowerCase().includes(q));
+    return [d.title, d.customer_name, d.competitor, d.owner_name, d.stage, d.linked_order_number].some((v) => (v || "").toLowerCase().includes(q));
   });
   const { sorted, toggleSort, arrow } = useSort(filteredDeals, "created_at", "desc");
 
@@ -142,6 +143,7 @@ export default function Deals() {
             <tr>
               <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Customer" sortKey="customer_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Competitor" sortKey="competitor" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Value" sortKey="value" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Owner" sortKey="owner_name" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Expected close" sortKey="expected_close_date" toggleSort={toggleSort} arrow={arrow} />
@@ -155,6 +157,7 @@ export default function Deals() {
               <tr key={d.id}>
                 <td>{d.title}</td>
                 <td>{d.customer_name}</td>
+                <td>{d.competitor || "—"}</td>
                 <td>{money(d.value)}</td>
                 <td>{d.owner_name || "—"}</td>
                 <td>{d.expected_close_date || "—"}</td>
@@ -190,6 +193,14 @@ export default function Deals() {
               <div className="form-row">
                 <label>Customer</label>
                 <input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} required />
+              </div>
+              <div className="form-row">
+                <label>Competitor</label>
+                <input
+                  value={form.competitor}
+                  onChange={(e) => setForm({ ...form, competitor: e.target.value })}
+                  placeholder="Who else is bidding"
+                />
               </div>
               <div className="form-row">
                 <label>Value</label>
