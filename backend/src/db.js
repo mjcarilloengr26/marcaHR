@@ -589,11 +589,23 @@ async function ensureLeaveTypeTaxonomy() {
   for (const [oldName, newName] of renames) {
     await pool.query("UPDATE leave_types SET name = $1, default_days_per_year = 5 WHERE name = $2", [newName, oldName]);
   }
-  const requiredTypes = ["Vacation Leave", "Paternity/Maternity Leave", "Sick Leave", "Emergency Leave", "No Pay Leave"];
-  for (const name of requiredTypes) {
+  // Each type carries its own yearly allocation rather than a shared 5.
+  // Offset Leave gets none on purpose: it is earned by working overtime and
+  // taken back later, so an annual grant would hand everybody free days they
+  // never worked for. HR can still set a figure per employee under Leave
+  // balances, and the amount is editable at Leave > types like any other.
+  const requiredTypes = [
+    ["Vacation Leave", 5],
+    ["Paternity/Maternity Leave", 5],
+    ["Sick Leave", 5],
+    ["Emergency Leave", 5],
+    ["No Pay Leave", 5],
+    ["Offset Leave", 0],
+  ];
+  for (const [name, days] of requiredTypes) {
     await pool.query(
-      "INSERT INTO leave_types (name, default_days_per_year) VALUES ($1, 5) ON CONFLICT (name) DO NOTHING",
-      [name]
+      "INSERT INTO leave_types (name, default_days_per_year) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING",
+      [name, days]
     );
   }
 }
