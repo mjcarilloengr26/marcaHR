@@ -745,6 +745,11 @@ async function ensureEmployeeStandingDeductions() {
   // so it has to be one setting rather than a constant repeated per file.
   // Defaults to Asia/Manila, which is what it was hardcoded to.
   await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'Asia/Manila'");
+
+  // Who else is bidding. Free text rather than a lookup table — a
+  // competitor on one deal is usually a name someone heard in a meeting,
+  // not an entity worth maintaining a record for.
+  await pool.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS competitor TEXT");
 }
 
 // Seeded once on first boot only (ON CONFLICT DO NOTHING) — after that this

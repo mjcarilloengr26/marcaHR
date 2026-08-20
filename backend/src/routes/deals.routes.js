@@ -97,10 +97,10 @@ router.post(
 
     const info = await db
       .prepare(
-        `INSERT INTO deals (title, customer_name, value, stage, owner_id, expected_close_date, notes)
+        `INSERT INTO deals (title, customer_name, value, stage, owner_id, expected_close_date, notes, competitor)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(title, customer_name, value || 0, stage || "lead", owner_id, expected_close_date || null, notes || null);
+      .run(title, customer_name, value || 0, stage || "lead", owner_id, expected_close_date || null, notes || null, competitor?.trim() || null);
 
     const created = await db.prepare("SELECT * FROM deals WHERE id = ?").get(info.lastInsertRowid);
     // An opportunity can be entered as already-won (e.g. logging a deal closed
@@ -128,7 +128,7 @@ router.put(
       }
     }
 
-    const { title, customer_name, value, stage, expected_close_date, notes } = req.body || {};
+    const { title, customer_name, value, stage, expected_close_date, notes, competitor } = req.body || {};
     if (stage && !["lead", "qualified", "proposal", "negotiation", "won", "lost"].includes(stage)) {
       return res.status(400).json({ error: "Invalid stage" });
     }
@@ -138,7 +138,7 @@ router.put(
 
     await db
       .prepare(
-        `UPDATE deals SET title = ?, customer_name = ?, value = ?, stage = ?, owner_id = ?, expected_close_date = ?, notes = ?
+        `UPDATE deals SET title = ?, customer_name = ?, value = ?, stage = ?, owner_id = ?, expected_close_date = ?, notes = ?, competitor = ?
      WHERE id = ?`
       )
       .run(
@@ -149,6 +149,7 @@ router.put(
         owner_id,
         expected_close_date !== undefined ? expected_close_date : existing.expected_close_date,
         notes !== undefined ? notes : existing.notes,
+        competitor !== undefined ? competitor?.trim() || null : existing.competitor,
         req.params.id
       );
 
