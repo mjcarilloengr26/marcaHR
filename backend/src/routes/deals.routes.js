@@ -98,7 +98,7 @@ router.post(
     const info = await db
       .prepare(
         `INSERT INTO deals (title, customer_name, value, stage, owner_id, expected_close_date, notes, competitor)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(title, customer_name, value || 0, stage || "lead", owner_id, expected_close_date || null, notes || null, competitor?.trim() || null);
 
