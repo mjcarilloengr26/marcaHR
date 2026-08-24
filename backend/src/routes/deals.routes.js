@@ -89,7 +89,7 @@ router.post(
     const isSales = await isSalesEmployee(req);
     if (!isHr && !isSales) return res.status(403).json({ error: "Insufficient permissions" });
 
-    const { title, customer_name, value, stage, expected_close_date, notes } = req.body || {};
+    const { title, customer_name, value, stage, expected_close_date, notes, competitor } = req.body || {};
     if (!title || !customer_name) return res.status(400).json({ error: "title and customer_name are required" });
     // A sales rep can only ever create opportunities under their own name —
     // owner_id from the request body is only honored for HR/admin.
