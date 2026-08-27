@@ -950,7 +950,10 @@ input[type="date"]::-webkit-datetime-edit-year-field {
 .meter-pct { color: var(--text); font-weight: 600; }
 .meter-edit { font-size: 12px; white-space: nowrap; }
 
-@media (max-width: 768px) {
+/* Same condition as the main phone block below, so a landscape phone does not
+   keep one component on the desktop layout while everything else has moved. */
+@media (max-width: 768px),
+       (max-width: 1024px) and (max-height: 600px) and (orientation: landscape) {
   .meter-row {
     grid-template-columns: 1fr;
     gap: 4px;
@@ -994,7 +997,14 @@ input[type="date"]::-webkit-datetime-edit-year-field {
   font-weight: 600;
 }
 
-@media (max-width: 768px) {
+/* A phone held sideways is 812px wide and so used to land on the desktop
+   layout: the sidebar took back its column, Inventory's card sized itself to
+   its table at 1113px while Events sat at 517px, and the content area scrolled
+   sideways dragging the headings with it. Matching a short landscape viewport
+   as well puts a phone on the phone layout whichever way it is turned. The
+   width bound keeps a genuinely wide, short desktop window out of it. */
+@media (max-width: 768px),
+       (max-width: 1024px) and (max-height: 600px) and (orientation: landscape) {
   .sidebar {
     position: fixed;
     top: 0;
