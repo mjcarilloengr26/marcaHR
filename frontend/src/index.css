@@ -1030,11 +1030,37 @@ input[type="date"]::-webkit-datetime-edit-year-field {
 
   .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
 
-  /* .card used to scroll sideways here. It no longer does: .content is the
-     scroll container on both axes now, so a wide table scrolls the page
-     instead — and a card that scrolls is a card whose sticky header cannot
-     stay put, which would have quietly disabled docked headers on phones. */
+  /* On a phone the page itself must never move sideways — a table wider than
+     the screen used to drag the heading and the toolbar off with it. The page
+     is pinned to the viewport and each card scrolls sideways on its own
+     instead, so headings stay put and only the data moves.
+
+     The cost is docked table headers: a card that scrolls horizontally becomes
+     its own scroll container, and a container that never scrolls vertically
+     cannot hold anything sticky. Desktop keeps its docked headers; on a phone
+     a fixed page width is worth more. */
+  .content { overflow-x: hidden; }
+
+  .card {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
   .card table { min-width: 560px; }
+
+  /* Inventory's card is sized to its table on desktop. On a phone that would
+     force the card past the screen edge, so it goes back to fitting and
+     scrolling like every other card. */
+  .card-wide { width: auto; min-width: 0; }
+
+  /* One line per row. Wrapping made a row as tall as its longest cell — a
+     single opportunity ran to seven lines and three filled the screen. The
+     data that no longer fits is reached by scrolling sideways, which is the
+     trade a phone should make. */
+  .card td, .card th { white-space: nowrap; }
+
+  /* Except free text, which would otherwise run to absurd widths. Capped and
+     clipped, with the full value still in the cell's tooltip. */
+  .card td { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
 
   .form-inline { flex-direction: column; align-items: stretch; }
   .form-inline .form-row { min-width: 0; }
