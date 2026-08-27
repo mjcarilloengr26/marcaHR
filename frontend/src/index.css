@@ -1058,9 +1058,15 @@ input[type="date"]::-webkit-datetime-edit-year-field {
      trade a phone should make. */
   .card td, .card th { white-space: nowrap; }
 
-  /* Except free text, which would otherwise run to absurd widths. Capped and
-     clipped, with the full value still in the cell's tooltip. */
-  .card td { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+  /* No width cap on cells. Capping them at a fixed width clipped whatever ran
+     past it AND shrank the table, so the card could not scroll far enough to
+     reach the clipped part — the row of actions on Inventory needs 393px and
+     lost History, Edit and Delete; the details column on Events lost its text.
+     Cells take the width they need and the card scrolls to them, which is the
+     whole point of scrolling sideways rather than hiding.
+
+     Columns that genuinely want truncation ask for it themselves — .col-sku
+     and .col-qty cap their own contents and keep the full value in a tooltip. */
 
   .form-inline { flex-direction: column; align-items: stretch; }
   .form-inline .form-row { min-width: 0; }
