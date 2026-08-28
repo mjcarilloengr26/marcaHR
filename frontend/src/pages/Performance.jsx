@@ -166,14 +166,16 @@ This cannot be undone. A cycle that already has reviews against it cannot be del
                   <td>{c.end_date || "—"}</td>
                   <td>{reviews.filter((r) => r.cycle_id === c.id).length}</td>
                   <td><span className={`badge badge-${c.status === "open" ? "active" : "neutral"}`}>{c.status}</span></td>
-                  <td className="col-actions">
-                    <button className="btn btn-sm btn-secondary" onClick={() => openEditCycle(c)}>Edit</button>
-                    {c.status === "open" ? (
-                      <button className="btn btn-sm btn-secondary" onClick={() => setCycleStatus(c, "closed")}>Close</button>
-                    ) : (
-                      <button className="btn btn-sm btn-secondary" onClick={() => setCycleStatus(c, "open")}>Reopen</button>
-                    )}
-                    <button className="btn btn-sm btn-danger" onClick={() => deleteCycle(c)}>Delete</button>
+                  <td>
+                    <div className="col-actions">
+                      <button className="btn btn-sm btn-secondary" onClick={() => openEditCycle(c)}>Edit</button>
+                      {c.status === "open" ? (
+                        <button className="btn btn-sm btn-secondary" onClick={() => setCycleStatus(c, "closed")}>Close</button>
+                      ) : (
+                        <button className="btn btn-sm btn-secondary" onClick={() => setCycleStatus(c, "open")}>Reopen</button>
+                      )}
+                      <button className="btn btn-sm btn-danger" onClick={() => deleteCycle(c)}>Delete</button>
+                    </div>
                   </td>
                 </tr>
               ))}

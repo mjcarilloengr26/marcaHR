@@ -30,11 +30,10 @@ export default function Expenses() {
 
   const load = () => api.get("/expenses").then(setReports).catch((err) => setError(err.message));
 
-  // Mirrors the server rule in loadEditableReport: your own draft, or anything
-  // at all if you are HR/admin. Showing the button where the request would be
-  // rejected just invites an error message.
-  const canDelete = (r) =>
-    isHr || (r.employee_id === user.employee_id && r.status === "draft");
+  // Deleting from the list is an HR/admin tool. The server would also accept an
+  // employee removing their own draft, but employee-facing access is deliberately
+  // left as it was — clearing out abandoned reports is an administrative job.
+  const canDelete = () => isHr;
 
   const [deletingId, setDeletingId] = useState(null);
 
@@ -62,9 +61,66 @@ export default function Expenses() {
     }
   };
 
+  // Ids ticked for bulk removal. Only rows canDelete() allows ever enter this
+  // set, so the bulk action can never ask for something the server refuses.
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  const toggleOne = (id) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const deleteSelected = async () => {
+    const targets = reports.filter((r) => selected.has(r.id) && canDelete(r));
+    if (targets.length === 0) return;
+    if (
+      !confirm(
+        `Delete ${targets.length} report${targets.length === 1 ? "" : "s"}?
+
+` +
+          "Their expense items and any attached receipts go with them. This cannot be undone."
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    setError("");
+    // One at a time rather than in parallel: a partial failure then leaves a
+    // clear picture of what went, and the list is small enough that the wait
+    // is not worth the risk of a burst of concurrent deletes.
+    const failed = [];
+    for (const r of targets) {
+      try {
+        await api.del(`/expenses/${r.id}`);
+        if (openId === r.id) setOpenId(null);
+      } catch (err) {
+        failed.push(`${r.title}: ${err.message}`);
+      }
+    }
+    setBulkDeleting(false);
+    setSelected(new Set());
+    if (failed.length) {
+      setError(`${failed.length} of ${targets.length} could not be deleted — ${failed.join("; ")}`);
+    }
+    load();
+  };
+
   useEffect(() => {
     load();
   }, []);
+
+  // Reports deleted here or elsewhere must not linger as phantom ticks that
+  // inflate the selected count.
+  useEffect(() => {
+    setSelected((prev) => {
+      const live = new Set(reports.map((r) => r.id));
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [reports]);
 
   const filteredReports = reports.filter((r) => {
     const q = search.trim().toLowerCase();
@@ -72,6 +128,19 @@ export default function Expenses() {
     return [r.employee_name, r.title, r.expense_type, r.cost_center, r.status].some((v) => (v || "").toLowerCase().includes(q));
   });
   const { sorted, toggleSort, arrow } = useSort(filteredReports, "created_at", "desc");
+
+  // Select-all covers what is on screen, not what the search has hidden.
+  const selectableVisible = sorted.filter(canDelete);
+  const selectedVisible = selectableVisible.filter((r) => selected.has(r.id));
+  const allVisibleSelected = selectableVisible.length > 0 && selectedVisible.length === selectableVisible.length;
+
+  const toggleAllVisible = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) selectableVisible.forEach((r) => next.delete(r.id));
+      else selectableVisible.forEach((r) => next.add(r.id));
+      return next;
+    });
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -124,10 +193,49 @@ export default function Expenses() {
         />
       </div>
 
+      {/* Only appears once something is ticked, so a destructive control isn't
+          sitting armed on the page during ordinary browsing. */}
+      {selected.size > 0 && (
+        <div
+          className="card"
+          style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}
+        >
+          <strong>{selected.size} selected</strong>
+          <button type="button" className="link-btn" disabled={bulkDeleting} onClick={() => setSelected(new Set())}>
+            Clear selection
+          </button>
+          <span style={{ flex: 1 }} />
+          <button
+            type="button"
+            className="btn btn-sm btn-danger"
+            onClick={deleteSelected}
+            disabled={bulkDeleting}
+          >
+            {bulkDeleting ? "Deleting…" : `Delete ${selected.size} selected`}
+          </button>
+        </div>
+      )}
+
       <div className="card">
         <table className="sticky-head">
           <thead>
             <tr>
+              {isHr && (
+                <th style={{ width: 32 }}>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all reports shown"
+                    disabled={selectableVisible.length === 0}
+                    checked={allVisibleSelected}
+                    ref={(el) => {
+                      // Part-selected reads as a dash, so "select all" is never
+                      // mistaken for "everything is already ticked".
+                      if (el) el.indeterminate = selectedVisible.length > 0 && !allVisibleSelected;
+                    }}
+                    onChange={toggleAllVisible}
+                  />
+                </th>
+              )}
               {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
               <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Type" sortKey="expense_type" toggleSort={toggleSort} arrow={arrow} />
@@ -142,7 +250,17 @@ export default function Expenses() {
           </thead>
           <tbody>
             {sorted.map((r) => (
-              <tr key={r.id}>
+              <tr key={r.id} className={selected.has(r.id) ? "row-selected" : undefined}>
+                {isHr && (
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${r.title}`}
+                      checked={selected.has(r.id)}
+                      onChange={() => toggleOne(r.id)}
+                    />
+                  </td>
+                )}
                 {isHr && <td>{r.employee_name}</td>}
                 <td>{r.title}</td>
                 <td>{r.expense_type || "—"}</td>
@@ -158,19 +276,21 @@ export default function Expenses() {
                 <td title={r.created_at || ""} style={{ whiteSpace: "nowrap" }}>
                   {r.created_at ? r.created_at.slice(0, 10) : "—"}
                 </td>
-                <td className="col-actions">
-                  <button className="link-btn" onClick={() => setOpenId(r.id)}>
-                    Open →
-                  </button>
-                  {canDelete(r) && (
-                    <button
-                      className="btn btn-sm btn-danger"
-                      disabled={deletingId === r.id}
-                      onClick={() => deleteReport(r)}
-                    >
-                      {deletingId === r.id ? "Deleting…" : "Delete"}
+                <td>
+                  <div className="col-actions">
+                    <button className="link-btn" onClick={() => setOpenId(r.id)}>
+                      Open →
                     </button>
-                  )}
+                    {canDelete(r) && (
+                      <button
+                        className="btn btn-sm btn-danger"
+                        disabled={deletingId === r.id}
+                        onClick={() => deleteReport(r)}
+                      >
+                        {deletingId === r.id ? "Deleting…" : "Delete"}
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
