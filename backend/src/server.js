@@ -100,6 +100,7 @@ app.use("/api/events", eventsRoutes);
 app.use("/api/terms", termsRoutes);
 app.use("/api/security-settings", securityRoutes);
 app.use("/api/server-status", require("./routes/serverstatus.routes"));
+app.use("/api/suggestions", require("./routes/suggestions.routes").router);
 app.use("/api/branding", brandingRoutes);
 app.use("/api/page-access", pageAccessRoutes);
 app.use("/api/nav-order", navOrderRoutes);
