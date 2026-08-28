@@ -214,7 +214,8 @@ export default function Expenses() {
             {form.title === "Others" && (
               <div className="form-row">
                 <label>Please specify</label>
-                <input
+                <SuggestInput
+                  field="expense_title"
                   value={form.title_other}
                   onChange={(e) => setForm({ ...form, title_other: e.target.value })}
                   placeholder="Describe the purpose"
