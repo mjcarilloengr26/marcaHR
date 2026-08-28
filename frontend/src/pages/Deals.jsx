@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 import { useSort } from "../hooks/useSort";
@@ -187,16 +188,17 @@ export default function Deals() {
             <h2>{editingId ? "Edit opportunity" : "Add opportunity"}</h2>
             <div className="form-row">
               <label>Title</label>
-              <input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
+              <SuggestInput field="project_title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
             </div>
             <div className="grid grid-2">
               <div className="form-row">
                 <label>Customer</label>
-                <input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} required />
+                <SuggestInput field="customer_name" value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} required />
               </div>
               <div className="form-row">
                 <label>Competitor</label>
-                <input
+                <SuggestInput
+                  field="competitor"
                   value={form.competitor}
                   onChange={(e) => setForm({ ...form, competitor: e.target.value })}
                   placeholder="Who else is bidding"

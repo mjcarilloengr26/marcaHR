@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
@@ -165,7 +166,7 @@ export default function Orders() {
               </div>
               <div className="form-row">
                 <label>Customer</label>
-                <input value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} required />
+                <SuggestInput field="customer_name" value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} required />
               </div>
               <div className="form-row">
                 <label>Amount</label>

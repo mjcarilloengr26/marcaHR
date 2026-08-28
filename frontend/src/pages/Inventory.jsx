@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { readFileAsDataUrl } from "../utils/image";
 import { useSort } from "../hooks/useSort";
@@ -507,7 +508,7 @@ export default function Inventory() {
               </div>
               <div className="form-row">
                 <label>Category</label>
-                <input value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+                <SuggestInput field="item_category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
               </div>
               <div className="form-row">
                 <label>Unit</label>

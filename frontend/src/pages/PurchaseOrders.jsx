@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
@@ -166,7 +167,7 @@ export default function PurchaseOrders() {
               </div>
               <div className="form-row">
                 <label>Vendor</label>
-                <input value={form.vendor_name} onChange={(e) => setForm({ ...form, vendor_name: e.target.value })} required />
+                <SuggestInput field="vendor_name" value={form.vendor_name} onChange={(e) => setForm({ ...form, vendor_name: e.target.value })} required />
               </div>
               <div className="form-row">
                 <label>Amount</label>

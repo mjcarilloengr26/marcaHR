@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import SuggestInput from "../components/SuggestInput";
 import { useAuth } from "../context/AuthContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { compressImageFile, readFileAsDataUrl } from "../utils/image";
@@ -28,6 +29,38 @@ export default function Expenses() {
   const [search, setSearch] = useState("");
 
   const load = () => api.get("/expenses").then(setReports).catch((err) => setError(err.message));
+
+  // Mirrors the server rule in loadEditableReport: your own draft, or anything
+  // at all if you are HR/admin. Showing the button where the request would be
+  // rejected just invites an error message.
+  const canDelete = (r) =>
+    isHr || (r.employee_id === user.employee_id && r.status === "draft");
+
+  const [deletingId, setDeletingId] = useState(null);
+
+  const deleteReport = async (r) => {
+    if (
+      !confirm(
+        `Delete "${r.title}"?
+
+` +
+          "Its expense items and any attached receipts go with it. This cannot be undone."
+      )
+    ) {
+      return;
+    }
+    setDeletingId(r.id);
+    setError("");
+    try {
+      await api.del(`/expenses/${r.id}`);
+      if (openId === r.id) setOpenId(null);
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   useEffect(() => {
     load();
@@ -125,10 +158,19 @@ export default function Expenses() {
                 <td title={r.created_at || ""} style={{ whiteSpace: "nowrap" }}>
                   {r.created_at ? r.created_at.slice(0, 10) : "—"}
                 </td>
-                <td>
+                <td className="col-actions">
                   <button className="link-btn" onClick={() => setOpenId(r.id)}>
                     Open →
                   </button>
+                  {canDelete(r) && (
+                    <button
+                      className="btn btn-sm btn-danger"
+                      disabled={deletingId === r.id}
+                      onClick={() => deleteReport(r)}
+                    >
+                      {deletingId === r.id ? "Deleting…" : "Delete"}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -192,7 +234,8 @@ export default function Expenses() {
             </div>
             <div className="form-row">
               <label>Cost center</label>
-              <input
+              <SuggestInput
+                field="cost_center"
                 value={form.cost_center}
                 onChange={(e) => setForm({ ...form, cost_center: e.target.value })}
                 placeholder="e.g. Sales, Engineering, CC-100"
@@ -443,7 +486,7 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                 </div>
                 <div className="form-row">
                   <label>Category</label>
-                  <input value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })} placeholder="Meals, transport…" />
+                  <SuggestInput field="category" value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })} placeholder="Meals, transport…" />
                 </div>
                 <div className="form-row" style={{ flex: 1 }}>
                   <label>Description</label>
@@ -455,7 +498,8 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                 </div>
                 <div className="form-row">
                   <label>Supplier / company</label>
-                  <input
+                  <SuggestInput
+                    field="supplier_name"
                     value={itemForm.supplier_name}
                     onChange={(e) => setItemForm({ ...itemForm, supplier_name: e.target.value })}
                     placeholder="Who was paid"
