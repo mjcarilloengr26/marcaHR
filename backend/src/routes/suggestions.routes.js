@@ -22,6 +22,8 @@ const SOURCES = {
   ],
   vendor_name: [{ table: "purchase_orders", column: "vendor_name" }],
   supplier_name: [{ table: "expense_items", column: "supplier_name" }],
+  supplier_address: [{ table: "expense_items", column: "supplier_address" }],
+  supplier_tin: [{ table: "expense_items", column: "supplier_tin" }],
   competitor: [{ table: "deals", column: "competitor" }],
   cost_center: [{ table: "expense_reports", column: "cost_center" }],
   expense_title: [{ table: "expense_reports", column: "title" }],
@@ -30,6 +32,7 @@ const SOURCES = {
     { table: "work_orders", column: "title" },
   ],
   category: [{ table: "expense_items", column: "category" }],
+  expense_description: [{ table: "expense_items", column: "description" }],
   item_category: [{ table: "inventory_items", column: "category" }],
 };
 
@@ -61,6 +64,41 @@ router.get(
       .all();
 
     res.json({ field, values: rows.map((r) => r.value), detail: rows });
+  })
+);
+
+// Suppliers are more than a list of names: an address and a TIN belong to the
+// company, and retyping them per receipt is how the same firm ends up filed
+// under two spellings with the TIN on only one of them — which the live data
+// already shows. Returning the whole profile lets the form fill itself in once
+// the name is picked.
+router.get(
+  "/suppliers",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const rows = await db
+      .prepare(
+        `SELECT (array_agg(btrim(supplier_name) ORDER BY id DESC))[1] AS name,
+                (array_agg(btrim(supplier_address) ORDER BY id DESC)
+                   FILTER (WHERE btrim(COALESCE(supplier_address, '')) <> ''))[1] AS address,
+                (array_agg(btrim(supplier_tin) ORDER BY id DESC)
+                   FILTER (WHERE btrim(COALESCE(supplier_tin, '')) <> ''))[1] AS tin,
+                COUNT(*)::int AS uses
+         FROM expense_items
+         WHERE btrim(COALESCE(supplier_name, '')) <> ''
+         -- Folded case, so "NA" and "Na" are one supplier rather than two
+         -- competing profiles. The most recently used spelling is the one
+         -- offered, and the newest non-blank address and TIN win independently:
+         -- a receipt entered without a TIN must not blank out a known one.
+         GROUP BY lower(btrim(supplier_name))
+         ORDER BY COUNT(*) DESC, 1 ASC
+         LIMIT 300`
+      )
+      .all();
+
+    res.json(
+      rows.map((r) => ({ name: r.name, address: r.address || "", tin: r.tin || "", uses: r.uses }))
+    );
   })
 );
 

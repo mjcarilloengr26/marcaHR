@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import SuggestInput from "../components/SuggestInput";
 import { useAuth } from "../context/AuthContext";
@@ -407,6 +407,45 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
     supplier_address: "",
     supplier_tin: "",
   });
+  // Suppliers already used, each with the address and TIN last recorded for
+  // it. Picking a name fills the rest of the row in, which is the whole point:
+  // the live data already holds one company under two spellings with the TIN
+  // typed out by hand each time.
+  const [suppliers, setSuppliers] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    api
+      .get("/suggestions/suppliers")
+      .then((rows) => { if (alive) setSuppliers(rows || []); })
+      // The form is perfectly usable without the profiles; failing to load
+      // them must not stop anyone entering a receipt by hand.
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  // What the last auto-fill wrote. Switching supplier replaces its own values,
+  // but anything typed by hand is left exactly as it was — silently discarding
+  // an address someone corrected would be worse than not filling at all.
+  const autoFilled = useRef({ address: "", tin: "" });
+
+  const setSupplierName = (name) => {
+    const match = suppliers.find(
+      (sup) => (sup.name || "").trim().toLowerCase() === name.trim().toLowerCase()
+    );
+    setItemForm((prev) => {
+      const next = { ...prev, supplier_name: name };
+      if (!match) return next;
+      if (!prev.supplier_address.trim() || prev.supplier_address === autoFilled.current.address) {
+        next.supplier_address = match.address || "";
+      }
+      if (!prev.supplier_tin.trim() || prev.supplier_tin === autoFilled.current.tin) {
+        next.supplier_tin = match.tin || "";
+      }
+      autoFilled.current = { address: next.supplier_address, tin: next.supplier_tin };
+      return next;
+    });
+  };
+
   const [receipt, setReceipt] = useState(null); // { name, type, data }
   const [attaching, setAttaching] = useState(false);
   const [reviewNote, setReviewNote] = useState("");
@@ -454,6 +493,7 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
         receipt_data: receipt?.data,
       });
       setItemForm({ expense_date: "", category: "", description: "", amount: "", receipt_ref: "", supplier_name: "", supplier_address: "", supplier_tin: "" });
+      autoFilled.current = { address: "", tin: "" };
       setReceipt(null);
       await load();
       onChanged();
@@ -611,7 +651,11 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                 </div>
                 <div className="form-row" style={{ flex: 1 }}>
                   <label>Description</label>
-                  <input value={itemForm.description} onChange={(e) => setItemForm({ ...itemForm, description: e.target.value })} />
+                  <SuggestInput
+                    field="expense_description"
+                    value={itemForm.description}
+                    onChange={(e) => setItemForm({ ...itemForm, description: e.target.value })}
+                  />
                 </div>
                 <div className="form-row">
                   <label>Receipt #</label>
@@ -621,21 +665,24 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                   <label>Supplier / company</label>
                   <SuggestInput
                     field="supplier_name"
+                    options={suppliers.map((sup) => sup.name)}
                     value={itemForm.supplier_name}
-                    onChange={(e) => setItemForm({ ...itemForm, supplier_name: e.target.value })}
+                    onChange={(e) => setSupplierName(e.target.value)}
                     placeholder="Who was paid"
                   />
                 </div>
                 <div className="form-row">
                   <label>Supplier address</label>
-                  <input
+                  <SuggestInput
+                    field="supplier_address"
                     value={itemForm.supplier_address}
                     onChange={(e) => setItemForm({ ...itemForm, supplier_address: e.target.value })}
                   />
                 </div>
                 <div className="form-row">
                   <label>Supplier TIN</label>
-                  <input
+                  <SuggestInput
+                    field="supplier_tin"
                     value={itemForm.supplier_tin}
                     onChange={(e) => setItemForm({ ...itemForm, supplier_tin: e.target.value })}
                     placeholder="000-000-000-000"

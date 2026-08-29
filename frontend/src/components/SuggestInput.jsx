@@ -30,19 +30,25 @@ function loadField(field) {
 // values already used elsewhere in the app, and anything not on the list can
 // still be typed. Deliberately not a select — these are open sets, and forcing
 // a choice would block the first-ever customer from ever being entered.
-export default function SuggestInput({ field, value, onChange, ...rest }) {
+//
+// `options` lets a caller pass values it has already loaded — the supplier name
+// list arrives with the addresses and TINs attached, and fetching the same
+// names a second time just to fill a dropdown would be waste.
+export default function SuggestInput({ field, value, onChange, options: given, ...rest }) {
   const listId = useId();
-  const [options, setOptions] = useState([]);
+  const [fetched, setFetched] = useState([]);
+  const options = given ?? fetched;
 
   useEffect(() => {
+    if (given) return;
     let alive = true;
     loadField(field).then((v) => {
-      if (alive) setOptions(v);
+      if (alive) setFetched(v);
     });
     return () => {
       alive = false;
     };
-  }, [field]);
+  }, [field, given]);
 
   return (
     <>
