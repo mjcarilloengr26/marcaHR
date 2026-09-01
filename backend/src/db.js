@@ -136,9 +136,9 @@ CREATE TABLE IF NOT EXISTS departments (
 CREATE TABLE IF NOT EXISTS locations (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
-  lat REAL NOT NULL,
-  lng REAL NOT NULL,
-  radius_meters REAL NOT NULL DEFAULT 1000,
+  lat DOUBLE PRECISION NOT NULL,
+  lng DOUBLE PRECISION NOT NULL,
+  radius_meters NUMERIC(14,3) NOT NULL DEFAULT 1000,
   address TEXT
 );
 
@@ -154,15 +154,15 @@ CREATE TABLE IF NOT EXISTS employees (
   manager_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   hire_date TEXT,
   status TEXT NOT NULL DEFAULT 'active',
-  base_salary REAL DEFAULT 0,
+  base_salary NUMERIC(14,2) DEFAULT 0,
   address TEXT,
   photo TEXT,
-  deduction_sss REAL NOT NULL DEFAULT 0,
-  deduction_hdmf REAL NOT NULL DEFAULT 0,
-  deduction_philhealth REAL NOT NULL DEFAULT 0,
-  deduction_taxes REAL NOT NULL DEFAULT 0,
-  deduction_loans REAL NOT NULL DEFAULT 0,
-  deduction_cash_advances REAL NOT NULL DEFAULT 0,
+  deduction_sss NUMERIC(14,2) NOT NULL DEFAULT 0,
+  deduction_hdmf NUMERIC(14,2) NOT NULL DEFAULT 0,
+  deduction_philhealth NUMERIC(14,2) NOT NULL DEFAULT 0,
+  deduction_taxes NUMERIC(14,2) NOT NULL DEFAULT 0,
+  deduction_loans NUMERIC(14,2) NOT NULL DEFAULT 0,
+  deduction_cash_advances NUMERIC(14,2) NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
@@ -188,8 +188,8 @@ CREATE TABLE IF NOT EXISTS leave_balances (
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   leave_type_id INTEGER NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE,
   year INTEGER NOT NULL,
-  allocated_days REAL NOT NULL DEFAULT 0,
-  used_days REAL NOT NULL DEFAULT 0,
+  allocated_days NUMERIC(14,3) NOT NULL DEFAULT 0,
+  used_days NUMERIC(14,3) NOT NULL DEFAULT 0,
   UNIQUE(employee_id, leave_type_id, year)
 );
 
@@ -199,7 +199,7 @@ CREATE TABLE IF NOT EXISTS leave_requests (
   leave_type_id INTEGER NOT NULL REFERENCES leave_types(id) ON DELETE CASCADE,
   start_date TEXT NOT NULL,
   end_date TEXT NOT NULL,
-  days REAL NOT NULL,
+  days NUMERIC(14,3) NOT NULL,
   reason TEXT,
   status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','cancelled')),
   reviewed_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
@@ -217,14 +217,14 @@ CREATE TABLE IF NOT EXISTS attendance (
   status TEXT NOT NULL DEFAULT 'present' CHECK(status IN ('present','absent','late','half_day','leave')),
   clock_in TEXT,
   clock_out TEXT,
-  clock_in_lat REAL,
-  clock_in_lng REAL,
-  clock_in_accuracy REAL,
-  clock_in_distance_m REAL,
-  clock_out_lat REAL,
-  clock_out_lng REAL,
-  clock_out_accuracy REAL,
-  clock_out_distance_m REAL,
+  clock_in_lat DOUBLE PRECISION,
+  clock_in_lng DOUBLE PRECISION,
+  clock_in_accuracy NUMERIC(14,3),
+  clock_in_distance_m NUMERIC(14,3),
+  clock_out_lat DOUBLE PRECISION,
+  clock_out_lng DOUBLE PRECISION,
+  clock_out_accuracy NUMERIC(14,3),
+  clock_out_distance_m NUMERIC(14,3),
   clock_in_photo TEXT,
   clock_out_photo TEXT,
   note TEXT,
@@ -236,18 +236,18 @@ CREATE TABLE IF NOT EXISTS payroll_records (
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   period_month INTEGER NOT NULL,
   period_year INTEGER NOT NULL,
-  base_salary REAL NOT NULL DEFAULT 0,
-  bonuses REAL NOT NULL DEFAULT 0,
-  overtime_pay REAL NOT NULL DEFAULT 0,
-  night_differential_pay REAL NOT NULL DEFAULT 0,
-  deductions REAL NOT NULL DEFAULT 0,
-  deduction_sss REAL NOT NULL DEFAULT 0,
-  deduction_hdmf REAL NOT NULL DEFAULT 0,
-  deduction_philhealth REAL NOT NULL DEFAULT 0,
-  deduction_taxes REAL NOT NULL DEFAULT 0,
-  deduction_loans REAL NOT NULL DEFAULT 0,
-  deduction_cash_advances REAL NOT NULL DEFAULT 0,
-  net_pay REAL NOT NULL DEFAULT 0,
+  base_salary NUMERIC(14,2) NOT NULL DEFAULT 0,
+  bonuses NUMERIC(14,2) NOT NULL DEFAULT 0,
+  overtime_pay NUMERIC(14,2) NOT NULL DEFAULT 0,
+  night_differential_pay NUMERIC(14,2) NOT NULL DEFAULT 0,
+  deductions NUMERIC(14,2) NOT NULL DEFAULT 0,
+  deduction_sss NUMERIC(14,2) NOT NULL DEFAULT 0,
+  deduction_hdmf NUMERIC(14,2) NOT NULL DEFAULT 0,
+  deduction_philhealth NUMERIC(14,2) NOT NULL DEFAULT 0,
+  deduction_taxes NUMERIC(14,2) NOT NULL DEFAULT 0,
+  deduction_loans NUMERIC(14,2) NOT NULL DEFAULT 0,
+  deduction_cash_advances NUMERIC(14,2) NOT NULL DEFAULT 0,
+  net_pay NUMERIC(14,2) NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','finalized','paid')),
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
@@ -310,7 +310,7 @@ CREATE TABLE IF NOT EXISTS expense_reports (
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   expense_type TEXT,
-  cash_advance_amount REAL NOT NULL DEFAULT 0,
+  cash_advance_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   cost_center TEXT,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','rejected','reimbursed')),
   notes TEXT,
@@ -326,7 +326,7 @@ CREATE TABLE IF NOT EXISTS expense_items (
   expense_date TEXT NOT NULL,
   category TEXT,
   description TEXT,
-  amount REAL NOT NULL DEFAULT 0,
+  amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   receipt_ref TEXT,
   receipt_name TEXT,
   receipt_type TEXT,
@@ -337,7 +337,7 @@ CREATE TABLE IF NOT EXISTS deals (
   id SERIAL PRIMARY KEY,
   title TEXT NOT NULL,
   customer_name TEXT NOT NULL,
-  value REAL NOT NULL DEFAULT 0,
+  value NUMERIC(14,2) NOT NULL DEFAULT 0,
   stage TEXT NOT NULL DEFAULT 'lead' CHECK(stage IN ('lead','qualified','proposal','negotiation','won','lost')),
   owner_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   expected_close_date TEXT,
@@ -354,7 +354,7 @@ CREATE TABLE IF NOT EXISTS orders (
   id SERIAL PRIMARY KEY,
   order_number TEXT NOT NULL UNIQUE,
   customer_name TEXT NOT NULL,
-  amount REAL NOT NULL DEFAULT 0,
+  amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'placed' CHECK(status IN ('placed','processing','shipped','delivered','cancelled')),
   owner_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   deal_id INTEGER UNIQUE REFERENCES deals(id) ON DELETE SET NULL,
@@ -369,7 +369,7 @@ CREATE TABLE IF NOT EXISTS sales_targets (
   period_type TEXT NOT NULL DEFAULT 'monthly' CHECK(period_type IN ('monthly','quarterly','yearly')),
   period_year INTEGER NOT NULL,
   period_index INTEGER NOT NULL DEFAULT 0,
-  target_amount REAL NOT NULL DEFAULT 0,
+  target_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
   UNIQUE(employee_id, period_type, period_year, period_index)
 );
@@ -396,7 +396,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   invoice_number TEXT NOT NULL UNIQUE,
   order_id INTEGER REFERENCES orders(id) ON DELETE SET NULL,
   customer_name TEXT NOT NULL,
-  amount REAL NOT NULL DEFAULT 0,
+  amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','sent','paid','overdue','cancelled')),
   issue_date TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
   due_date TEXT,
@@ -410,7 +410,7 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   po_number TEXT NOT NULL UNIQUE,
   vendor_name TEXT NOT NULL,
   description TEXT,
-  amount REAL NOT NULL DEFAULT 0,
+  amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','received','cancelled')),
   requested_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   order_date TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
@@ -426,10 +426,10 @@ CREATE TABLE IF NOT EXISTS inventory_items (
   name TEXT NOT NULL,
   category TEXT,
   unit TEXT NOT NULL DEFAULT 'pcs',
-  quantity_on_hand REAL NOT NULL DEFAULT 0,
-  reorder_level REAL NOT NULL DEFAULT 0,
-  unit_cost REAL NOT NULL DEFAULT 0,
-  unit_price REAL NOT NULL DEFAULT 0,
+  quantity_on_hand NUMERIC(14,3) NOT NULL DEFAULT 0,
+  reorder_level NUMERIC(14,3) NOT NULL DEFAULT 0,
+  unit_cost NUMERIC(14,2) NOT NULL DEFAULT 0,
+  unit_price NUMERIC(14,2) NOT NULL DEFAULT 0,
   location_id INTEGER REFERENCES locations(id) ON DELETE SET NULL,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
@@ -439,7 +439,7 @@ CREATE TABLE IF NOT EXISTS inventory_transactions (
   id SERIAL PRIMARY KEY,
   item_id INTEGER NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
   type TEXT NOT NULL CHECK(type IN ('in','out','adjustment')),
-  quantity REAL NOT NULL,
+  quantity NUMERIC(14,3) NOT NULL,
   reason TEXT,
   reference TEXT,
   created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
@@ -448,7 +448,7 @@ CREATE TABLE IF NOT EXISTS inventory_transactions (
 
 CREATE TABLE IF NOT EXISTS inventory_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
-  alarm_threshold_percent REAL NOT NULL DEFAULT 20,
+  alarm_threshold_percent NUMERIC(14,3) NOT NULL DEFAULT 20,
   updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
@@ -535,13 +535,13 @@ CREATE TABLE IF NOT EXISTS security_settings (
 -- for every company.
 CREATE TABLE IF NOT EXISTS payroll_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
-  standard_hours_per_day REAL NOT NULL DEFAULT 8,
-  overtime_multiplier REAL NOT NULL DEFAULT 1.25,
+  standard_hours_per_day NUMERIC(14,3) NOT NULL DEFAULT 8,
+  overtime_multiplier NUMERIC(14,3) NOT NULL DEFAULT 1.25,
   regular_start_time TEXT NOT NULL DEFAULT '08:00',
   regular_end_time TEXT NOT NULL DEFAULT '17:00',
   overtime_start_time TEXT NOT NULL DEFAULT '17:00',
   overtime_end_time TEXT NOT NULL DEFAULT '22:00',
-  night_shift_multiplier REAL NOT NULL DEFAULT 1.10,
+  night_shift_multiplier NUMERIC(14,3) NOT NULL DEFAULT 1.10,
   updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
@@ -586,7 +586,7 @@ CREATE TABLE IF NOT EXISTS employee_assets (
   status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','returned','replaced')),
   condition_note TEXT,
   notes TEXT,
-  market_value REAL,
+  market_value NUMERIC(14,2),
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
@@ -707,6 +707,104 @@ async function ensureDealAging() {
   await pool.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS stage_changed_at TEXT");
   await pool.query("UPDATE deals SET stage_changed_at = created_at WHERE stage_changed_at IS NULL");
   await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS stale_deal_days INTEGER NOT NULL DEFAULT 30");
+}
+
+// Postgres REAL is 4-byte single precision — about seven significant digits.
+// That is enough for 1,234.56 and not enough for 484,012.56, which it silently
+// stores as 484,013. Every money column in the app was REAL, so any amount
+// above ~99,999.99 quietly lost its centavos on save. It looked like a UI bug
+// for a long time because the figure typed in was correct and only the stored
+// one was wrong.
+//
+// Money moves to NUMERIC(14,2): exact decimal, no binary-float drift, and
+// db.js already parses NUMERIC into a JS number so nothing downstream changes.
+// Coordinates move to DOUBLE PRECISION, which is what they always needed.
+// Quantities, day counts and multipliers get three decimals.
+const MONEY_COLUMNS = [
+  ["deals", "value"],
+  ["employee_assets", "market_value"],
+  ["employees", "base_salary"],
+  ["employees", "deduction_sss"],
+  ["employees", "deduction_hdmf"],
+  ["employees", "deduction_philhealth"],
+  ["employees", "deduction_taxes"],
+  ["employees", "deduction_loans"],
+  ["employees", "deduction_cash_advances"],
+  ["expense_items", "amount"],
+  ["expense_reports", "cash_advance_amount"],
+  ["inventory_items", "unit_cost"],
+  ["inventory_items", "unit_price"],
+  ["invoices", "amount"],
+  ["orders", "amount"],
+  ["payroll_records", "base_salary"],
+  ["payroll_records", "bonuses"],
+  ["payroll_records", "overtime_pay"],
+  ["payroll_records", "night_differential_pay"],
+  ["payroll_records", "deductions"],
+  ["payroll_records", "deduction_sss"],
+  ["payroll_records", "deduction_hdmf"],
+  ["payroll_records", "deduction_philhealth"],
+  ["payroll_records", "deduction_taxes"],
+  ["payroll_records", "deduction_loans"],
+  ["payroll_records", "deduction_cash_advances"],
+  ["payroll_records", "net_pay"],
+  ["purchase_orders", "amount"],
+  ["sales_targets", "target_amount"],
+];
+
+const COORDINATE_COLUMNS = [
+  ["attendance", "clock_in_lat"],
+  ["attendance", "clock_in_lng"],
+  ["attendance", "clock_out_lat"],
+  ["attendance", "clock_out_lng"],
+  ["attendance", "clock_in_accuracy"],
+  ["attendance", "clock_in_distance_m"],
+  ["attendance", "clock_out_accuracy"],
+  ["attendance", "clock_out_distance_m"],
+  ["locations", "lat"],
+  ["locations", "lng"],
+];
+
+const QUANTITY_COLUMNS = [
+  ["inventory_items", "quantity_on_hand"],
+  ["inventory_items", "reorder_level"],
+  ["inventory_transactions", "quantity"],
+  ["inventory_settings", "alarm_threshold_percent"],
+  ["leave_balances", "allocated_days"],
+  ["leave_balances", "used_days"],
+  ["leave_requests", "days"],
+  ["locations", "radius_meters"],
+  ["payroll_settings", "standard_hours_per_day"],
+  ["payroll_settings", "overtime_multiplier"],
+  ["payroll_settings", "night_shift_multiplier"],
+];
+
+async function widenRealColumns() {
+  const convert = async (table, column, type, roundTo) => {
+    const existing = await pool.query(
+      `SELECT data_type FROM information_schema.columns
+       WHERE table_name = $1 AND column_name = $2`,
+      [table, column]
+    );
+    const row = existing.rows[0];
+    // Absent on installs that predate the table, and already done on a second
+    // boot — either way there is nothing to convert.
+    if (!row || row.data_type !== "real") return false;
+    // Rounded on the way across: casting a REAL straight to NUMERIC exposes the
+    // binary-float noise underneath it (0.1 becomes 0.100000001490116).
+    const using =
+      roundTo === null
+        ? `${column}::double precision`
+        : `ROUND(${column}::numeric, ${roundTo})`;
+    await pool.query(`ALTER TABLE ${table} ALTER COLUMN ${column} TYPE ${type} USING ${using}`);
+    return true;
+  };
+
+  let changed = 0;
+  for (const [t, c] of MONEY_COLUMNS) changed += (await convert(t, c, "NUMERIC(14,2)", 2)) ? 1 : 0;
+  for (const [t, c] of COORDINATE_COLUMNS) changed += (await convert(t, c, "DOUBLE PRECISION", null)) ? 1 : 0;
+  for (const [t, c] of QUANTITY_COLUMNS) changed += (await convert(t, c, "NUMERIC(14,3)", 3)) ? 1 : 0;
+  if (changed > 0) console.log(`Widened ${changed} column(s) off REAL so amounts keep their decimals`);
 }
 
 async function ensureBoardCardAssignees() {
@@ -894,6 +992,7 @@ db.migrate = function () {
       .then(() => ensureBoardCardAssignees())
       .then(() => ensureAssetMarketValue())
       .then(() => ensureDealAging())
+      .then(() => widenRealColumns())
       .then(() => ensureExpenseType())
       .then(() => ensurePayrollTimeSettings())
       .then(() => ensurePayrollNightDifferential())
