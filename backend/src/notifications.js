@@ -154,6 +154,62 @@ const notifyAssetRequestDecision = guarded(async ({ employee_id, asset_type, sta
   });
 });
 
+const money = (n) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// One line per opportunity, ordered worst-first by the caller.
+function dealLines(deals) {
+  return deals.map((d) => {
+    const bits = [`${d.days_in_stage}d in ${d.stage}`];
+    if (d.days_past_close !== null && d.days_past_close > 0) bits.push(`${d.days_past_close}d past close`);
+    return `  - ${d.title} (${d.customer_name}) - ${money(d.value)} - ${bits.join(", ")}`;
+  });
+}
+
+// The daily stale-pipeline digest. Sales managers get everything; each owner
+// gets only their own, because a list someone cannot act on is a list they
+// learn to ignore.
+const notifyStaleDeals = guarded(async ({ deals, thresholdDays, companyLabel }) => {
+  if (!deals || deals.length === 0) return;
+  const label = companyLabel || (await companyName());
+
+  const hrTo = await getHrEmails();
+  if (hrTo.length > 0) {
+    const totalValue = deals.reduce((sum, d) => sum + Number(d.value || 0), 0);
+    sendMail({
+      to: hrTo,
+      subject: `${deals.length} opportunit${deals.length === 1 ? "y has" : "ies have"} gone quiet`,
+      text: [
+        `${deals.length} open opportunit${deals.length === 1 ? "y has" : "ies have"} sat in the same stage for ${thresholdDays}+ days, or run past the close date it was given. Together they are worth ${money(totalValue)}.`,
+        "",
+        ...dealLines(deals),
+        "",
+        `Review them in ${label} under Sales.`,
+      ].join("\n"),
+    });
+  }
+
+  // Group by owner so each rep gets one email, not one per opportunity.
+  const byOwner = new Map();
+  for (const d of deals) {
+    if (!d.owner_email) continue;
+    if (!byOwner.has(d.owner_email)) byOwner.set(d.owner_email, []);
+    byOwner.get(d.owner_email).push(d);
+  }
+  for (const [email, own] of byOwner) {
+    sendMail({
+      to: email,
+      subject: `${own.length} of your opportunit${own.length === 1 ? "y needs" : "ies need"} an update`,
+      text: [
+        `These have not moved for ${thresholdDays}+ days, or are past their expected close date:`,
+        "",
+        ...dealLines(own),
+        "",
+        `Update the stage or push the close date in ${label} so the pipeline reflects where they really are.`,
+      ].join("\n"),
+    });
+  }
+});
+
 module.exports = {
   notifyLeaveSubmitted,
   notifyLeaveStatusChanged,
@@ -165,4 +221,5 @@ module.exports = {
   notifyLowStockAlarm,
   notifyAssetRequested,
   notifyAssetRequestDecision,
+  notifyStaleDeals,
 };

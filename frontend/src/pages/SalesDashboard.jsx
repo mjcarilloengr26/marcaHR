@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useAuth } from "../context/AuthContext";
 import { api } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import Funnel from "../components/Funnel";
@@ -73,6 +74,159 @@ function YtdComparison({ thisYear, lastYear }) {
   );
 }
 
+
+
+// A pipeline that has stopped moving is the thing a sales review exists to
+// catch, and it is invisible on every other tile here: open pipeline value
+// looks identical whether the deals are progressing or parked.
+function PipelineAging({ aging, money, isHr, thresholdDraft, setThresholdDraft, saveThreshold, savingThreshold }) {
+  if (!aging) return null;
+  const { totals, byStage, worst, thresholdDays, staleCount } = aging;
+  const clean = staleCount === 0;
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="page-header" style={{ marginBottom: 4 }}>
+        <div>
+          <h2>Pipeline aging</h2>
+          <p className="subtitle" style={{ margin: 0 }}>
+            Open opportunities that have not moved for {thresholdDays}+ days, or have run past their expected close date
+          </p>
+        </div>
+        {isHr && (
+          <div className="form-inline" style={{ gap: 8 }}>
+            <div className="form-row" style={{ marginBottom: 0 }}>
+              <label style={{ fontSize: 12 }}>Stale after (days)</label>
+              <input
+                type="number"
+                min="1"
+                max="365"
+                style={{ width: 90 }}
+                value={thresholdDraft}
+                onChange={(e) => setThresholdDraft(e.target.value)}
+              />
+            </div>
+            <button
+              className="btn btn-sm btn-secondary"
+              disabled={savingThreshold || Number(thresholdDraft) === thresholdDays}
+              onClick={saveThreshold}
+            >
+              {savingThreshold ? "Saving…" : "Apply"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-4" style={{ marginTop: 12, marginBottom: 16 }}>
+        <div className="stat-card">
+          <div className="stat-value" style={{ color: totals.stalledCount ? "var(--danger)" : undefined }}>
+            {totals.stalledCount}
+          </div>
+          <div className="stat-label">Stalled {thresholdDays}+ days — {money(totals.stalledValue)} at risk</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value" style={{ color: totals.overdueCount ? "var(--danger)" : undefined }}>
+            {totals.overdueCount}
+          </div>
+          <div className="stat-label">Past expected close — {money(totals.overdueValue)}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{totals.avgDaysInStage}d</div>
+          <div className="stat-label">Average time in current stage</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-value">{totals.noCloseDate}</div>
+          <div className="stat-label">Open with no close date set</div>
+        </div>
+      </div>
+
+      {byStage.length > 0 && (
+        <div className="table-scroll" style={{ marginBottom: 16 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Stage</th>
+                <th>Open</th>
+                <th>Value</th>
+                <th>Average age in stage</th>
+                <th>Oldest</th>
+              </tr>
+            </thead>
+            <tbody>
+              {byStage.map((row) => (
+                <tr key={row.stage}>
+                  <td><span className="badge badge-neutral">{row.stage}</span></td>
+                  <td>{row.count}</td>
+                  <td>{money(row.value)}</td>
+                  <td>{row.avgDays}d</td>
+                  <td style={{ color: row.oldestDays >= thresholdDays ? "var(--danger)" : undefined }}>
+                    {row.oldestDays}d
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {clean ? (
+        <div className="empty-state">
+          Nothing has gone quiet — every open opportunity has moved within {thresholdDays} days and is inside its close date.
+        </div>
+      ) : (
+        <>
+          <h2 style={{ fontSize: 15 }}>
+            Needs attention
+            {staleCount > worst.length && (
+              <span className="subtitle" style={{ fontSize: 12, fontWeight: 400 }}>
+                {" "}— worst {worst.length} of {staleCount}
+              </span>
+            )}
+          </h2>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Opportunity</th>
+                  <th>Customer</th>
+                  <th>Owner</th>
+                  <th>Value</th>
+                  <th>Stage</th>
+                  <th>In stage</th>
+                  <th>Past close</th>
+                </tr>
+              </thead>
+              <tbody>
+                {worst.map((d) => (
+                  <tr key={d.id}>
+                    <td>{d.title}</td>
+                    <td>{d.customer_name}</td>
+                    <td>{d.owner_name || "Unassigned"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{money(d.value)}</td>
+                    <td><span className="badge badge-neutral">{d.stage}</span></td>
+                    <td
+                      style={{
+                        whiteSpace: "nowrap",
+                        color: d.days_in_stage >= thresholdDays ? "var(--danger)" : undefined,
+                        fontWeight: d.days_in_stage >= thresholdDays ? 600 : 400,
+                      }}
+                    >
+                      {d.days_in_stage}d
+                    </td>
+                    <td style={{ whiteSpace: "nowrap", color: d.days_past_close > 0 ? "var(--danger)" : undefined }}>
+                      {d.days_past_close === null ? "no date" : d.days_past_close > 0 ? `${d.days_past_close}d` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function SalesDashboard() {
   const { money } = useAppSettings();
   const [stats, setStats] = useState(null);
@@ -80,6 +234,11 @@ export default function SalesDashboard() {
   const [targets, setTargets] = useState([]);
   const [pnl, setPnl] = useState(null);
   const [expensesReport, setExpensesReport] = useState(null);
+  const [aging, setAging] = useState(null);
+  const [thresholdDraft, setThresholdDraft] = useState("");
+  const [savingThreshold, setSavingThreshold] = useState(false);
+  const { user } = useAuth();
+  const isHrUser = user?.role === "admin" || user?.role === "hr";
   const [error, setError] = useState("");
   const now = new Date();
   const [periodType, setPeriodType] = useState("monthly");
@@ -110,9 +269,41 @@ export default function SalesDashboard() {
       .then(setExpensesReport)
       .catch((err) => setError(err.message));
 
+  const loadAging = () =>
+    api
+      .get("/deals/aging/summary")
+      .then((d) => {
+        setAging(d);
+        setThresholdDraft(String(d.thresholdDays));
+      })
+      // Aging is one card on a page of many; if it fails the rest of the
+      // dashboard should still be readable.
+      .catch(() => {});
+
+  const saveThreshold = async () => {
+    const days = Number(thresholdDraft);
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      setError("Stale-after must be a whole number of days between 1 and 365");
+      return;
+    }
+    setSavingThreshold(true);
+    setError("");
+    try {
+      const updated = await api.put("/deals/aging/settings", { stale_deal_days: days });
+      setAging(updated);
+      setThresholdDraft(String(updated.thresholdDays));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSavingThreshold(false);
+    }
+  };
+
   useEffect(() => {
     api.get("/sales/stats").then(setStats).catch((err) => setError(err.message));
     api.get("/sales/revenue-trend").then(setRevenueTrend).catch((err) => setError(err.message));
+    loadAging();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -217,6 +408,16 @@ export default function SalesDashboard() {
           </div>
         </div>
       </div>
+
+      <PipelineAging
+        aging={aging}
+        money={money}
+        isHr={isHrUser}
+        thresholdDraft={thresholdDraft}
+        setThresholdDraft={setThresholdDraft}
+        saveThreshold={saveThreshold}
+        savingThreshold={savingThreshold}
+      />
 
       {revenueTrend && <RevenueTrendChart thisYear={revenueTrend.thisYear} lastYear={revenueTrend.lastYear} months={revenueTrend.months} />}
 

@@ -6,6 +6,7 @@ const asyncHandler = require("../middleware/asyncHandler");
 const { getSalesTargetsReport, parsePeriod, periodDateRange } = require("../services/salesTargets");
 const { getExpenseSummary } = require("../services/expenseSummary");
 const { companyName } = require("../services/branding");
+const { AGING_COLUMNS, staleDealDays } = require("../services/dealAging");
 const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
@@ -124,10 +125,13 @@ router.get(
          ORDER BY o.created_at DESC`
       )
       .all();
+    const staleAfter = await staleDealDays();
     const opportunities = await db
       .prepare(
-        `SELECT d.title, d.customer_name, d.value, d.stage, d.expected_close_date,
-                (e.first_name || ' ' || e.last_name) AS owner_name, o.order_number AS linked_order_number
+        `SELECT d.title, d.customer_name, d.value, d.stage, d.expected_close_date, d.competitor,
+                substr(d.created_at, 1, 10) AS opened_on,
+                (e.first_name || ' ' || e.last_name) AS owner_name, o.order_number AS linked_order_number,
+                ${AGING_COLUMNS}
          FROM deals d LEFT JOIN employees e ON e.id = d.owner_id LEFT JOIN orders o ON o.deal_id = d.id
          ORDER BY e.last_name, e.first_name, d.created_at DESC`
       )
@@ -194,12 +198,34 @@ router.get(
         { header: "Owner", key: "owner_name", width: 24 },
         { header: "Title", key: "title", width: 26 },
         { header: "Customer", key: "customer_name", width: 22 },
+        { header: "Competitor", key: "competitor", width: 18 },
         { header: "Value", key: "value", width: 14 },
+        { header: "Opened", key: "opened_on", width: 12 },
+        { header: "Age (days)", key: "age_days", width: 11 },
+        { header: "Days In Stage", key: "days_in_stage", width: 13 },
         { header: "Expected Close", key: "expected_close_date", width: 16 },
+        { header: "Days Past Close", key: "days_past_close", width: 15 },
+        { header: "Ageing Flag", key: "aging_flag", width: 16 },
         { header: "Order #", key: "linked_order_number", width: 14 },
         { header: "Stage", key: "stage", width: 14 },
       ],
-      opportunities.map((r) => ({ ...r, owner_name: r.owner_name || "Unassigned" }))
+      opportunities.map((r) => {
+        const open = !["won", "lost"].includes(r.stage);
+        // Spelled out rather than left as a number, so the spreadsheet can be
+        // filtered on the flag without anyone rebuilding the rule in Excel.
+        const flags = [];
+        if (open && r.days_in_stage >= staleAfter) flags.push(`STALLED ${staleAfter}d+`);
+        if (open && r.days_past_close !== null && r.days_past_close > 0) flags.push("PAST CLOSE");
+        if (open && (r.expected_close_date === null || r.expected_close_date === "")) flags.push("NO CLOSE DATE");
+        return {
+          ...r,
+          owner_name: r.owner_name || "Unassigned",
+          competitor: r.competitor || "—",
+          expected_close_date: r.expected_close_date || "—",
+          days_past_close: r.days_past_close === null ? "—" : r.days_past_close,
+          aging_flag: flags.length ? flags.join(" + ") : open ? "OK" : "—",
+        };
+      })
     );
 
     addSheet(

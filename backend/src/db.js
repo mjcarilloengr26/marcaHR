@@ -342,6 +342,11 @@ CREATE TABLE IF NOT EXISTS deals (
   owner_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   expected_close_date TEXT,
   notes TEXT,
+  competitor TEXT,
+  -- When the deal last moved stage. "Days in stage" is the question a pipeline
+  -- review actually asks, and created_at cannot answer it: a deal opened in
+  -- January and pushed to Proposal yesterday is not a stale proposal.
+  stage_changed_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
@@ -480,6 +485,11 @@ CREATE TABLE IF NOT EXISTS app_settings (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   currency_code TEXT NOT NULL DEFAULT 'PHP',
   language TEXT NOT NULL DEFAULT 'en',
+  -- How long an open opportunity may sit in one stage before it is called
+  -- stale. Configurable because it is a sales-cycle judgement, not a constant:
+  -- a 30-day rule that fits fast-moving supply quotes would flag every
+  -- long-lead engineering bid as a failure.
+  stale_deal_days INTEGER NOT NULL DEFAULT 30,
   updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
   updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
@@ -689,6 +699,16 @@ async function ensureAssetMarketValue() {
   await pool.query("ALTER TABLE employee_assets ADD COLUMN IF NOT EXISTS market_value REAL");
 }
 
+// deals and app_settings both predate stale-deal tracking, and CREATE TABLE
+// IF NOT EXISTS won't add a column to a table that already exists. Existing
+// deals get their created_at as the stage date — the most honest available
+// answer, since nothing recorded when they last moved.
+async function ensureDealAging() {
+  await pool.query("ALTER TABLE deals ADD COLUMN IF NOT EXISTS stage_changed_at TEXT");
+  await pool.query("UPDATE deals SET stage_changed_at = created_at WHERE stage_changed_at IS NULL");
+  await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS stale_deal_days INTEGER NOT NULL DEFAULT 30");
+}
+
 async function ensureBoardCardAssignees() {
   await pool.query(
     `INSERT INTO board_card_assignees (card_id, employee_id)
@@ -873,6 +893,7 @@ db.migrate = function () {
       .then(() => ensurePayrollPeriodHalf())
       .then(() => ensureBoardCardAssignees())
       .then(() => ensureAssetMarketValue())
+      .then(() => ensureDealAging())
       .then(() => ensureExpenseType())
       .then(() => ensurePayrollTimeSettings())
       .then(() => ensurePayrollNightDifferential())

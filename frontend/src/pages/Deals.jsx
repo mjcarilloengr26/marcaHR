@@ -9,6 +9,30 @@ import SortTh from "../components/SortTh";
 const emptyForm = { title: "", customer_name: "", value: "", stage: "lead", owner_id: "", expected_close_date: "", notes: "", competitor: "" };
 const STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"];
 
+// Days in the current stage is the number a pipeline review acts on; total age
+// is context, so it sits underneath in small type rather than competing.
+// Won and lost deals are finished, so they show nothing at all.
+function AgingCell({ deal, staleAfter }) {
+  if (["won", "lost"].includes(deal.stage)) return <span>—</span>;
+
+  const stalled = deal.days_in_stage >= staleAfter;
+  const pastClose = deal.days_past_close !== null && deal.days_past_close > 0;
+  const colour = stalled || pastClose ? "var(--danger)" : undefined;
+
+  return (
+    <div style={{ whiteSpace: "nowrap" }}>
+      <span style={{ color: colour, fontWeight: stalled || pastClose ? 600 : 400 }}>
+        {deal.days_in_stage}d in {deal.stage}
+      </span>
+      <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>
+        {deal.age_days}d old
+        {pastClose && <span style={{ color: "var(--danger)" }}> · {deal.days_past_close}d past close</span>}
+        {!pastClose && deal.days_past_close === null && " · no close date"}
+      </div>
+    </div>
+  );
+}
+
 export default function Deals() {
   const { money } = useAppSettings();
   const { user } = useAuth();
@@ -22,11 +46,18 @@ export default function Deals() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
+  // The staleness threshold is set on the Sales Dashboard; the list reads it so
+  // both pages agree on what counts as stalled.
+  const [staleAfter, setStaleAfter] = useState(30);
 
   const load = () => api.get("/deals").then(setDeals).catch((err) => setError(err.message));
 
   useEffect(() => {
     load();
+    api
+      .get("/deals/aging/summary")
+      .then((d) => setStaleAfter(d.thresholdDays))
+      .catch(() => {});
     if (isHr) api.get("/employees").then(setEmployees).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -148,6 +179,7 @@ export default function Deals() {
               <SortTh label="Value" sortKey="value" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Owner" sortKey="owner_name" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Expected close" sortKey="expected_close_date" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Aging" sortKey="days_in_stage" toggleSort={toggleSort} arrow={arrow} />
               <th>Order</th>
               <SortTh label="Stage" sortKey="stage" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
@@ -161,7 +193,7 @@ export default function Deals() {
                 <td>{d.competitor || "—"}</td>
                 <td>{money(d.value)}</td>
                 <td>{d.owner_name || "—"}</td>
-                <td>{d.expected_close_date || "—"}</td>
+                <td><AgingCell deal={d} staleAfter={staleAfter} /></td>
                 <td>{d.linked_order_number || "—"}</td>
                 <td>
                   <select value={d.stage} onChange={(e) => quickSetStage(d.id, e.target.value)} style={{ width: "auto" }}>

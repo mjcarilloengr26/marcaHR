@@ -3,6 +3,7 @@ const express = require("express");
 const cors = require("cors");
 
 const db = require("./db");
+const { scheduleStaleDealDigest } = require("./services/staleDealDigest");
 const { firstRunSetup } = require("./firstRun");
 
 const authRoutes = require("./routes/auth.routes");
@@ -133,6 +134,7 @@ async function start() {
   db.prepare("SELECT 1 AS ok").get().catch(() => {});
 
   keepWarm();
+  scheduleStaleDealDigest();
 }
 
 // Render's free plan stops the instance after ~15 minutes with no inbound

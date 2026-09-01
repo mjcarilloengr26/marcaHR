@@ -1,8 +1,9 @@
 const express = require("express");
 const db = require("../db");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
+const { AGING_COLUMNS, agingSummary, staleDeals } = require("../services/dealAging");
 
 const router = express.Router();
 
@@ -56,7 +57,8 @@ router.get(
     if (!isHr && !isSales) return res.status(403).json({ error: "Insufficient permissions" });
 
     const { stage, owner_id } = req.query;
-    let sql = `SELECT d.*, (e.first_name || ' ' || e.last_name) AS owner_name, o.order_number AS linked_order_number
+    let sql = `SELECT d.*, (e.first_name || ' ' || e.last_name) AS owner_name, o.order_number AS linked_order_number,
+             ${AGING_COLUMNS}
              FROM deals d LEFT JOIN employees e ON e.id = d.owner_id LEFT JOIN orders o ON o.deal_id = d.id WHERE 1=1`;
     const params = [];
 
@@ -136,9 +138,15 @@ router.put(
     // opportunity can't hand it to someone else via this endpoint.
     const owner_id = isHr && req.body?.owner_id !== undefined ? req.body.owner_id || null : existing.owner_id;
 
+    // Only a stage move restarts the days-in-stage clock. Correcting a typo in
+    // the title must not make a three-week-old proposal look fresh.
+    const nextStage = stage || existing.stage;
+    const stageMoved = nextStage !== existing.stage;
+
     await db
       .prepare(
-        `UPDATE deals SET title = ?, customer_name = ?, value = ?, stage = ?, owner_id = ?, expected_close_date = ?, notes = ?, competitor = ?
+        `UPDATE deals SET title = ?, customer_name = ?, value = ?, stage = ?, owner_id = ?, expected_close_date = ?, notes = ?, competitor = ?,
+            stage_changed_at = CASE WHEN ? THEN to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') ELSE stage_changed_at END
      WHERE id = ?`
       )
       .run(
@@ -150,6 +158,7 @@ router.put(
         expected_close_date !== undefined ? expected_close_date : existing.expected_close_date,
         notes !== undefined ? notes : existing.notes,
         competitor !== undefined ? competitor?.trim() || null : existing.competitor,
+        stageMoved,
         req.params.id
       );
 
@@ -188,6 +197,51 @@ router.delete(
 
     await db.prepare("DELETE FROM deals WHERE id = ?").run(req.params.id);
     res.status(204).end();
+  })
+);
+
+// Pipeline aging for the Sales Dashboard. Read-only and HR/admin-or-sales, the
+// same audience that can already see the pipeline itself.
+router.get(
+  "/aging/summary",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const isHr = ["admin", "hr"].includes(req.user.role);
+    if (!isHr && !(await isSalesEmployee(req))) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+    const override = req.query.threshold_days ? Number(req.query.threshold_days) : null;
+    const threshold = Number.isFinite(override) && override > 0 ? override : null;
+    res.json(await agingSummary(threshold));
+  })
+);
+
+router.get(
+  "/aging/stale",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const isHr = ["admin", "hr"].includes(req.user.role);
+    if (!isHr && !(await isSalesEmployee(req))) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+    res.json(await staleDeals());
+  })
+);
+
+// The staleness threshold lives here rather than with currency and language:
+// it is a sales-cycle judgement, and the app-settings GET is unauthenticated
+// for the sign-in screen, which is no place for pipeline configuration.
+router.put(
+  "/aging/settings",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const days = Number(req.body?.stale_deal_days);
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      return res.status(400).json({ error: "stale_deal_days must be a whole number between 1 and 365" });
+    }
+    await db.prepare("UPDATE app_settings SET stale_deal_days = ? WHERE id = 1").run(days);
+    res.json(await agingSummary(days));
   })
 );
 
