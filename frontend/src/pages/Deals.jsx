@@ -238,7 +238,7 @@ export default function Deals() {
               </div>
               <div className="form-row">
                 <label>Value</label>
-                <input type="number" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
+                <input type="number" step="0.01" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
               </div>
               {isHr && (
                 <div className="form-row">

@@ -43,9 +43,19 @@ export function AppSettingsProvider({ children }) {
     // and chart render loops.
     let fmt;
     try {
-      fmt = new Intl.NumberFormat(locale, { style: "currency", currency, maximumFractionDigits: 0 });
+      fmt = new Intl.NumberFormat(locale, {
+        style: "currency",
+        currency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
     } catch {
-      fmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "PHP", maximumFractionDigits: 0 });
+      fmt = new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "PHP",
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
     }
 
     let fmt2;
@@ -65,9 +75,12 @@ export function AppSettingsProvider({ children }) {
       });
     }
 
+    // Every figure carries centavos. Rounding to whole pesos on screen made
+    // an invoice for 1,234.56 read as 1,235, and a column of those does not
+    // add up to the total anyone is reconciling against.
     const money = (n) => fmt.format(Number(n || 0));
-    // Expense/liquidation figures are shown to the centavo, so they keep two
-    // decimals where the rest of the app rounds to whole units.
+    // Kept as its own name because expense and liquidation screens ask for it
+    // explicitly; identical to money() now that the default carries centavos.
     const moneyPrecise = (n) => fmt2.format(Number(n || 0));
 
     // Compact form for chart axes (₱1.2M), where a full figure would crowd

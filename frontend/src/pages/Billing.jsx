@@ -267,6 +267,7 @@ export default function Billing() {
                 <label>Amount{formOrderRemaining !== null && ` (up to ${money(formOrderRemaining)} remaining on this order)`}</label>
                 <input
                   type="number"
+                  step="0.01"
                   value={form.amount}
                   max={formOrderRemaining !== null ? formOrderRemaining : undefined}
                   onChange={(e) => setForm({ ...form, amount: e.target.value })}

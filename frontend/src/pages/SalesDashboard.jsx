@@ -792,7 +792,7 @@ export default function SalesDashboard() {
             </p>
             <div className="form-row">
               <label>Target amount</label>
-              <input type="number" value={targetAmount} onChange={(e) => setTargetAmount(e.target.value)} autoFocus />
+              <input type="number" step="0.01" value={targetAmount} onChange={(e) => setTargetAmount(e.target.value)} autoFocus />
             </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setEditingTarget(null)}>Cancel</button>

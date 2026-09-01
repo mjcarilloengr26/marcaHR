@@ -394,6 +394,7 @@ export default function Payroll() {
                 <label>Bonuses</label>
                 <input
                   type="number"
+                  step="0.01"
                   value={editForm.bonuses}
                   onChange={(e) => setEditForm({ ...editForm, bonuses: e.target.value })}
                 />
@@ -402,6 +403,7 @@ export default function Payroll() {
                 <label>Overtime pay</label>
                 <input
                   type="number"
+                  step="0.01"
                   value={editForm.overtime_pay}
                   onChange={(e) => setEditForm({ ...editForm, overtime_pay: e.target.value })}
                 />
@@ -410,6 +412,7 @@ export default function Payroll() {
                 <label>Night differential pay</label>
                 <input
                   type="number"
+                  step="0.01"
                   value={editForm.night_differential_pay}
                   onChange={(e) => setEditForm({ ...editForm, night_differential_pay: e.target.value })}
                 />
@@ -423,6 +426,7 @@ export default function Payroll() {
                 <label>SSS</label>
                 <input
                   type="number"
+                  step="0.01"
                   value={editForm.deduction_sss}
                   onChange={(e) => setEditForm({ ...editForm, deduction_sss: e.target.value })}
                 />
@@ -431,6 +435,7 @@ export default function Payroll() {
                 <label>HDMF (Pag-IBIG)</label>
                 <input
                   type="number"
+                  step="0.01"
                   value={editForm.deduction_hdmf}
                   onChange={(e) => setEditForm({ ...editForm, deduction_hdmf: e.target.value })}
                 />
@@ -439,6 +444,7 @@ export default function Payroll() {
                 <label>PhilHealth</label>
                 <input
                   type="number"
+                  step="0.01"
                   value={editForm.deduction_philhealth}
                   onChange={(e) => setEditForm({ ...editForm, deduction_philhealth: e.target.value })}
                 />
@@ -447,6 +453,7 @@ export default function Payroll() {
                 <label>Taxes</label>
                 <input
                   type="number"
+                  step="0.01"
                   value={editForm.deduction_taxes}
                   onChange={(e) => setEditForm({ ...editForm, deduction_taxes: e.target.value })}
                 />
@@ -455,6 +462,7 @@ export default function Payroll() {
                 <label>Loans</label>
                 <input
                   type="number"
+                  step="0.01"
                   value={editForm.deduction_loans}
                   onChange={(e) => setEditForm({ ...editForm, deduction_loans: e.target.value })}
                 />
@@ -463,6 +471,7 @@ export default function Payroll() {
                 <label>Cash advances</label>
                 <input
                   type="number"
+                  step="0.01"
                   value={editForm.deduction_cash_advances}
                   onChange={(e) => setEditForm({ ...editForm, deduction_cash_advances: e.target.value })}
                 />
@@ -482,6 +491,7 @@ export default function Payroll() {
               <label>Final pay override (optional)</label>
               <input
                 type="number"
+                step="0.01"
                 placeholder={`Leave blank to auto-calculate (${money(
                   (Number(editForm.base_salary) || 0) +
                   (Number(editForm.bonuses) || 0) +

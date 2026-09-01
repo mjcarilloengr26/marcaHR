@@ -170,7 +170,7 @@ export default function Orders() {
               </div>
               <div className="form-row">
                 <label>Amount</label>
-                <input type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+                <input type="number" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
               </div>
               <div className="form-row">
                 <label>Owner</label>

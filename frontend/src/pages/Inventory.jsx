@@ -552,6 +552,7 @@ export default function Inventory() {
                 <label>Unit cost ({currencySymbol})</label>
                 <input
                   type="number"
+                  step="0.01"
                   value={form.unit_cost}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, unit_cost: e.target.value, unit_price: priceFromMargin(e.target.value, f.margin, f.unit_price) }))
@@ -580,6 +581,7 @@ export default function Inventory() {
                 <label>Unit price ({currencySymbol})</label>
                 <input
                   type="number"
+                  step="0.01"
                   value={form.unit_price}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, unit_price: e.target.value, margin: marginFromPrice(f.unit_cost, e.target.value, f.margin) }))

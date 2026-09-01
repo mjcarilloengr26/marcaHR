@@ -200,7 +200,7 @@ export default function Employees() {
               </div>
               <div className="form-row">
                 <label>Base salary</label>
-                <input type="number" value={form.base_salary} onChange={handleChange("base_salary")} />
+                <input type="number" step="0.01" value={form.base_salary} onChange={handleChange("base_salary")} />
               </div>
               <div className="form-row">
                 <label>Pay schedule</label>

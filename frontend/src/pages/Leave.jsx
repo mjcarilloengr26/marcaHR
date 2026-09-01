@@ -548,7 +548,7 @@ export default function Leave() {
             <p className="subtitle" style={{ marginTop: -8 }}>{currentYear}</p>
             <div className="form-row">
               <label>Allocated days</label>
-              <input type="number" min="0" value={balanceAmount} onChange={(e) => setBalanceAmount(e.target.value)} autoFocus />
+              <input type="number" step="0.5" min="0" value={balanceAmount} onChange={(e) => setBalanceAmount(e.target.value)} autoFocus />
             </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setEditingBalance(null)}>Cancel</button>
