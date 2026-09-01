@@ -125,6 +125,8 @@ export default function Orders() {
               <th>From opportunity</th>
               <SortTh label="Order date" sortKey="order_date" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Raised by" sortKey="created_by_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Last updated by" sortKey="status_changed_by_name" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
           </thead>
@@ -143,6 +145,21 @@ export default function Orders() {
                       <option key={s} value={s}>{s}</option>
                     ))}
                   </select>
+                </td>
+                <td>{o.created_by_name || "—"}</td>
+                <td>
+                  {o.status_changed_by_name ? (
+                    <>
+                      {o.status_changed_by_name}
+                      {o.status_changed_at && (
+                        <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>
+                          {o.status_changed_at.slice(0, 10)} · {o.status}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <span className="subtitle" style={{ margin: 0 }}>—</span>
+                  )}
                 </td>
                 <td style={{ display: "flex", gap: 6 }}>
                   <button className="btn btn-sm btn-secondary" onClick={() => openEdit(o)}>Edit</button>

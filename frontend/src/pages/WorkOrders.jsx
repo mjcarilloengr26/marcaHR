@@ -147,6 +147,8 @@ export default function WorkOrders() {
               <SortTh label="Priority" sortKey="priority" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Scheduled" sortKey="scheduled_date" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Raised by" sortKey="created_by_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Last updated by" sortKey="status_changed_by_name" toggleSort={toggleSort} arrow={arrow} />
               {isHr && <th></th>}
             </tr>
           </thead>
@@ -165,6 +167,21 @@ export default function WorkOrders() {
                       <option key={s} value={s}>{s.replace("_", " ")}</option>
                     ))}
                   </select>
+                </td>
+                <td>{w.created_by_name || "—"}</td>
+                <td>
+                  {w.status_changed_by_name ? (
+                    <>
+                      {w.status_changed_by_name}
+                      {w.status_changed_at && (
+                        <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>
+                          {w.status_changed_at.slice(0, 10)} · {w.status}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <span className="subtitle" style={{ margin: 0 }}>—</span>
+                  )}
                 </td>
                 {isHr && (
                   <td style={{ display: "flex", gap: 6 }}>

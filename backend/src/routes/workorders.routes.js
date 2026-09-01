@@ -6,12 +6,18 @@ const asyncHandler = require("../middleware/asyncHandler");
 
 const router = express.Router();
 
+const nowStamp = () => new Date().toISOString().slice(0, 19).replace("T", " ");
+
 const SELECT_BASE = `
   SELECT w.*,
     (asg.first_name || ' ' || asg.last_name) AS assigned_to_name,
+    (c.first_name || ' ' || c.last_name) AS created_by_name,
+    (s.first_name || ' ' || s.last_name) AS status_changed_by_name,
     o.order_number
   FROM work_orders w
   LEFT JOIN employees asg ON asg.id = w.assigned_to
+  LEFT JOIN employees c ON c.id = w.created_by
+  LEFT JOIN employees s ON s.id = w.status_changed_by
   LEFT JOIN orders o ON o.id = w.order_id
 `;
 
@@ -47,8 +53,9 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
   try {
     const info = await db
       .prepare(
-        `INSERT INTO work_orders (work_order_number, title, customer_name, description, address, order_id, assigned_to, priority, status, scheduled_date, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO work_orders (work_order_number, title, customer_name, description, address, order_id, assigned_to, priority, status, scheduled_date, notes,
+                                  created_by, status_changed_by, status_changed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         work_order_number,
@@ -61,7 +68,10 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
         priority || "medium",
         status,
         scheduled_date || null,
-        notes || null
+        notes || null,
+        req.user.employee_id || null,
+        req.user.employee_id || null,
+        nowStamp()
       );
     if (assigned_to) notifyWorkOrderAssigned({ employee_id: assigned_to, title });
     res.status(201).json(await db.prepare(`${SELECT_BASE} WHERE w.id = ?`).get(info.lastInsertRowid));
@@ -98,10 +108,20 @@ router.put("/:id", requireAuth, asyncHandler(async (req, res) => {
   const status = body.status || existing.status;
   const completed_at = status === "completed" && existing.status !== "completed" ? new Date().toISOString() : existing.completed_at;
 
+  // Only a status move re-stamps who last advanced it, so editing an address
+  // does not overwrite the record of who completed the job.
+  const statusMoved = status !== existing.status;
+
   await db.prepare(
     `UPDATE work_orders SET title = ?, customer_name = ?, description = ?, address = ?, order_id = ?, assigned_to = ?,
-     priority = ?, status = ?, scheduled_date = ?, notes = ?, completed_at = ? WHERE id = ?`
-  ).run(title, customer_name, description, address, order_id, assigned_to, priority, status, scheduled_date, notes, completed_at, req.params.id);
+     priority = ?, status = ?, scheduled_date = ?, notes = ?, completed_at = ?,
+     status_changed_by = ?, status_changed_at = ? WHERE id = ?`
+  ).run(
+    title, customer_name, description, address, order_id, assigned_to, priority, status, scheduled_date, notes, completed_at,
+    statusMoved ? req.user.employee_id || null : existing.status_changed_by,
+    statusMoved ? nowStamp() : existing.status_changed_at,
+    req.params.id
+  );
 
   if (assigned_to && assigned_to !== existing.assigned_to) {
     notifyWorkOrderAssigned({ employee_id: assigned_to, title });

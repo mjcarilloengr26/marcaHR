@@ -211,6 +211,8 @@ export default function Billing() {
               <SortTh label="Issue date" sortKey="issue_date" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Due date" sortKey="due_date" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Raised by" sortKey="created_by_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Last updated by" sortKey="status_changed_by_name" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
           </thead>
@@ -229,6 +231,21 @@ export default function Billing() {
                       <option key={s} value={s}>{s}</option>
                     ))}
                   </select>
+                </td>
+                <td>{inv.created_by_name || "—"}</td>
+                <td>
+                  {inv.status_changed_by_name ? (
+                    <>
+                      {inv.status_changed_by_name}
+                      {inv.status_changed_at && (
+                        <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>
+                          {inv.status_changed_at.slice(0, 10)} · {inv.status}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <span className="subtitle" style={{ margin: 0 }}>—</span>
+                  )}
                 </td>
                 <td style={{ display: "flex", gap: 6 }}>
                   <button className="btn btn-sm btn-secondary" onClick={() => openEdit(inv)}>Edit</button>

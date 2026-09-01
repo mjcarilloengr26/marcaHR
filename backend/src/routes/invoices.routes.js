@@ -5,10 +5,16 @@ const asyncHandler = require("../middleware/asyncHandler");
 
 const router = express.Router();
 
+const nowStamp = () => new Date().toISOString().slice(0, 19).replace("T", " ");
+
 const SELECT_BASE = `
-  SELECT i.*, o.order_number
+  SELECT i.*, o.order_number,
+    (c.first_name || ' ' || c.last_name) AS created_by_name,
+    (s.first_name || ' ' || s.last_name) AS status_changed_by_name
   FROM invoices i
   LEFT JOIN orders o ON o.id = i.order_id
+  LEFT JOIN employees c ON c.id = i.created_by
+  LEFT JOIN employees s ON s.id = i.status_changed_by
 `;
 
 // The remaining unbilled balance on an order: its total amount minus every
@@ -58,10 +64,23 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
   try {
     const info = await db
       .prepare(
-        `INSERT INTO invoices (invoice_number, order_id, customer_name, amount, status, issue_date, due_date, notes)
-         VALUES (?, ?, ?, ?, ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?)`
+        `INSERT INTO invoices (invoice_number, order_id, customer_name, amount, status, issue_date, due_date, notes,
+                               created_by, status_changed_by, status_changed_at)
+         VALUES (?, ?, ?, ?, ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?, ?)`
       )
-      .run(invoice_number, order_id || null, customer_name, amount || 0, status || "draft", issue_date || null, due_date || null, notes || null);
+      .run(
+        invoice_number,
+        order_id || null,
+        customer_name,
+        amount || 0,
+        status || "draft",
+        issue_date || null,
+        due_date || null,
+        notes || null,
+        req.user.employee_id || null,
+        req.user.employee_id || null,
+        nowStamp()
+      );
     res.status(201).json(await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(info.lastInsertRowid));
   } catch (err) {
     res.status(400).json({ error: "An invoice with that number already exists" });
@@ -125,10 +144,13 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
   }
 
   const paid_date = status === "paid" && existing.status !== "paid" ? new Date().toISOString().slice(0, 10) : existing.paid_date;
+  const invStatusMoved = (status || existing.status) !== existing.status;
+
   try {
     await db.prepare(
       `UPDATE invoices SET invoice_number = ?, order_id = ?, customer_name = ?, amount = ?, status = ?,
-       issue_date = ?, due_date = ?, notes = ?, paid_date = ? WHERE id = ?`
+       issue_date = ?, due_date = ?, notes = ?, paid_date = ?,
+       status_changed_by = ?, status_changed_at = ? WHERE id = ?`
     ).run(
       invoice_number ?? existing.invoice_number,
       order_id !== undefined ? order_id || null : existing.order_id,
@@ -139,6 +161,10 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
       due_date !== undefined ? due_date : existing.due_date,
       notes !== undefined ? notes : existing.notes,
       paid_date,
+      // Only re-stamped when the status actually moves — the person who marked
+      // an invoice paid should not be replaced by whoever later fixed a typo.
+      invStatusMoved ? req.user.employee_id || null : existing.status_changed_by,
+      invStatusMoved ? nowStamp() : existing.status_changed_at,
       req.params.id
     );
   } catch (err) {

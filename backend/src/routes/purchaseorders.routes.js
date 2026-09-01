@@ -6,9 +6,14 @@ const asyncHandler = require("../middleware/asyncHandler");
 const router = express.Router();
 
 const SELECT_BASE = `
-  SELECT p.*, (e.first_name || ' ' || e.last_name) AS requested_by_name
+  SELECT p.*, (e.first_name || ' ' || e.last_name) AS requested_by_name,
+         (a.first_name || ' ' || a.last_name) AS approved_by_name,
+         w.work_order_number, w.title AS work_order_title, w.customer_name AS work_order_customer,
+         w.status AS work_order_status
   FROM purchase_orders p
   LEFT JOIN employees e ON e.id = p.requested_by
+  LEFT JOIN employees a ON a.id = p.approved_by
+  LEFT JOIN work_orders w ON w.id = p.work_order_id
 `;
 
 router.get("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
@@ -23,15 +28,15 @@ router.get("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req
 }));
 
 router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
-  const { po_number, vendor_name, description, amount, requested_by, order_date, expected_delivery_date, notes } = req.body || {};
+  const { po_number, vendor_name, description, amount, requested_by, order_date, expected_delivery_date, notes, work_order_id } = req.body || {};
   if (!po_number || !vendor_name) {
     return res.status(400).json({ error: "po_number and vendor_name are required" });
   }
   try {
     const info = await db
       .prepare(
-        `INSERT INTO purchase_orders (po_number, vendor_name, description, amount, status, requested_by, order_date, expected_delivery_date, notes)
-         VALUES (?, ?, ?, ?, 'draft', ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?)`
+        `INSERT INTO purchase_orders (po_number, vendor_name, description, amount, status, requested_by, order_date, expected_delivery_date, notes, work_order_id)
+         VALUES (?, ?, ?, ?, 'draft', ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?)`
       )
       .run(
         po_number,
@@ -41,22 +46,32 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
         requested_by || req.user.employee_id || null,
         order_date || null,
         expected_delivery_date || null,
-        notes || null
+        notes || null,
+        work_order_id || null
       );
     res.status(201).json(await db.prepare(`${SELECT_BASE} WHERE p.id = ?`).get(info.lastInsertRowid));
   } catch (err) {
-    res.status(400).json({ error: "A purchase order with that number already exists" });
+    // Only a unique-violation is actually a duplicate number. Reporting every
+    // failure that way sent an earlier debugging session chasing the wrong
+    // thing when the real error was a foreign key.
+    if (err.code === "23505") {
+      return res.status(400).json({ error: "A purchase order with that number already exists" });
+    }
+    if (err.code === "23503") {
+      return res.status(400).json({ error: "That work order does not exist" });
+    }
+    throw err;
   }
 }));
 
 router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
   const existing = await db.prepare("SELECT * FROM purchase_orders WHERE id = ?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "Purchase order not found" });
-  const { po_number, vendor_name, description, amount, order_date, expected_delivery_date, notes } = req.body || {};
+  const { po_number, vendor_name, description, amount, order_date, expected_delivery_date, notes, work_order_id } = req.body || {};
   try {
     await db.prepare(
       `UPDATE purchase_orders SET po_number = ?, vendor_name = ?, description = ?, amount = ?,
-       order_date = ?, expected_delivery_date = ?, notes = ? WHERE id = ?`
+       order_date = ?, expected_delivery_date = ?, notes = ?, work_order_id = ? WHERE id = ?`
     ).run(
       po_number ?? existing.po_number,
       vendor_name ?? existing.vendor_name,
@@ -65,10 +80,18 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
       order_date ?? existing.order_date,
       expected_delivery_date !== undefined ? expected_delivery_date : existing.expected_delivery_date,
       notes !== undefined ? notes : existing.notes,
+      // An empty string clears the link; omitting the field leaves it alone.
+      work_order_id !== undefined ? work_order_id || null : existing.work_order_id,
       req.params.id
     );
   } catch (err) {
-    return res.status(400).json({ error: "A purchase order with that number already exists" });
+    if (err.code === "23505") {
+      return res.status(400).json({ error: "A purchase order with that number already exists" });
+    }
+    if (err.code === "23503") {
+      return res.status(400).json({ error: "That work order does not exist" });
+    }
+    throw err;
   }
   res.json(await db.prepare(`${SELECT_BASE} WHERE p.id = ?`).get(req.params.id));
 }));
@@ -81,8 +104,30 @@ router.put("/:id/status", requireAuth, requireRole("admin", "hr"), asyncHandler(
   }
   const existing = await db.prepare("SELECT * FROM purchase_orders WHERE id = ?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "Purchase order not found" });
-  const received_date = status === "received" && existing.status !== "received" ? new Date().toISOString().slice(0, 10) : existing.received_date;
-  await db.prepare("UPDATE purchase_orders SET status = ?, received_date = ? WHERE id = ?").run(status, received_date, req.params.id);
+  const received_date =
+    status === "received" && existing.status !== "received"
+      ? new Date().toISOString().slice(0, 10)
+      : existing.received_date;
+
+  // Stamp the approver the first time it reaches approved, and keep that stamp
+  // through later moves to received — the person who authorised the spend does
+  // not change because the goods later turned up. Sending it back to draft or
+  // cancelling clears it, since what was approved no longer stands.
+  let approved_by = existing.approved_by;
+  let approved_at = existing.approved_at;
+  if (status === "approved" && existing.status !== "approved") {
+    approved_by = req.user.employee_id || null;
+    approved_at = new Date().toISOString().slice(0, 19).replace("T", " ");
+  } else if (status === "draft" || status === "submitted" || status === "cancelled") {
+    approved_by = null;
+    approved_at = null;
+  }
+
+  await db
+    .prepare(
+      "UPDATE purchase_orders SET status = ?, received_date = ?, approved_by = ?, approved_at = ? WHERE id = ?"
+    )
+    .run(status, received_date, approved_by, approved_at, req.params.id);
   res.json(await db.prepare(`${SELECT_BASE} WHERE p.id = ?`).get(req.params.id));
 }));
 

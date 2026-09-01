@@ -5,8 +5,9 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
+import { Link } from "react-router-dom";
 
-const emptyForm = { po_number: "", vendor_name: "", description: "", amount: "", order_date: "", expected_delivery_date: "", notes: "" };
+const emptyForm = { po_number: "", vendor_name: "", description: "", amount: "", order_date: "", expected_delivery_date: "", notes: "", work_order_id: "" };
 const STATUSES = ["draft", "submitted", "approved", "received", "cancelled"];
 
 export default function PurchaseOrders() {
@@ -19,9 +20,15 @@ export default function PurchaseOrders() {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
 
+  // Work orders to attribute a purchase to. Only ones still running are worth
+  // offering for a new PO, but a PO already attached to a finished job must
+  // keep showing it, so completed ones are merged back in below.
+  const [workOrders, setWorkOrders] = useState([]);
+
   const load = () => api.get("/purchase-orders").then(setPos).catch((err) => setError(err.message));
 
   useEffect(() => {
+    api.get("/work-orders").then(setWorkOrders).catch(() => {});
     load();
   }, []);
 
@@ -119,9 +126,12 @@ export default function PurchaseOrders() {
               <SortTh label="PO #" sortKey="po_number" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Vendor" sortKey="vendor_name" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Amount" sortKey="amount" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Work order" sortKey="work_order_number" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Order date" sortKey="order_date" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Expected delivery" sortKey="expected_delivery_date" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Raised by" sortKey="requested_by_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Approved by" sortKey="approved_by_name" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
           </thead>
@@ -131,9 +141,36 @@ export default function PurchaseOrders() {
                 <td>{po.po_number}</td>
                 <td>{po.vendor_name}</td>
                 <td>{money(po.amount)}</td>
+                <td>
+                  {po.work_order_number ? (
+                    <>
+                      <Link to="/work-orders" className="location-link">{po.work_order_number}</Link>
+                      <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>
+                        {po.work_order_title}
+                      </div>
+                    </>
+                  ) : (
+                    <span className="subtitle" style={{ margin: 0 }}>Not linked</span>
+                  )}
+                </td>
                 <td>{po.order_date}</td>
                 <td>{po.expected_delivery_date || "—"}</td>
                 <td><span className={`badge badge-${po.status}`}>{po.status}</span></td>
+                <td>{po.requested_by_name || "—"}</td>
+                <td>
+                  {po.approved_by_name ? (
+                    <>
+                      {po.approved_by_name}
+                      {po.approved_at && (
+                        <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>
+                          {po.approved_at.slice(0, 10)}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <span className="subtitle" style={{ margin: 0 }}>Not approved</span>
+                  )}
+                </td>
                 <td style={{ display: "flex", gap: 6 }}>
                   {po.status === "draft" && (
                     <button className="btn btn-sm" onClick={() => setStatus(po.id, "submitted")}>Submit</button>
@@ -186,6 +223,23 @@ export default function PurchaseOrders() {
             <div className="form-row">
               <label>Description</label>
               <textarea rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            </div>
+            <div className="form-row">
+              <label>Work order</label>
+              <select
+                value={form.work_order_id}
+                onChange={(e) => setForm({ ...form, work_order_id: e.target.value })}
+              >
+                <option value="">Not linked — general purchase</option>
+                {workOrders.map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.work_order_number} — {w.title} ({w.customer_name})
+                  </option>
+                ))}
+              </select>
+              <span className="subtitle" style={{ fontSize: 12 }}>
+                Ties this spend to the job that caused it. Leave unlinked for overheads.
+              </span>
             </div>
             <div className="form-row">
               <label>Notes</label>

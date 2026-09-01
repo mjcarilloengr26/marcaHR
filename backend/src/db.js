@@ -356,6 +356,9 @@ CREATE TABLE IF NOT EXISTS orders (
   customer_name TEXT NOT NULL,
   amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'placed' CHECK(status IN ('placed','processing','shipped','delivered','cancelled')),
+  created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  status_changed_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  status_changed_at TEXT,
   owner_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   deal_id INTEGER UNIQUE REFERENCES deals(id) ON DELETE SET NULL,
   order_date TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
@@ -385,6 +388,9 @@ CREATE TABLE IF NOT EXISTS work_orders (
   assigned_to INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   priority TEXT NOT NULL DEFAULT 'medium' CHECK(priority IN ('low','medium','high','urgent')),
   status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','assigned','in_progress','completed','cancelled')),
+  created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  status_changed_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  status_changed_at TEXT,
   scheduled_date TEXT,
   completed_at TEXT,
   notes TEXT,
@@ -398,6 +404,9 @@ CREATE TABLE IF NOT EXISTS invoices (
   customer_name TEXT NOT NULL,
   amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','sent','paid','overdue','cancelled')),
+  created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  status_changed_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  status_changed_at TEXT,
   issue_date TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
   due_date TEXT,
   paid_date TEXT,
@@ -413,6 +422,17 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','submitted','approved','received','cancelled')),
   requested_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  -- What the purchase was for. Completes the chain the rest of the app already
+  -- has — opportunity to order to work order — so spend can be traced back to
+  -- the job that caused it. Nullable on purpose: office supplies and general
+  -- overheads are real purchases with no job behind them, and forcing a link
+  -- would only produce a fake one.
+  work_order_id INTEGER REFERENCES work_orders(id) ON DELETE SET NULL,
+  -- Who signed the spend off, and when. requested_by above already records who
+  -- raised it, so together they answer the two questions an audit asks of any
+  -- purchase: who wanted this, and who agreed to pay for it.
+  approved_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  approved_at TEXT,
   order_date TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
   expected_delivery_date TEXT,
   received_date TEXT,
@@ -807,6 +827,25 @@ async function widenRealColumns() {
   if (changed > 0) console.log(`Widened ${changed} column(s) off REAL so amounts keep their decimals`);
 }
 
+// purchase_orders predates the work-order link, and CREATE TABLE IF NOT EXISTS
+// will not add a column to a table that already exists.
+async function ensurePurchaseOrderWorkOrder() {
+  await pool.query("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS work_order_id INTEGER REFERENCES work_orders(id) ON DELETE SET NULL");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_purchase_orders_work_order ON purchase_orders(work_order_id)");
+  await pool.query("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES employees(id) ON DELETE SET NULL");
+  await pool.query("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS approved_at TEXT");
+
+  // Orders, invoices and work orders have no approval step of their own, so
+  // the pair that answers the same question is who raised it and who last
+  // moved it — which in practice is whoever marked it delivered, paid or
+  // completed. The current status names which of those it was.
+  for (const table of ["orders", "invoices", "work_orders"]) {
+    await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL`);
+    await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS status_changed_by INTEGER REFERENCES employees(id) ON DELETE SET NULL`);
+    await pool.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS status_changed_at TEXT`);
+  }
+}
+
 async function ensureBoardCardAssignees() {
   await pool.query(
     `INSERT INTO board_card_assignees (card_id, employee_id)
@@ -993,6 +1032,7 @@ db.migrate = function () {
       .then(() => ensureAssetMarketValue())
       .then(() => ensureDealAging())
       .then(() => widenRealColumns())
+      .then(() => ensurePurchaseOrderWorkOrder())
       .then(() => ensureExpenseType())
       .then(() => ensurePayrollTimeSettings())
       .then(() => ensurePayrollNightDifferential())

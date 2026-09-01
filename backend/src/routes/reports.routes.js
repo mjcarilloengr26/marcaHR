@@ -276,8 +276,14 @@ router.get(
       .prepare(
         `SELECT po.po_number, po.vendor_name, po.description, po.amount, po.status,
                 po.order_date, po.expected_delivery_date, po.received_date,
-                (e.first_name || ' ' || e.last_name) AS requested_by_name
-         FROM purchase_orders po LEFT JOIN employees e ON e.id = po.requested_by
+                po.approved_at,
+                (e.first_name || ' ' || e.last_name) AS requested_by_name,
+                (a.first_name || ' ' || a.last_name) AS approved_by_name,
+                w.work_order_number, w.title AS work_order_title, w.customer_name AS work_order_customer
+         FROM purchase_orders po
+         LEFT JOIN employees e ON e.id = po.requested_by
+         LEFT JOIN employees a ON a.id = po.approved_by
+         LEFT JOIN work_orders w ON w.id = po.work_order_id
          WHERE po.order_date BETWEEN ? AND ?
          ORDER BY po.order_date DESC`
       )
@@ -292,13 +298,30 @@ router.get(
       { header: "Vendor", key: "vendor_name", width: 22 },
       { header: "Description", key: "description", width: 28 },
       { header: "Amount", key: "amount", width: 14 },
+      { header: "Work Order", key: "work_order_number", width: 16 },
+      { header: "Work Order Title", key: "work_order_title", width: 30 },
+      { header: "Job Customer", key: "work_order_customer", width: 24 },
       { header: "Status", key: "status", width: 12 },
-      { header: "Requested By", key: "requested_by_name", width: 20 },
+      { header: "Raised By", key: "requested_by_name", width: 20 },
+      { header: "Approved By", key: "approved_by_name", width: 20 },
+      { header: "Approved On", key: "approved_at", width: 20 },
       { header: "Order Date", key: "order_date", width: 14 },
       { header: "Expected Delivery", key: "expected_delivery_date", width: 16 },
       { header: "Received Date", key: "received_date", width: 14 },
     ];
-    sheet.addRows(rows.map((r) => ({ ...r, requested_by_name: r.requested_by_name || "—" })));
+    sheet.addRows(
+      rows.map((r) => ({
+        ...r,
+        requested_by_name: r.requested_by_name || "—",
+        approved_by_name: r.approved_by_name || "NOT APPROVED",
+        approved_at: r.approved_at || "—",
+        // Spelled out rather than blank, so a filter on the column separates
+        // job-attributable spend from general overheads.
+        work_order_number: r.work_order_number || "UNLINKED",
+        work_order_title: r.work_order_title || "—",
+        work_order_customer: r.work_order_customer || "—",
+      }))
+    );
     sheet.getRow(1).font = { bold: true };
 
     await logRequestEvent(req, "export_excel", {
