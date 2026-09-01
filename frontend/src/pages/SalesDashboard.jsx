@@ -241,11 +241,14 @@ export default function SalesDashboard() {
   const isHrUser = user?.role === "admin" || user?.role === "hr";
   const [error, setError] = useState("");
   const now = new Date();
+  const [pnlPeriodType, setPnlPeriodType] = useState("yearly");
+  const [pnlPeriodIndex, setPnlPeriodIndex] = useState(0);
+  const [pnlYear, setPnlYear] = useState(now.getFullYear());
   const [periodType, setPeriodType] = useState("monthly");
   const [periodIndex, setPeriodIndex] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
-  const [expPeriodType, setExpPeriodType] = useState("monthly");
-  const [expPeriodIndex, setExpPeriodIndex] = useState(now.getMonth() + 1);
+  const [expPeriodType, setExpPeriodType] = useState("yearly");
+  const [expPeriodIndex, setExpPeriodIndex] = useState(0);
   const [expYear, setExpYear] = useState(now.getFullYear());
   const [editingTarget, setEditingTarget] = useState(null);
   const [targetAmount, setTargetAmount] = useState("");
@@ -259,7 +262,7 @@ export default function SalesDashboard() {
 
   const loadPnl = () =>
     api
-      .get(`/sales/profit-loss?period_type=${periodType}&year=${year}&index=${periodIndex}`)
+      .get(`/sales/profit-loss?period_type=${pnlPeriodType}&year=${pnlYear}&index=${pnlPeriodIndex}`)
       .then(setPnl)
       .catch((err) => setError(err.message));
 
@@ -308,9 +311,13 @@ export default function SalesDashboard() {
 
   useEffect(() => {
     loadTargets();
-    loadPnl();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodType, periodIndex, year]);
+
+  useEffect(() => {
+    loadPnl();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pnlPeriodType, pnlPeriodIndex, pnlYear]);
 
   useEffect(() => {
     loadExpensesReport();
@@ -322,6 +329,13 @@ export default function SalesDashboard() {
     if (type === "monthly") setPeriodIndex(now.getMonth() + 1);
     else if (type === "quarterly") setPeriodIndex(Math.floor(now.getMonth() / 3) + 1);
     else setPeriodIndex(0);
+  };
+
+  const changePnlPeriodType = (type) => {
+    setPnlPeriodType(type);
+    if (type === "monthly") setPnlPeriodIndex(now.getMonth() + 1);
+    else if (type === "quarterly") setPnlPeriodIndex(Math.floor(now.getMonth() / 3) + 1);
+    else setPnlPeriodIndex(0);
   };
 
   const changeExpPeriodType = (type) => {
@@ -416,32 +430,32 @@ export default function SalesDashboard() {
             <div>
               <h2>Profit &amp; Loss</h2>
               <p className="subtitle" style={{ margin: 0 }}>
-                Order revenue minus procurement, payroll, and operating expenses for {periodLabel(periodType, year, periodIndex)}
+                Order revenue minus procurement, payroll, and operating expenses for {periodLabel(pnlPeriodType, pnlYear, pnlPeriodIndex)}
               </p>
             </div>
             <div className="form-inline">
               <div className="form-row">
                 <label>Period</label>
-                <select value={periodType} onChange={(e) => changePeriodType(e.target.value)}>
+                <select value={pnlPeriodType} onChange={(e) => changePnlPeriodType(e.target.value)}>
                   <option value="monthly">Monthly</option>
                   <option value="quarterly">Quarterly</option>
                   <option value="yearly">Yearly</option>
                 </select>
               </div>
-              {periodType === "monthly" && (
+              {pnlPeriodType === "monthly" && (
                 <div className="form-row">
                   <label>Month</label>
-                  <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
+                  <select value={pnlPeriodIndex} onChange={(e) => setPnlPeriodIndex(Number(e.target.value))}>
                     {MONTH_NAMES.slice(1).map((name, i) => (
                       <option key={name} value={i + 1}>{name}</option>
                     ))}
                   </select>
                 </div>
               )}
-              {periodType === "quarterly" && (
+              {pnlPeriodType === "quarterly" && (
                 <div className="form-row">
                   <label>Quarter</label>
-                  <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
+                  <select value={pnlPeriodIndex} onChange={(e) => setPnlPeriodIndex(Number(e.target.value))}>
                     <option value={1}>Q1</option>
                     <option value={2}>Q2</option>
                     <option value={3}>Q3</option>
@@ -451,7 +465,7 @@ export default function SalesDashboard() {
               )}
               <div className="form-row">
                 <label>Year</label>
-                <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} />
+                <input type="number" value={pnlYear} onChange={(e) => setPnlYear(Number(e.target.value))} />
               </div>
             </div>
           </div>
