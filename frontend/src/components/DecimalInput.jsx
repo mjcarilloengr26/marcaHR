@@ -24,6 +24,7 @@ export default function DecimalInput({
   // "1234." that no number can represent.
   const [draft, setDraft] = useState(value === null || value === undefined ? "" : String(value));
   const emitted = useRef(draft);
+  const node = useRef(null);
 
   // Follow the prop when it changes from outside — opening an edit modal, a
   // form reset, a value recalculated elsewhere — but never while the difference
@@ -37,16 +38,31 @@ export default function DecimalInput({
   }, [value]);
 
   const handle = (e) => {
-    const raw = e.target.value;
+    // Numeric keypads in many locales send a comma for the decimal key. Taking
+    // it as a decimal point costs nothing and saves the person discovering that
+    // their keyboard's period key is the only one that works.
+    const raw = e.target.value.replace(",", ".");
 
     // Digits, at most one decimal point, and a leading minus where allowed.
     const pattern = allowNegative
       ? new RegExp(`^-?\\d*(\\.\\d{0,${decimals}})?$`)
       : new RegExp(`^\\d*(\\.\\d{0,${decimals}})?$`);
-    if (raw !== "" && !pattern.test(raw)) return; // reject the keystroke, keep the field as it was
+
+    if (raw !== "" && !pattern.test(raw)) {
+      // Refuse the keystroke — but put the field back to the last good text
+      // first. React will not re-render for an unchanged draft, so simply
+      // returning would leave the rejected character sitting in the DOM with
+      // state that disagrees. Every later keystroke would then build on text
+      // that keeps failing this test, and the field would look frozen.
+      if (node.current) node.current.value = draft;
+      return;
+    }
 
     setDraft(raw);
     emitted.current = raw;
+    // Keep the DOM in step when the sanitised text differs from what was typed
+    // (a comma became a point), since draft may be unchanged from React's view.
+    if (node.current && node.current.value !== raw) node.current.value = raw;
     // Call sites already written against a plain input keep working unchanged.
     onChange({ target: { value: raw } });
   };
@@ -65,6 +81,7 @@ export default function DecimalInput({
   return (
     <input
       {...rest}
+      ref={node}
       type="text"
       inputMode="decimal"
       value={draft}
