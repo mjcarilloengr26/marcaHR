@@ -4,6 +4,7 @@ import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
+import DecimalInput from "../components/DecimalInput";
 
 const emptyForm = { invoice_number: "", order_id: "", customer_name: "", amount: "", status: "draft", issue_date: "", due_date: "", notes: "" };
 const STATUSES = ["draft", "sent", "paid", "overdue", "cancelled"];
@@ -265,9 +266,7 @@ export default function Billing() {
               </div>
               <div className="form-row">
                 <label>Amount{formOrderRemaining !== null && ` (up to ${money(formOrderRemaining)} remaining on this order)`}</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   value={form.amount}
                   max={formOrderRemaining !== null ? formOrderRemaining : undefined}
                   onChange={(e) => setForm({ ...form, amount: e.target.value })}

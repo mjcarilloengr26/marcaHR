@@ -5,6 +5,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import SuggestInput from "../components/SuggestInput";
+import DecimalInput from "../components/DecimalInput";
 
 // Starting points only — the field stays free text, because the next thing a
 // company hands someone is never on anybody's list.
@@ -600,9 +601,7 @@ export default function Assets() {
                 </div>
                 <div className="form-row">
                   <label>Market value</label>
-                  <input
-                    type="number"
-                    step="0.01"
+                  <DecimalInput
                     min="0"
                     value={issuing.form.market_value}
                     onChange={(e) => setIssuing({ ...issuing, form: { ...issuing.form, market_value: e.target.value } })}
@@ -693,9 +692,7 @@ export default function Assets() {
               </div>
               <div className="form-row">
                 <label>Market value</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   min="0"
                   value={form.market_value}
                   onChange={(e) => setForm({ ...form, market_value: e.target.value })}

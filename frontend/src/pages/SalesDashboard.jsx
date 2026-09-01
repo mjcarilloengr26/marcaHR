@@ -7,6 +7,7 @@ import Meter from "../components/Meter";
 import RevenueTrendChart from "../components/RevenueTrendChart";
 import PieChart from "../components/PieChart";
 import BarChart from "../components/BarChart";
+import DecimalInput from "../components/DecimalInput";
 
 const MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -793,7 +794,7 @@ export default function SalesDashboard() {
             </p>
             <div className="form-row">
               <label>Target amount</label>
-              <input type="number" step="0.01" value={targetAmount} onChange={(e) => setTargetAmount(e.target.value)} autoFocus />
+              <DecimalInput value={targetAmount} onChange={(e) => setTargetAmount(e.target.value)} autoFocus />
             </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setEditingTarget(null)}>Cancel</button>

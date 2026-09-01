@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation, Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { compressImageFile } from "../utils/image";
+import DecimalInput from "../components/DecimalInput";
 
 // Matches the register: only "active" means the company's property is still out.
 const ASSET_STATUS_BADGE = { active: "active", returned: "approved", replaced: "draft" };
@@ -240,7 +241,7 @@ export default function EmployeeDetail() {
             </div>
             <div className="form-row">
               <label>Base salary</label>
-              <input type="number" step="0.01" value={form.base_salary || ""} onChange={handleChange("base_salary")} />
+              <DecimalInput value={form.base_salary || ""} onChange={handleChange("base_salary")} />
             </div>
             <div className="form-row">
               <label>Pay schedule</label>

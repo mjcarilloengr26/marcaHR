@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
+import DecimalInput from "../components/DecimalInput";
 
 const emptyForm = {
   first_name: "",
@@ -200,7 +201,7 @@ export default function Employees() {
               </div>
               <div className="form-row">
                 <label>Base salary</label>
-                <input type="number" step="0.01" value={form.base_salary} onChange={handleChange("base_salary")} />
+                <DecimalInput value={form.base_salary} onChange={handleChange("base_salary")} />
               </div>
               <div className="form-row">
                 <label>Pay schedule</label>

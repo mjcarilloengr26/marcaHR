@@ -6,6 +6,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { compressImageFile, readFileAsDataUrl } from "../utils/image";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
+import DecimalInput from "../components/DecimalInput";
 
 const EXPENSE_TYPE_OPTIONS = ["Operating Expenses", "Project Expenses"];
 const EXPENSE_TITLE_OPTIONS = [
@@ -346,9 +347,7 @@ export default function Expenses() {
             )}
             <div className="form-row">
               <label>Cash advance amount</label>
-              <input
-                type="number"
-                step="0.01"
+              <DecimalInput
                 value={form.cash_advance_amount}
                 onChange={(e) => setForm({ ...form, cash_advance_amount: e.target.value })}
                 placeholder="0.00"
@@ -691,7 +690,7 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                 </div>
                 <div className="form-row">
                   <label>Amount</label>
-                  <input type="number" step="0.01" value={itemForm.amount} onChange={(e) => setItemForm({ ...itemForm, amount: e.target.value })} required />
+                  <DecimalInput value={itemForm.amount} onChange={(e) => setItemForm({ ...itemForm, amount: e.target.value })} required />
                 </div>
                 <div className="form-row">
                   <label>Proof of receipt</label>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import DecimalInput from "../components/DecimalInput";
 
 const emptyForm = { name: "", lat: "", lng: "", radius_meters: "1000", address: "" };
 
@@ -113,11 +114,11 @@ export default function Locations() {
           </div>
           <div className="form-row">
             <label>Latitude</label>
-            <input type="number" step="0.000001" value={form.lat} onChange={(e) => setForm({ ...form, lat: e.target.value })} required />
+            <DecimalInput decimals={6} value={form.lat} onChange={(e) => setForm({ ...form, lat: e.target.value })} required />
           </div>
           <div className="form-row">
             <label>Longitude</label>
-            <input type="number" step="0.000001" value={form.lng} onChange={(e) => setForm({ ...form, lng: e.target.value })} required />
+            <DecimalInput decimals={6} value={form.lng} onChange={(e) => setForm({ ...form, lng: e.target.value })} required />
           </div>
           <div className="form-row">
             <label>Radius (meters)</label>

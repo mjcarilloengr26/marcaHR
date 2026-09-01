@@ -4,6 +4,7 @@ import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
+import DecimalInput from "../components/DecimalInput";
 
 const emptyForm = { po_number: "", vendor_name: "", description: "", amount: "", order_date: "", expected_delivery_date: "", notes: "" };
 const STATUSES = ["draft", "submitted", "approved", "received", "cancelled"];
@@ -171,7 +172,7 @@ export default function PurchaseOrders() {
               </div>
               <div className="form-row">
                 <label>Amount</label>
-                <input type="number" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
+                <DecimalInput value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />
               </div>
               <div className="form-row">
                 <label>Order date</label>

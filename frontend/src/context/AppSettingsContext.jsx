@@ -85,10 +85,20 @@ export function AppSettingsProvider({ children }) {
       });
     }
 
-    // Every figure carries centavos. Rounding to whole pesos on screen made
-    // an invoice for 1,234.56 read as 1,235, and a column of those does not
-    // add up to the total anyone is reconciling against.
-    const money = (n) => fmt.format(Number(n || 0));
+    // Centavos when there are centavos, and not otherwise. Rounding everything
+    // to whole pesos made an invoice for 1,234.56 read as 1,235; forcing two
+    // decimals on everything made a clean 500,000 read as 500,000.00. Neither
+    // is what the figure actually is.
+    //
+    // A part-peso amount always shows both places, so 1,234.5 is 1,234.50
+    // rather than the 1,234.5 a plain min-0/max-2 format would produce.
+    const money = (n) => {
+      const v = Number(n || 0);
+      // Rounded before the test, or 0.1 + 0.2 style drift would make a whole
+      // amount look fractional and sprout decimals it does not have.
+      const rounded = Math.round(v * 100) / 100;
+      return Number.isInteger(rounded) ? fmtWhole.format(rounded) : fmt2.format(rounded);
+    };
     // Kept as its own name because expense and liquidation screens ask for it
     // explicitly; identical to money() now that the default carries centavos.
     const moneyPrecise = (n) => fmt2.format(Number(n || 0));

@@ -5,6 +5,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
+import DecimalInput from "../components/DecimalInput";
 
 const emptyForm = { title: "", customer_name: "", value: "", stage: "lead", owner_id: "", expected_close_date: "", notes: "", competitor: "" };
 const STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"];
@@ -238,7 +239,7 @@ export default function Deals() {
               </div>
               <div className="form-row">
                 <label>Value</label>
-                <input type="number" step="0.01" value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
+                <DecimalInput value={form.value} onChange={(e) => setForm({ ...form, value: e.target.value })} />
               </div>
               {isHr && (
                 <div className="form-row">

@@ -4,6 +4,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
+import DecimalInput from "../components/DecimalInput";
 
 const MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -392,27 +393,21 @@ export default function Payroll() {
               </div>
               <div className="form-row">
                 <label>Bonuses</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   value={editForm.bonuses}
                   onChange={(e) => setEditForm({ ...editForm, bonuses: e.target.value })}
                 />
               </div>
               <div className="form-row">
                 <label>Overtime pay</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   value={editForm.overtime_pay}
                   onChange={(e) => setEditForm({ ...editForm, overtime_pay: e.target.value })}
                 />
               </div>
               <div className="form-row">
                 <label>Night differential pay</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   value={editForm.night_differential_pay}
                   onChange={(e) => setEditForm({ ...editForm, night_differential_pay: e.target.value })}
                 />
@@ -424,54 +419,42 @@ export default function Payroll() {
             <div className="grid grid-2">
               <div className="form-row">
                 <label>SSS</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   value={editForm.deduction_sss}
                   onChange={(e) => setEditForm({ ...editForm, deduction_sss: e.target.value })}
                 />
               </div>
               <div className="form-row">
                 <label>HDMF (Pag-IBIG)</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   value={editForm.deduction_hdmf}
                   onChange={(e) => setEditForm({ ...editForm, deduction_hdmf: e.target.value })}
                 />
               </div>
               <div className="form-row">
                 <label>PhilHealth</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   value={editForm.deduction_philhealth}
                   onChange={(e) => setEditForm({ ...editForm, deduction_philhealth: e.target.value })}
                 />
               </div>
               <div className="form-row">
                 <label>Taxes</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   value={editForm.deduction_taxes}
                   onChange={(e) => setEditForm({ ...editForm, deduction_taxes: e.target.value })}
                 />
               </div>
               <div className="form-row">
                 <label>Loans</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   value={editForm.deduction_loans}
                   onChange={(e) => setEditForm({ ...editForm, deduction_loans: e.target.value })}
                 />
               </div>
               <div className="form-row">
                 <label>Cash advances</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   value={editForm.deduction_cash_advances}
                   onChange={(e) => setEditForm({ ...editForm, deduction_cash_advances: e.target.value })}
                 />
@@ -555,9 +538,7 @@ export default function Payroll() {
             </div>
             <div className="form-row">
               <label>Standard hours per day</label>
-              <input
-                type="number"
-                step="0.5"
+              <DecimalInput
                 value={settingsForm.standard_hours_per_day}
                 onChange={(e) => setSettingsForm({ ...settingsForm, standard_hours_per_day: e.target.value })}
               />
@@ -604,18 +585,14 @@ export default function Payroll() {
             </p>
             <div className="form-row">
               <label>Overtime pay multiplier</label>
-              <input
-                type="number"
-                step="0.05"
+              <DecimalInput
                 value={settingsForm.overtime_multiplier}
                 onChange={(e) => setSettingsForm({ ...settingsForm, overtime_multiplier: e.target.value })}
               />
             </div>
             <div className="form-row">
               <label>Night shift differential multiplier</label>
-              <input
-                type="number"
-                step="0.05"
+              <DecimalInput
                 value={settingsForm.night_shift_multiplier}
                 onChange={(e) => setSettingsForm({ ...settingsForm, night_shift_multiplier: e.target.value })}
               />

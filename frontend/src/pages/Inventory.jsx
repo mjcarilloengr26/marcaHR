@@ -5,6 +5,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { readFileAsDataUrl } from "../utils/image";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
+import DecimalInput from "../components/DecimalInput";
 
 const DEFAULT_MARGIN = 50;
 
@@ -550,9 +551,7 @@ export default function Inventory() {
                   cost, and typing a price over the top re-derives the margin. */}
               <div className="form-row">
                 <label>Unit cost ({currencySymbol})</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   value={form.unit_cost}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, unit_cost: e.target.value, unit_price: priceFromMargin(e.target.value, f.margin, f.unit_price) }))
@@ -564,9 +563,7 @@ export default function Inventory() {
               </div>
               <div className="form-row">
                 <label>Margin % (of selling price)</label>
-                <input
-                  type="number"
-                  step="0.1"
+                <DecimalInput
                   value={form.margin}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, margin: e.target.value, unit_price: priceFromMargin(f.unit_cost, e.target.value, f.unit_price) }))
@@ -579,9 +576,7 @@ export default function Inventory() {
               </div>
               <div className="form-row">
                 <label>Unit price ({currencySymbol})</label>
-                <input
-                  type="number"
-                  step="0.01"
+                <DecimalInput
                   value={form.unit_price}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, unit_price: e.target.value, margin: marginFromPrice(f.unit_cost, e.target.value, f.margin) }))
