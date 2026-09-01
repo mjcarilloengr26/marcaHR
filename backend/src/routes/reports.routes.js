@@ -576,4 +576,173 @@ router.get(
   })
 );
 
+router.get(
+  "/assets-export",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!(await isAdminHrOrFinance(req))) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
+    const { period_type, period_year, period_index } = parsePeriod(req.query);
+    const { start, end } = periodDateRange(period_type, period_year, period_index);
+
+    const SELECT = `SELECT a.*, (e.first_name || ' ' || e.last_name) AS employee_name,
+                           e.status AS employee_status, d.name AS department_name
+                    FROM employee_assets a
+                    JOIN employees e ON e.id = a.employee_id
+                    LEFT JOIN departments d ON d.id = e.department_id`;
+
+    // Everything still out, as of today — the question an asset register is
+    // actually asked. Deliberately not period-filtered, the same way the
+    // inventory report's stock-on-hand sheet is a snapshot.
+    const onIssue = await db
+      .prepare(`${SELECT} WHERE a.status = 'active' ORDER BY e.last_name, e.first_name, a.asset_type`)
+      .all();
+
+    // Anything that changed hands during the period, issued or given back.
+    const movements = await db
+      .prepare(
+        `${SELECT} WHERE (a.date_issued BETWEEN ? AND ?) OR (a.date_returned BETWEEN ? AND ?)
+         ORDER BY COALESCE(a.date_returned, a.date_issued) DESC`
+      )
+      .all(start, end, start, end);
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = await companyName();
+    workbook.created = new Date();
+
+    const COLUMNS = [
+      { header: "Employee", key: "employee_name", width: 26 },
+      { header: "Department", key: "department_name", width: 18 },
+      { header: "Asset", key: "asset_type", width: 18 },
+      { header: "Brand", key: "brand", width: 16 },
+      { header: "Model", key: "model", width: 24 },
+      { header: "Serial Number", key: "serial_number", width: 24 },
+      { header: "Asset Tag", key: "asset_tag", width: 14 },
+      { header: "Date Issued", key: "date_issued", width: 14 },
+      { header: "Date Returned", key: "date_returned", width: 14 },
+      { header: "Status", key: "status", width: 12 },
+      { header: "Condition", key: "condition_note", width: 22 },
+      { header: "Market Value", key: "market_value", width: 14 },
+      { header: "Notes", key: "notes", width: 30 },
+    ];
+    const shape = (rows) =>
+      rows.map((a) => ({
+        ...a,
+        department_name: a.department_name || "—",
+        brand: a.brand || "—",
+        model: a.model || "—",
+        serial_number: a.serial_number || "—",
+        asset_tag: a.asset_tag || "—",
+        date_returned: a.date_returned || "—",
+        condition_note: a.condition_note || "—",
+        market_value: a.market_value == null ? "—" : Number(a.market_value),
+        notes: a.notes || "",
+      }));
+
+    const issuedSheet = workbook.addWorksheet("Assets On Issue");
+    issuedSheet.columns = COLUMNS;
+    issuedSheet.addRows(shape(onIssue));
+    issuedSheet.getRow(1).font = { bold: true };
+    const issuedTotal = issuedSheet.addRow({
+      employee_name: `TOTAL — ${onIssue.length} assets still issued`,
+      market_value: Number(onIssue.reduce((sum, a) => sum + (a.market_value || 0), 0).toFixed(2)),
+    });
+    issuedTotal.font = { bold: true };
+
+    const movementSheet = workbook.addWorksheet("Issued & Returned");
+    movementSheet.columns = COLUMNS;
+    movementSheet.addRows(shape(movements));
+    movementSheet.getRow(1).font = { bold: true };
+
+    // One line per employee, for the handover check when somebody leaves.
+    const byEmployee = new Map();
+    for (const a of onIssue) {
+      const key = a.employee_name;
+      if (!byEmployee.has(key)) {
+        byEmployee.set(key, { employee_name: key, department_name: a.department_name || "—", count: 0, value: 0, assets: [] });
+      }
+      const row = byEmployee.get(key);
+      row.count += 1;
+      row.value = Number((row.value + (a.market_value || 0)).toFixed(2));
+      row.assets.push([a.asset_type, a.brand, a.model].filter(Boolean).join(" "));
+    }
+    const summarySheet = workbook.addWorksheet("Holdings By Employee");
+    summarySheet.columns = [
+      { header: "Employee", key: "employee_name", width: 26 },
+      { header: "Department", key: "department_name", width: 18 },
+      { header: "Assets Held", key: "count", width: 12 },
+      { header: "Total Value", key: "value", width: 14 },
+      { header: "Items", key: "items", width: 70 },
+    ];
+    summarySheet.addRows(
+      [...byEmployee.values()].map((r) => ({ ...r, items: r.assets.join("; ") }))
+    );
+    summarySheet.getRow(1).font = { bold: true };
+
+    // Requests raised in the period, so the sheet shows what was asked for
+    // alongside what was actually handed out.
+    const requests = await db
+      .prepare(
+        `SELECT r.*, (e.first_name || ' ' || e.last_name) AS employee_name, d.name AS department_name,
+                (rv.first_name || ' ' || rv.last_name) AS reviewed_by_name,
+                a.serial_number AS issued_serial
+         FROM asset_requests r
+         JOIN employees e ON e.id = r.employee_id
+         LEFT JOIN departments d ON d.id = e.department_id
+         LEFT JOIN employees rv ON rv.id = r.reviewed_by
+         LEFT JOIN employee_assets a ON a.id = r.asset_id
+         WHERE substr(r.created_at, 1, 10) BETWEEN ? AND ?
+         ORDER BY r.created_at DESC`
+      )
+      .all(start, end);
+
+    const requestSheet = workbook.addWorksheet("Asset Requests");
+    requestSheet.columns = [
+      { header: "Requested", key: "created_at", width: 20 },
+      { header: "Employee", key: "employee_name", width: 26 },
+      { header: "Department", key: "department_name", width: 18 },
+      { header: "Asset Requested", key: "asset_type", width: 22 },
+      { header: "Qty", key: "quantity", width: 8 },
+      { header: "Reason", key: "reason", width: 34 },
+      { header: "Needed By", key: "needed_by", width: 14 },
+      { header: "Status", key: "status", width: 12 },
+      { header: "Decided By", key: "reviewed_by_name", width: 22 },
+      { header: "Decided On", key: "reviewed_at", width: 20 },
+      { header: "Note", key: "review_note", width: 30 },
+      { header: "Issued Serial", key: "issued_serial", width: 24 },
+    ];
+    requestSheet.addRows(
+      requests.map((r) => ({
+        ...r,
+        department_name: r.department_name || "—",
+        reason: r.reason || "—",
+        needed_by: r.needed_by || "—",
+        reviewed_by_name: r.reviewed_by_name || "—",
+        reviewed_at: r.reviewed_at || "—",
+        review_note: r.review_note || "—",
+        issued_serial: r.issued_serial || "—",
+      }))
+    );
+    requestSheet.getRow(1).font = { bold: true };
+    const pending = requests.filter((r) => r.status === "pending").length;
+    const pendingRow = requestSheet.addRow({
+      employee_name: `TOTAL — ${requests.length} requests, ${pending} still awaiting a decision`,
+    });
+    pendingRow.font = { bold: true };
+
+    await logRequestEvent(req, "export_excel", {
+      entityType: "report",
+      details: { report: "assets", period_type, period_year, period_index },
+    });
+
+    const filename = `marca-group-company-assets-report-${period_year}-${period_type}-${period_index}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  })
+);
+
 module.exports = router;

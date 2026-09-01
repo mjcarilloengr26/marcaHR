@@ -12,6 +12,17 @@ async function getHrEmails() {
   return rows.map((r) => r.email);
 }
 
+// The person this employee reports to, when there is one. An asset request is
+// usually theirs to judge before HR sees it, so they are copied in rather than
+// finding out once the kit has already been handed over.
+async function getManagerEmail(employeeId) {
+  if (!employeeId) return null;
+  const row = await db
+    .prepare("SELECT m.email FROM employees e JOIN employees m ON m.id = e.manager_id WHERE e.id = ?")
+    .get(employeeId);
+  return (row && row.email) || null;
+}
+
 function fullName(emp) {
   return `${emp.first_name} ${emp.last_name}`;
 }
@@ -107,6 +118,42 @@ const notifyLowStockAlarm = guarded(async ({ sku, name, quantity_on_hand, unit, 
   });
 });
 
+const notifyAssetRequested = guarded(async ({ employee_id, asset_type, quantity, reason, needed_by }) => {
+  const emp = await getEmployee(employee_id);
+  if (!emp) return;
+  const managerEmail = await getManagerEmail(employee_id);
+  // One address may be both HR and somebody's manager; sending twice would just
+  // look like the system stuttering.
+  const to = [...new Set([...(await getHrEmails()), managerEmail].filter(Boolean))];
+  if (to.length === 0) return;
+
+  const lines = [
+    `${fullName(emp)} requested ${quantity} × ${asset_type}.`,
+    reason ? `Reason: ${reason}` : null,
+    needed_by ? `Needed by: ${needed_by}` : null,
+    "",
+    `Approve or turn it down in ${await companyName()} under Company Assets.`,
+  ].filter((l) => l !== null);
+
+  sendMail({
+    to,
+    subject: `New asset request — ${fullName(emp)}`,
+    text: lines.join("\n"),
+  });
+});
+
+const notifyAssetRequestDecision = guarded(async ({ employee_id, asset_type, status, review_note }) => {
+  const emp = await getEmployee(employee_id);
+  if (!emp) return;
+  sendMail({
+    to: emp.email,
+    subject: `Your asset request was ${status}`,
+    text:
+      `Hi ${emp.first_name},\n\nYour request for ${asset_type} was ${status}.` +
+      (review_note ? `\n\nNote: ${review_note}` : ""),
+  });
+});
+
 module.exports = {
   notifyLeaveSubmitted,
   notifyLeaveStatusChanged,
@@ -116,4 +163,6 @@ module.exports = {
   notifyReviewSubmitted,
   notifyWorkOrderAssigned,
   notifyLowStockAlarm,
+  notifyAssetRequested,
+  notifyAssetRequestDecision,
 };

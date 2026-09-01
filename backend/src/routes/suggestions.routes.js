@@ -34,6 +34,9 @@ const SOURCES = {
   category: [{ table: "expense_items", column: "category" }],
   expense_description: [{ table: "expense_items", column: "description" }],
   item_category: [{ table: "inventory_items", column: "category" }],
+  asset_type: [{ table: "employee_assets", column: "asset_type" }],
+  asset_brand: [{ table: "employee_assets", column: "brand" }],
+  asset_model: [{ table: "employee_assets", column: "model" }],
 };
 
 router.get(

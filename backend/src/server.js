@@ -83,6 +83,8 @@ app.use("/api/leave", leaveRoutes);
 app.use("/api/attendance", attendanceRoutes);
 app.use("/api/payroll", payrollRoutes);
 app.use("/api/performance", performanceRoutes);
+app.use("/api/assets", require("./routes/assets.routes"));
+app.use("/api/asset-requests", require("./routes/assetRequests.routes"));
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/users", usersRoutes);
 app.use("/api/board", boardRoutes);

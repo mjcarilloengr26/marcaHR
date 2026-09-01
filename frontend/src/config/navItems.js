@@ -17,6 +17,7 @@ export const NAV_ITEMS = [
   { to: "/attendance", label: "Attendance", icon: "⏱️", roles: ["admin", "hr", "employee"] },
   { to: "/payroll", label: "Payroll", icon: "💵", roles: ["admin", "hr", "employee"] },
   { to: "/performance", label: "Performance", icon: "📈", roles: ["admin", "hr", "employee"] },
+  { to: "/assets", label: "Company Assets", icon: "💼", roles: ["admin", "hr", "employee"] },
 
   { section: "Collaboration", icon: "🤝", roles: ["admin", "hr", "employee"] },
   { to: "/board", label: "Task Board", icon: "🗒️", roles: ["admin", "hr", "employee"] },

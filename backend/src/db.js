@@ -559,6 +559,50 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_deal_id ON orders(deal_id) WHERE de
 -- user row is later deleted) so log rows stay readable forever, which a hard FK
 -- alone can't guarantee — ON DELETE SET NULL only protects the row from being
 -- deleted, not from losing its human-readable identity.
+CREATE TABLE IF NOT EXISTS employee_assets (
+  id SERIAL PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  asset_type TEXT NOT NULL,
+  brand TEXT,
+  model TEXT,
+  serial_number TEXT,
+  asset_tag TEXT,
+  date_issued TEXT NOT NULL,
+  date_returned TEXT,
+  -- 'replaced' is kept distinct from 'returned' on purpose: both mean the item
+  -- is no longer with the employee, but only one of them means a replacement
+  -- was issued, and the difference matters when auditing what a leaver still
+  -- holds versus what was swapped out mid-employment.
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','returned','replaced')),
+  condition_note TEXT,
+  notes TEXT,
+  market_value REAL,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_employee_assets_employee ON employee_assets(employee_id);
+
+CREATE TABLE IF NOT EXISTS asset_requests (
+  id SERIAL PRIMARY KEY,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  asset_type TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  reason TEXT,
+  needed_by TEXT,
+  -- 'approved' and 'issued' are separate steps: approval is the decision, and
+  -- issuance is the moment the item actually changes hands and joins the
+  -- register. Collapsing them would let an approved-but-unfulfilled request
+  -- read as though the employee already had the kit.
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','issued')),
+  review_note TEXT,
+  reviewed_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  reviewed_at TEXT,
+  asset_id INTEGER REFERENCES employee_assets(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_asset_requests_employee ON asset_requests(employee_id);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -638,6 +682,13 @@ async function ensurePayrollPeriodHalf() {
 // board_card_assignees join table, so cards created before multi-assignee
 // support still show their original assignee. Safe to repeat: ON CONFLICT DO
 // NOTHING means a card already backfilled (or since reassigned) is untouched.
+// employee_assets shipped before assets carried a value. CREATE TABLE IF NOT
+// EXISTS won't add a column to a table that already exists, so any deployment
+// that already ran the register needs this explicitly.
+async function ensureAssetMarketValue() {
+  await pool.query("ALTER TABLE employee_assets ADD COLUMN IF NOT EXISTS market_value REAL");
+}
+
 async function ensureBoardCardAssignees() {
   await pool.query(
     `INSERT INTO board_card_assignees (card_id, employee_id)
@@ -821,6 +872,7 @@ db.migrate = function () {
       .then(() => ensureLeaveTypeTaxonomy())
       .then(() => ensurePayrollPeriodHalf())
       .then(() => ensureBoardCardAssignees())
+      .then(() => ensureAssetMarketValue())
       .then(() => ensureExpenseType())
       .then(() => ensurePayrollTimeSettings())
       .then(() => ensurePayrollNightDifferential())

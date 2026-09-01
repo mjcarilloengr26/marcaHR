@@ -32,6 +32,10 @@ export default function Reports() {
   const [invPeriodIndex, setInvPeriodIndex] = useState(now.getMonth() + 1);
   const [invYear, setInvYear] = useState(now.getFullYear());
   const [exportingInventory, setExportingInventory] = useState(false);
+  const [assetPeriodType, setAssetPeriodType] = useState("monthly");
+  const [assetPeriodIndex, setAssetPeriodIndex] = useState(now.getMonth() + 1);
+  const [assetYear, setAssetYear] = useState(now.getFullYear());
+  const [exportingAssets, setExportingAssets] = useState(false);
 
   const [error, setError] = useState("");
 
@@ -44,7 +48,9 @@ export default function Reports() {
   const canExportPayroll = ["admin", "hr"].includes(user?.role) || isFinance;
   const canExportExpenses = ["admin", "hr"].includes(user?.role) || isFinance;
   const canExportInventory = ["admin", "hr"].includes(user?.role) || isFinance;
-  const canSeePage = canExportSalesFinance || canExportPurchaseOrders || canExportPayroll || canExportExpenses || canExportInventory;
+  const canExportAssets = ["admin", "hr"].includes(user?.role) || isFinance;
+  const canSeePage =
+    canExportSalesFinance || canExportPurchaseOrders || canExportPayroll || canExportExpenses || canExportInventory || canExportAssets;
 
   const changePeriodType = (type) => {
     setPeriodType(type);
@@ -132,6 +138,28 @@ export default function Reports() {
       setError(err.message);
     } finally {
       setExportingInventory(false);
+    }
+  };
+
+  const changeAssetPeriodType = (type) => {
+    setAssetPeriodType(type);
+    if (type === "monthly") setAssetPeriodIndex(now.getMonth() + 1);
+    else if (type === "quarterly") setAssetPeriodIndex(Math.floor(now.getMonth() / 3) + 1);
+    else setAssetPeriodIndex(0);
+  };
+
+  const exportAssets = async () => {
+    setExportingAssets(true);
+    setError("");
+    try {
+      await downloadFile(
+        `/reports/assets-export?period_type=${assetPeriodType}&year=${assetYear}&index=${assetPeriodIndex}`,
+        "marca-group-company-assets-report.xlsx"
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setExportingAssets(false);
     }
   };
 
@@ -395,6 +423,55 @@ export default function Reports() {
           </div>
           <button type="button" className="btn" onClick={exportInventory} disabled={exportingInventory}>
             {exportingInventory ? "Exporting…" : "Export to Excel"}
+          </button>
+        </div>
+      )}
+
+      {canExportAssets && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>Company Assets Report</h2>
+          <p className="subtitle" style={{ margin: "0 0 12px" }}>
+            Three sheets: everything still issued to staff as of today, every asset issued or returned during the
+            selected period, and a one-line-per-employee summary for handover checks. Like inventory, current
+            holdings are always as of today — the period only filters the movements.
+          </p>
+          <div className="form-inline" style={{ marginBottom: 16 }}>
+            <div className="form-row">
+              <label>Period</label>
+              <select value={assetPeriodType} onChange={(e) => changeAssetPeriodType(e.target.value)}>
+                <option value="monthly">Monthly</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+            {assetPeriodType === "monthly" && (
+              <div className="form-row">
+                <label>Month</label>
+                <select value={assetPeriodIndex} onChange={(e) => setAssetPeriodIndex(Number(e.target.value))}>
+                  {MONTH_NAMES.slice(1).map((name, i) => (
+                    <option key={name} value={i + 1}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {assetPeriodType === "quarterly" && (
+              <div className="form-row">
+                <label>Quarter</label>
+                <select value={assetPeriodIndex} onChange={(e) => setAssetPeriodIndex(Number(e.target.value))}>
+                  <option value={1}>Q1</option>
+                  <option value={2}>Q2</option>
+                  <option value={3}>Q3</option>
+                  <option value={4}>Q4</option>
+                </select>
+              </div>
+            )}
+            <div className="form-row">
+              <label>Year</label>
+              <input type="number" value={assetYear} onChange={(e) => setAssetYear(Number(e.target.value))} />
+            </div>
+          </div>
+          <button type="button" className="btn" onClick={exportAssets} disabled={exportingAssets}>
+            {exportingAssets ? "Exporting…" : "Export to Excel"}
           </button>
         </div>
       )}

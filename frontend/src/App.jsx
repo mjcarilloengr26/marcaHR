@@ -20,6 +20,7 @@ const Payroll = lazy(() => import("./pages/Payroll"));
 const Performance = lazy(() => import("./pages/Performance"));
 const Board = lazy(() => import("./pages/Board"));
 const Expenses = lazy(() => import("./pages/Expenses"));
+const Assets = lazy(() => import("./pages/Assets"));
 const SalesDashboard = lazy(() => import("./pages/SalesDashboard"));
 const Deals = lazy(() => import("./pages/Deals"));
 const Orders = lazy(() => import("./pages/Orders"));
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="/attendance" element={<Protected><Attendance /></Protected>} />
         <Route path="/payroll" element={<Protected><Payroll /></Protected>} />
         <Route path="/performance" element={<Protected><Performance /></Protected>} />
+        <Route path="/assets" element={<Protected><Assets /></Protected>} />
         <Route path="/board" element={<Protected><Board /></Protected>} />
         <Route path="/expenses" element={<Protected pageKey="expenses"><Expenses /></Protected>} />
         <Route path="/sales" element={<Protected roles={["admin", "hr"]} pageKey="sales"><SalesDashboard /></Protected>} />

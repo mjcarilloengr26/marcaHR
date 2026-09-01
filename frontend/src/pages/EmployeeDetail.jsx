@@ -4,6 +4,9 @@ import { api } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { compressImageFile } from "../utils/image";
 
+// Matches the register: only "active" means the company's property is still out.
+const ASSET_STATUS_BADGE = { active: "active", returned: "approved", replaced: "draft" };
+
 export default function EmployeeDetail() {
   const { money } = useAppSettings();
   const { id } = useParams();
@@ -12,6 +15,7 @@ export default function EmployeeDetail() {
   const [employee, setEmployee] = useState(null);
   const [departments, setDepartments] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [assets, setAssets] = useState([]);
   const [error, setError] = useState("");
   const [editing, setEditing] = useState(Boolean(routerLocation.state?.edit));
   const [form, setForm] = useState(null);
@@ -29,6 +33,10 @@ export default function EmployeeDetail() {
     setEditing(Boolean(routerLocation.state?.edit));
     api.get("/departments").then(setDepartments).catch(() => setError("Could not load departments — department selection may be unavailable. Try reloading the page."));
     api.get("/locations").then(setLocations).catch(() => setError("Could not load locations — location selection may be unavailable. Try reloading the page."));
+    // Company property this person holds. Read-only here: the register at
+    // /assets is where it is issued and returned, so there is one place that
+    // writes it and no second form to keep in step.
+    api.get(`/assets?employee_id=${id}`).then(setAssets).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -258,6 +266,53 @@ export default function EmployeeDetail() {
             </button>
           </div>
         </form>
+      )}
+
+      {!editing && (
+        <div className="card">
+          <h2>Company assets</h2>
+          {assets.length === 0 ? (
+            <div className="empty-state">Nothing issued to this employee.</div>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Asset</th>
+                  <th>Brand</th>
+                  <th>Model</th>
+                  <th>Serial number</th>
+                  <th>Asset tag</th>
+                  <th>Issued</th>
+                  <th>Returned</th>
+                  <th>Status</th>
+                  <th>Market value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assets.map((a) => (
+                  <tr key={a.id}>
+                    <td>{a.asset_type}</td>
+                    <td>{a.brand || "—"}</td>
+                    <td>{a.model || "—"}</td>
+                    <td style={{ fontVariantNumeric: "tabular-nums" }}>{a.serial_number || "—"}</td>
+                    <td>{a.asset_tag || "—"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{a.date_issued}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{a.date_returned || "—"}</td>
+                    <td>
+                      <span className={`badge badge-${ASSET_STATUS_BADGE[a.status] || "neutral"}`}>{a.status}</span>
+                    </td>
+                    <td style={{ whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                      {a.market_value == null ? "—" : money(a.market_value)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div style={{ marginTop: 12 }}>
+            <Link to="/assets" className="link-btn">Open the asset register →</Link>
+          </div>
+        </div>
       )}
     </div>
   );
