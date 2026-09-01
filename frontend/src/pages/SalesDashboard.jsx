@@ -409,16 +409,6 @@ export default function SalesDashboard() {
         </div>
       </div>
 
-      <PipelineAging
-        aging={aging}
-        money={money}
-        isHr={isHrUser}
-        thresholdDraft={thresholdDraft}
-        setThresholdDraft={setThresholdDraft}
-        saveThreshold={saveThreshold}
-        savingThreshold={savingThreshold}
-      />
-
       {revenueTrend && <RevenueTrendChart thisYear={revenueTrend.thisYear} lastYear={revenueTrend.lastYear} months={revenueTrend.months} />}
 
         <div className="card" style={{ marginBottom: 16 }}>
@@ -676,6 +666,16 @@ export default function SalesDashboard() {
           branchUnit="order"
         />
       </div>
+
+      <PipelineAging
+        aging={aging}
+        money={money}
+        isHr={isHrUser}
+        thresholdDraft={thresholdDraft}
+        setThresholdDraft={setThresholdDraft}
+        saveThreshold={saveThreshold}
+        savingThreshold={savingThreshold}
+      />
 
       <div className="card" style={{ marginBottom: 16 }}>
         <h2>Sales Lead Summary</h2>
