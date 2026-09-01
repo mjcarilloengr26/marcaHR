@@ -229,6 +229,21 @@ export default function Layout({ children }) {
             )
           )}
         </nav>
+        {/* Which build this page is running. On a phone there is no console to
+            check, and "did the fix reach me?" is otherwise unanswerable. */}
+        <div
+          style={{
+            marginTop: "auto",
+            paddingTop: 12,
+            fontSize: 10.5,
+            color: "#5c6172",
+            letterSpacing: "0.02em",
+            userSelect: "text",
+          }}
+          title={`Built ${__BUILD_TIME__}`}
+        >
+          build {__BUILD_ID__}
+        </div>
       </aside>
       {menuOpen && <div className="sidebar-backdrop" onClick={() => setMenuOpen(false)} />}
       <div className="main-col">
