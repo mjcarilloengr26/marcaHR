@@ -42,6 +42,27 @@ const REQUEST_BADGE = { pending: "pending", approved: "approved", rejected: "rej
 
 const EMPTY_REQUEST = { asset_type: "", quantity: 1, reason: "", needed_by: "" };
 
+// Only appears once something is ticked, so a destructive control is not
+// sitting armed on the page during ordinary browsing.
+function BulkBar({ selected, clear, onDelete, busy }) {
+  if (selected.size === 0) return null;
+  return (
+    <div
+      className="card"
+      style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}
+    >
+      <strong>{selected.size} selected</strong>
+      <button type="button" className="link-btn" disabled={busy} onClick={() => clear(new Set())}>
+        Clear selection
+      </button>
+      <span style={{ flex: 1 }} />
+      <button type="button" className="btn btn-sm btn-danger" onClick={onDelete} disabled={busy}>
+        {busy ? "Deleting…" : `Delete ${selected.size} selected`}
+      </button>
+    </div>
+  );
+}
+
 export default function Assets() {
   const { user } = useAuth();
   const { money } = useAppSettings();
@@ -65,6 +86,15 @@ export default function Assets() {
   const [issuing, setIssuing] = useState(null); // the request being handed over
   const [busyRequestId, setBusyRequestId] = useState(null);
 
+  // Tick-box selections, one set per table — the two lists are different things
+  // and clearing one should not clear the other.
+  const [selectedAssets, setSelectedAssets] = useState(() => new Set());
+  const [selectedRequests, setSelectedRequests] = useState(() => new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  // The asset being handed back, and the details of its return.
+  const [returning, setReturning] = useState(null);
+
   const load = () =>
     api.get("/assets").then(setAssets).catch((err) => setError(err.message));
 
@@ -78,6 +108,22 @@ export default function Assets() {
     // employee fetch the whole staff list just to read their own two rows.
     if (isHr) api.get("/employees").then(setEmployees).catch(() => {});
   }, [isHr]);
+
+  useEffect(() => {
+    setSelectedAssets((prev) => {
+      const live = new Set(assets.map((a) => a.id));
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [assets]);
+
+  useEffect(() => {
+    setSelectedRequests((prev) => {
+      const live = new Set(requests.map((r) => r.id));
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [requests]);
 
   const filtered = assets.filter((a) => {
     if (statusFilter && a.status !== statusFilter) return false;
@@ -245,6 +291,105 @@ export default function Assets() {
     }
   };
 
+  const toggleIn = (setter) => (id) =>
+    setter((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const toggleAsset = toggleIn(setSelectedAssets);
+  const toggleRequest = toggleIn(setSelectedRequests);
+
+  // One at a time rather than in parallel: a partial failure then names exactly
+  // what survived, and these lists are short.
+  const bulkDelete = async ({ ids, rows, endpoint, describe, after }) => {
+    const targets = rows.filter((r) => ids.has(r.id));
+    if (targets.length === 0) return;
+    if (!confirm(describe(targets))) return;
+    setBulkBusy(true);
+    setError("");
+    const failed = [];
+    for (const r of targets) {
+      try {
+        await api.del(`${endpoint}/${r.id}`);
+      } catch (err) {
+        failed.push(`${r.asset_type}: ${err.message}`);
+      }
+    }
+    setBulkBusy(false);
+    if (failed.length) setError(`${failed.length} of ${targets.length} could not be deleted — ${failed.join("; ")}`);
+    after();
+  };
+
+  const deleteSelectedAssets = () =>
+    bulkDelete({
+      ids: selectedAssets,
+      rows: assets,
+      endpoint: "/assets",
+      describe: (t) =>
+        `Delete ${t.length} asset${t.length === 1 ? "" : "s"} from the register?\n\n` +
+        "This removes the record entirely. To record that something came back, use Return instead.",
+      after: () => {
+        setSelectedAssets(new Set());
+        load();
+      },
+    });
+
+  const deleteSelectedRequests = () =>
+    bulkDelete({
+      ids: selectedRequests,
+      rows: requests,
+      endpoint: "/asset-requests",
+      describe: (t) => `Delete ${t.length} request${t.length === 1 ? "" : "s"}? This cannot be undone.`,
+      after: () => {
+        setSelectedRequests(new Set());
+        loadRequests();
+      },
+    });
+
+  const deleteRequest = async (r) => {
+    if (!confirm(`Delete ${r.employee_name}'s request for ${r.asset_type}?`)) return;
+    setBusyRequestId(r.id);
+    setError("");
+    try {
+      await api.del(`/asset-requests/${r.id}`);
+      loadRequests();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyRequestId(null);
+    }
+  };
+
+  // Handing an item back is its own action rather than an edit: the register
+  // needs the date and the condition it came back in, and burying that in the
+  // full edit form is how those two fields end up empty.
+  const openReturn = (a) =>
+    setReturning({
+      asset: a,
+      form: {
+        status: "returned",
+        date_returned: new Date().toISOString().slice(0, 10),
+        condition_note: "",
+        notes: a.notes || "",
+      },
+    });
+
+  const confirmReturn = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await api.put(`/assets/${returning.asset.id}`, returning.form);
+      setReturning(null);
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const stillOut = assets.filter((a) => a.status === "active").length;
   const openRequests = requests.filter((r) => r.status === "pending").length;
 
@@ -292,6 +437,24 @@ export default function Assets() {
               <table>
                 <thead>
                   <tr>
+                    {isHr && (
+                      <th style={{ width: 32 }}>
+                        <input
+                          type="checkbox"
+                          aria-label="Select all requests shown"
+                          disabled={requests.length === 0}
+                          checked={requests.length > 0 && selectedRequests.size === requests.length}
+                          ref={(el) => {
+                            if (el) el.indeterminate = selectedRequests.size > 0 && selectedRequests.size < requests.length;
+                          }}
+                          onChange={() =>
+                            setSelectedRequests((prev) =>
+                              prev.size === requests.length ? new Set() : new Set(requests.map((r) => r.id))
+                            )
+                          }
+                        />
+                      </th>
+                    )}
                     {isHr && <th>Employee</th>}
                     <th>Asset</th>
                     <th>Qty</th>
@@ -305,7 +468,17 @@ export default function Assets() {
                 </thead>
                 <tbody>
                   {requests.map((r) => (
-                    <tr key={r.id}>
+                    <tr key={r.id} className={selectedRequests.has(r.id) ? "row-selected" : undefined}>
+                      {isHr && (
+                        <td>
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${r.asset_type}`}
+                            checked={selectedRequests.has(r.id)}
+                            onChange={() => toggleRequest(r.id)}
+                          />
+                        </td>
+                      )}
                       {isHr && (
                         <td>
                           {r.employee_name}
@@ -356,6 +529,15 @@ export default function Assets() {
                               Issue now
                             </button>
                           )}
+                          {isHr && (
+                            <button
+                              className="btn btn-sm btn-danger"
+                              disabled={busyRequestId === r.id}
+                              onClick={() => deleteRequest(r)}
+                            >
+                              {busyRequestId === r.id ? "Deleting…" : "Delete"}
+                            </button>
+                          )}
                           {!isHr && r.status === "pending" && (
                             <button
                               className="btn btn-sm btn-secondary"
@@ -375,6 +557,13 @@ export default function Assets() {
           )}
         </div>
       )}
+
+      <BulkBar
+        selected={selectedRequests}
+        clear={setSelectedRequests}
+        onDelete={deleteSelectedRequests}
+        busy={bulkBusy}
+      />
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="form-inline">
@@ -399,10 +588,36 @@ export default function Assets() {
         </div>
       </div>
 
+      <BulkBar
+        selected={selectedAssets}
+        clear={setSelectedAssets}
+        onDelete={deleteSelectedAssets}
+        busy={bulkBusy}
+      />
+
       <div className="card card-wide">
         <table className="sticky-head">
           <thead>
             <tr>
+              {isHr && (
+                <th style={{ width: 32 }}>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all assets shown"
+                    disabled={sorted.length === 0}
+                    checked={sorted.length > 0 && sorted.every((a) => selectedAssets.has(a.id))}
+                    ref={(el) => {
+                      if (el) {
+                        const n = sorted.filter((a) => selectedAssets.has(a.id)).length;
+                        el.indeterminate = n > 0 && n < sorted.length;
+                      }
+                    }}
+                    onChange={(e) =>
+                      setSelectedAssets(e.target.checked ? new Set(sorted.map((a) => a.id)) : new Set())
+                    }
+                  />
+                </th>
+              )}
               {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
               <SortTh label="Asset" sortKey="asset_type" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Brand" sortKey="brand" toggleSort={toggleSort} arrow={arrow} />
@@ -418,7 +633,17 @@ export default function Assets() {
           </thead>
           <tbody>
             {sorted.map((a) => (
-              <tr key={a.id}>
+              <tr key={a.id} className={selectedAssets.has(a.id) ? "row-selected" : undefined}>
+                {isHr && (
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${a.asset_type}`}
+                      checked={selectedAssets.has(a.id)}
+                      onChange={() => toggleAsset(a.id)}
+                    />
+                  </td>
+                )}
                 {isHr && (
                   <td>
                     {a.employee_name}
@@ -445,6 +670,11 @@ export default function Assets() {
                 {isHr && (
                   <td>
                     <div className="col-actions">
+                      {a.status === "active" && (
+                        <button className="btn btn-sm" onClick={() => openReturn(a)}>
+                          Return
+                        </button>
+                      )}
                       <button className="btn btn-sm btn-secondary" onClick={() => openEdit(a)}>
                         Edit
                       </button>
@@ -614,6 +844,79 @@ export default function Assets() {
                 </button>
                 <button type="submit" className="btn" disabled={requestSaving}>
                   {requestSaving ? "Issuing…" : "Issue asset"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {returning && (
+        <div className="modal-backdrop" onClick={() => setReturning(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Return asset</h2>
+            <p className="subtitle" style={{ margin: "0 0 12px" }}>
+              {returning.asset.asset_type}
+              {returning.asset.brand ? ` — ${returning.asset.brand}` : ""}
+              {returning.asset.model ? ` ${returning.asset.model}` : ""}
+              {returning.asset.serial_number ? ` (${returning.asset.serial_number})` : ""}, issued to{" "}
+              {returning.asset.employee_name} on {returning.asset.date_issued}.
+            </p>
+            <form onSubmit={confirmReturn}>
+              <div className="grid grid-2">
+                <div className="form-row">
+                  <label>Date returned</label>
+                  <input
+                    type="date"
+                    value={returning.form.date_returned}
+                    onChange={(e) =>
+                      setReturning({ ...returning, form: { ...returning.form, date_returned: e.target.value } })
+                    }
+                    required
+                  />
+                </div>
+                <div className="form-row">
+                  <label>Outcome</label>
+                  <select
+                    value={returning.form.status}
+                    onChange={(e) =>
+                      setReturning({ ...returning, form: { ...returning.form, status: e.target.value } })
+                    }
+                  >
+                    <option value="returned">Returned — back with the company</option>
+                    <option value="replaced">Replaced — a new one was issued</option>
+                  </select>
+                </div>
+              </div>
+              <div className="form-row">
+                <label>Condition it came back in</label>
+                <input
+                  value={returning.form.condition_note}
+                  onChange={(e) =>
+                    setReturning({ ...returning, form: { ...returning.form, condition_note: e.target.value } })
+                  }
+                  placeholder="Good, screen cracked, missing charger…"
+                />
+                <span className="subtitle" style={{ fontSize: 12 }}>
+                  Worth a line even when nothing is wrong — it is the only record of what came back.
+                </span>
+              </div>
+              <div className="form-row">
+                <label>Notes</label>
+                <textarea
+                  rows={2}
+                  value={returning.form.notes}
+                  onChange={(e) =>
+                    setReturning({ ...returning, form: { ...returning.form, notes: e.target.value } })
+                  }
+                />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setReturning(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn" disabled={saving}>
+                  {saving ? "Saving…" : "Record return"}
                 </button>
               </div>
             </form>
