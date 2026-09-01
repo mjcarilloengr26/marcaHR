@@ -99,9 +99,10 @@ export function AppSettingsProvider({ children }) {
       const rounded = Math.round(v * 100) / 100;
       return Number.isInteger(rounded) ? fmtWhole.format(rounded) : fmt2.format(rounded);
     };
-    // Kept as its own name because expense and liquidation screens ask for it
-    // explicitly; identical to money() now that the default carries centavos.
-    const moneyPrecise = (n) => fmt2.format(Number(n || 0));
+    // The liquidation screens ask for this by name. It follows the same rule as
+    // money(): a figure reconciled to the centavo shows its centavos, and one
+    // that has none does not need .00 to prove it.
+    const moneyPrecise = money;
     // For KPI tiles only. Anywhere a figure is added up or checked against a
     // document, use money().
     const moneyWhole = (n) => fmtWhole.format(Number(n || 0));
