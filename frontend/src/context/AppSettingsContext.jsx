@@ -58,6 +58,16 @@ export function AppSettingsProvider({ children }) {
       });
     }
 
+    // Headline tiles read better without centavos: a KPI is a magnitude, and
+    // ₱12,550,200 is quicker to take in than ₱12,550,200.00. Tables and line
+    // items keep the exact figure, because those are what get reconciled.
+    let fmtWhole;
+    try {
+      fmtWhole = new Intl.NumberFormat(locale, { style: "currency", currency, maximumFractionDigits: 0 });
+    } catch {
+      fmtWhole = new Intl.NumberFormat("en-US", { style: "currency", currency: "PHP", maximumFractionDigits: 0 });
+    }
+
     let fmt2;
     try {
       fmt2 = new Intl.NumberFormat(locale, {
@@ -82,6 +92,9 @@ export function AppSettingsProvider({ children }) {
     // Kept as its own name because expense and liquidation screens ask for it
     // explicitly; identical to money() now that the default carries centavos.
     const moneyPrecise = (n) => fmt2.format(Number(n || 0));
+    // For KPI tiles only. Anywhere a figure is added up or checked against a
+    // document, use money().
+    const moneyWhole = (n) => fmtWhole.format(Number(n || 0));
 
     // Compact form for chart axes (₱1.2M), where a full figure would crowd
     // the tick labels. Falls back to the plain formatter below 1000.
@@ -115,6 +128,7 @@ export function AppSettingsProvider({ children }) {
       currencySymbol: money(0).replace(/[\d.,\s]/g, ""),
       money,
       moneyPrecise,
+      moneyWhole,
       moneyCompact,
       t: (text) => translate(text, settings.language),
       refresh: load,

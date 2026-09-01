@@ -54,7 +54,7 @@ function periodLabel(periodType, year, index) {
 }
 
 function YtdComparison({ thisYear, lastYear }) {
-  const { money } = useAppSettings();
+  const { moneyWhole } = useAppSettings();
   if (!lastYear) {
     return (
       <div className="subtitle" style={{ margin: "6px 0 0" }}>
@@ -69,7 +69,7 @@ function YtdComparison({ thisYear, lastYear }) {
       <span style={{ color: up ? "var(--success)" : "var(--danger)", fontWeight: 600 }}>
         {up ? "▲" : "▼"} {Math.abs(change).toFixed(1)}%
       </span>{" "}
-      <span className="subtitle" style={{ margin: 0 }}>vs {money(lastYear)} same period last year</span>
+      <span className="subtitle" style={{ margin: 0 }}>vs {moneyWhole(lastYear)} same period last year</span>
     </div>
   );
 }
@@ -79,7 +79,7 @@ function YtdComparison({ thisYear, lastYear }) {
 // A pipeline that has stopped moving is the thing a sales review exists to
 // catch, and it is invisible on every other tile here: open pipeline value
 // looks identical whether the deals are progressing or parked.
-function PipelineAging({ aging, money, isHr, thresholdDraft, setThresholdDraft, saveThreshold, savingThreshold }) {
+function PipelineAging({ aging, money, moneyWhole, isHr, thresholdDraft, setThresholdDraft, saveThreshold, savingThreshold }) {
   if (!aging) return null;
   const { totals, byStage, worst, thresholdDays, staleCount } = aging;
   const clean = staleCount === 0;
@@ -122,13 +122,13 @@ function PipelineAging({ aging, money, isHr, thresholdDraft, setThresholdDraft, 
           <div className="stat-value" style={{ color: totals.stalledCount ? "var(--danger)" : undefined }}>
             {totals.stalledCount}
           </div>
-          <div className="stat-label">Stalled {thresholdDays}+ days — {money(totals.stalledValue)} at risk</div>
+          <div className="stat-label">Stalled {thresholdDays}+ days — {moneyWhole(totals.stalledValue)} at risk</div>
         </div>
         <div className="stat-card">
           <div className="stat-value" style={{ color: totals.overdueCount ? "var(--danger)" : undefined }}>
             {totals.overdueCount}
           </div>
-          <div className="stat-label">Past expected close — {money(totals.overdueValue)}</div>
+          <div className="stat-label">Past expected close — {moneyWhole(totals.overdueValue)}</div>
         </div>
         <div className="stat-card">
           <div className="stat-value">{totals.avgDaysInStage}d</div>
@@ -228,7 +228,7 @@ function PipelineAging({ aging, money, isHr, thresholdDraft, setThresholdDraft, 
 }
 
 export default function SalesDashboard() {
-  const { money } = useAppSettings();
+  const { money, moneyWhole } = useAppSettings();
   const [stats, setStats] = useState(null);
   const [revenueTrend, setRevenueTrend] = useState(null);
   const [targets, setTargets] = useState([]);
@@ -385,11 +385,11 @@ export default function SalesDashboard() {
 
       <div className="grid grid-4" style={{ marginBottom: 16 }}>
         <div className="stat-card">
-          <div className="stat-value">{money(stats.kpis.pipelineValue)}</div>
+          <div className="stat-value">{moneyWhole(stats.kpis.pipelineValue)}</div>
           <div className="stat-label">Open pipeline value</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">{money(stats.kpis.wonValue)}</div>
+          <div className="stat-value">{moneyWhole(stats.kpis.wonValue)}</div>
           <div className="stat-label">Won value</div>
         </div>
         <div className="stat-card">
@@ -397,19 +397,19 @@ export default function SalesDashboard() {
           <div className="stat-label">Open opportunities</div>
         </div>
         <div className="stat-card">
-          <div className="stat-value">{money(stats.kpis.ordersRevenue)}</div>
+          <div className="stat-value">{moneyWhole(stats.kpis.ordersRevenue)}</div>
           <div className="stat-label">Orders revenue</div>
         </div>
       </div>
 
       <div className="grid grid-3" style={{ marginBottom: 16 }}>
         <div className="stat-card">
-          <div className="stat-value">{money(stats.kpis.ordersRevenueYtdThisYear)}</div>
+          <div className="stat-value">{moneyWhole(stats.kpis.ordersRevenueYtdThisYear)}</div>
           <div className="stat-label">Order revenue — year to date (as of {stats.kpis.ytdAsOf})</div>
           <YtdComparison thisYear={stats.kpis.ordersRevenueYtdThisYear} lastYear={stats.kpis.ordersRevenueYtdLastYear} />
         </div>
         <div className="stat-card">
-          <div className="stat-value">{money(stats.kpis.orderBacklogValue)}</div>
+          <div className="stat-value">{moneyWhole(stats.kpis.orderBacklogValue)}</div>
           <div className="stat-label">
             Order backlog — {stats.kpis.orderBacklogCount} order{stats.kpis.orderBacklogCount === 1 ? "" : "s"} not yet delivered
           </div>
@@ -475,16 +475,16 @@ export default function SalesDashboard() {
             <>
               <div className="grid grid-4" style={{ marginBottom: 20 }}>
                 <div className="stat-card">
-                  <div className="stat-value">{money(pnl.totals.totalRevenue)}</div>
+                  <div className="stat-value">{moneyWhole(pnl.totals.totalRevenue)}</div>
                   <div className="stat-label">Total revenue</div>
                 </div>
                 <div className="stat-card">
-                  <div className="stat-value">{money(pnl.totals.totalCosts)}</div>
+                  <div className="stat-value">{moneyWhole(pnl.totals.totalCosts)}</div>
                   <div className="stat-label">Total costs</div>
                 </div>
                 <div className="stat-card">
                   <div className="stat-value" style={{ color: pnl.totals.netProfit >= 0 ? "var(--success)" : "var(--danger)" }}>
-                    {pnl.totals.netProfit >= 0 ? money(pnl.totals.netProfit) : `-${money(Math.abs(pnl.totals.netProfit))}`}
+                    {pnl.totals.netProfit >= 0 ? moneyWhole(pnl.totals.netProfit) : `-${moneyWhole(Math.abs(pnl.totals.netProfit))}`}
                   </div>
                   <div className="stat-label">{pnl.totals.netProfit >= 0 ? "Net profit" : "Net loss"}</div>
                 </div>
@@ -575,16 +575,16 @@ export default function SalesDashboard() {
             <>
               <div className="grid grid-4" style={{ marginBottom: 20 }}>
                 <div className="stat-card">
-                  <div className="stat-value">{money(expensesReport.totals.totalCashAdvance)}</div>
+                  <div className="stat-value">{moneyWhole(expensesReport.totals.totalCashAdvance)}</div>
                   <div className="stat-label">Total cash advance</div>
                 </div>
                 <div className="stat-card">
-                  <div className="stat-value">{money(expensesReport.totals.totalExpenses)}</div>
+                  <div className="stat-value">{moneyWhole(expensesReport.totals.totalExpenses)}</div>
                   <div className="stat-label">Total expenses</div>
                 </div>
                 <div className="stat-card">
                   <div className="stat-value" style={{ color: expensesReport.totals.balance >= 0 ? "var(--success)" : "var(--danger)" }}>
-                    {money(Math.abs(expensesReport.totals.balance))}
+                    {moneyWhole(Math.abs(expensesReport.totals.balance))}
                   </div>
                   <div className="stat-label">{expensesReport.totals.balance >= 0 ? "Due to company" : "Due to employees"}</div>
                 </div>
@@ -684,6 +684,7 @@ export default function SalesDashboard() {
       <PipelineAging
         aging={aging}
         money={money}
+        moneyWhole={moneyWhole}
         isHr={isHrUser}
         thresholdDraft={thresholdDraft}
         setThresholdDraft={setThresholdDraft}

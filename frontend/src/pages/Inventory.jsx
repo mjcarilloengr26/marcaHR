@@ -36,7 +36,7 @@ const marginFromPrice = (cost, price, current) => {
 const emptyForm = { sku: "", name: "", category: "", unit: "pcs", quantity_on_hand: "", reorder_level: "", unit_cost: "", unit_price: "", margin: DEFAULT_MARGIN, location_id: "", notes: "" };
 
 export default function Inventory() {
-  const { money, moneyPrecise, currencySymbol } = useAppSettings();
+  const { money, moneyPrecise, moneyWhole, currencySymbol } = useAppSettings();
   const [items, setItems] = useState([]);
   const [locations, setLocations] = useState([]);
   const [summary, setSummary] = useState(null);
