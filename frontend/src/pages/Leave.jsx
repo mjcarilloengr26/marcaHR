@@ -140,6 +140,15 @@ export default function Leave() {
     }
   };
 
+  // Approving deducts the days server-side and un-approving gives them back,
+  // so the balance table above has to be re-read too — otherwise it keeps
+  // showing the pre-approval figure until the page is reloaded, and the header
+  // promise that days are "deducted automatically" looks broken.
+  const refreshAfterBalanceChange = () => {
+    loadRequests();
+    if (balanceEmployeeId) loadBalances(balanceEmployeeId);
+  };
+
   const updateStatus = async (id, status) => {
     try {
       await api.put(`/leave/requests/${id}/status`, { status, review_note: reviewNoteDrafts[id] || undefined });
@@ -148,7 +157,7 @@ export default function Leave() {
         delete next[id];
         return next;
       });
-      loadRequests();
+      refreshAfterBalanceChange();
     } catch (err) {
       setError(err.message);
     }
@@ -158,11 +167,88 @@ export default function Leave() {
     if (!confirm("Cancel this leave request?")) return;
     try {
       await api.del(`/leave/requests/${id}`);
-      loadRequests();
+      refreshAfterBalanceChange();
     } catch (err) {
       setError(err.message);
     }
   };
+
+  // Deleting is an HR/admin tool. An employee withdrawing their own pending
+  // request already has "Cancel"; removing a decided request is a records job.
+  const canDelete = () => isHr;
+
+  const [selected, setSelected] = useState(() => new Set());
+  const [deletingId, setDeletingId] = useState(null);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  const toggleOne = (id) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  // Deleting an approved request hands the days back, so say so rather than
+  // letting HR discover it from the balance moving.
+  const daysWording = (rows) => {
+    const approved = rows.filter((r) => r.status === "approved");
+    if (approved.length === 0) return "";
+    const total = approved.reduce((sum, r) => sum + Number(r.days || 0), 0);
+    return (
+      `\n\n${approved.length} of them ${approved.length === 1 ? "is" : "are"} already approved, ` +
+      `so ${total} day${total === 1 ? "" : "s"} will be added back to the affected balances.`
+    );
+  };
+
+  const deleteRequest = async (r) => {
+    if (!confirm(`Delete ${r.employee_name}'s ${r.leave_type_name} (${r.start_date} → ${r.end_date})?` + daysWording([r]))) {
+      return;
+    }
+    setDeletingId(r.id);
+    setError("");
+    try {
+      await api.del(`/leave/requests/${r.id}`);
+      refreshAfterBalanceChange();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const deleteSelected = async () => {
+    const targets = requests.filter((r) => selected.has(r.id) && canDelete());
+    if (targets.length === 0) return;
+    if (!confirm(`Delete ${targets.length} leave request${targets.length === 1 ? "" : "s"}?` + daysWording(targets))) {
+      return;
+    }
+    setBulkDeleting(true);
+    setError("");
+    // One at a time rather than in parallel: each delete may adjust a balance,
+    // and a partial failure then names exactly which ones survived.
+    const failed = [];
+    for (const r of targets) {
+      try {
+        await api.del(`/leave/requests/${r.id}`);
+      } catch (err) {
+        failed.push(`${r.employee_name} ${r.leave_type_name}: ${err.message}`);
+      }
+    }
+    setBulkDeleting(false);
+    setSelected(new Set());
+    if (failed.length) {
+      setError(`${failed.length} of ${targets.length} could not be deleted — ${failed.join("; ")}`);
+    }
+    refreshAfterBalanceChange();
+  };
+
+  useEffect(() => {
+    setSelected((prev) => {
+      const live = new Set(requests.map((r) => r.id));
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [requests]);
 
   const filteredRequests = requests.filter((r) => {
     const q = search.trim().toLowerCase();
@@ -170,6 +256,20 @@ export default function Leave() {
     return [r.employee_name, r.leave_type_name, r.reason, r.status].some((v) => (v || "").toLowerCase().includes(q));
   });
   const { sorted, toggleSort, arrow } = useSort(filteredRequests, "created_at", "desc");
+
+  // Select-all covers the rows currently listed, so it respects the search
+  // rather than quietly taking rows that aren't on screen.
+  const selectableVisible = isHr ? sorted : [];
+  const selectedVisible = selectableVisible.filter((r) => selected.has(r.id));
+  const allVisibleSelected = selectableVisible.length > 0 && selectedVisible.length === selectableVisible.length;
+
+  const toggleAllVisible = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) selectableVisible.forEach((r) => next.delete(r.id));
+      else selectableVisible.forEach((r) => next.add(r.id));
+      return next;
+    });
 
   return (
     <div>
@@ -254,10 +354,42 @@ export default function Leave() {
         />
       </div>
 
+      {/* Only appears once something is ticked, so a destructive control isn't
+          sitting armed on the page during ordinary browsing. */}
+      {selected.size > 0 && (
+        <div
+          className="card"
+          style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}
+        >
+          <strong>{selected.size} selected</strong>
+          <button type="button" className="link-btn" disabled={bulkDeleting} onClick={() => setSelected(new Set())}>
+            Clear selection
+          </button>
+          <span style={{ flex: 1 }} />
+          <button type="button" className="btn btn-sm btn-danger" onClick={deleteSelected} disabled={bulkDeleting}>
+            {bulkDeleting ? "Deleting…" : `Delete ${selected.size} selected`}
+          </button>
+        </div>
+      )}
+
       <div className="card">
         <table className="sticky-head">
           <thead>
             <tr>
+              {isHr && (
+                <th style={{ width: 32 }}>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all requests shown"
+                    disabled={selectableVisible.length === 0}
+                    checked={allVisibleSelected}
+                    ref={(el) => {
+                      if (el) el.indeterminate = selectedVisible.length > 0 && !allVisibleSelected;
+                    }}
+                    onChange={toggleAllVisible}
+                  />
+                </th>
+              )}
               {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
               <SortTh label="Type" sortKey="leave_type_name" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Dates" sortKey="start_date" toggleSort={toggleSort} arrow={arrow} />
@@ -271,7 +403,17 @@ export default function Leave() {
           </thead>
           <tbody>
             {sorted.map((r) => (
-              <tr key={r.id}>
+              <tr key={r.id} className={selected.has(r.id) ? "row-selected" : undefined}>
+                {isHr && (
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${r.employee_name} ${r.leave_type_name}`}
+                      checked={selected.has(r.id)}
+                      onChange={() => toggleOne(r.id)}
+                    />
+                  </td>
+                )}
                 {isHr && <td>{r.employee_name}</td>}
                 <td>{r.leave_type_name}</td>
                 <td>{r.start_date} → {r.end_date}</td>
@@ -300,6 +442,16 @@ export default function Leave() {
                   )}
                   {!isHr && r.status === "rejected" && (
                     <button className="btn btn-sm" onClick={() => openResubmitForm(r)}>Resubmit</button>
+                  )}
+                  {isHr && (
+                    <button
+                      className="btn btn-sm btn-danger"
+                      style={{ marginTop: r.status === "pending" ? 6 : 0 }}
+                      disabled={deletingId === r.id}
+                      onClick={() => deleteRequest(r)}
+                    >
+                      {deletingId === r.id ? "Deleting…" : "Delete"}
+                    </button>
                   )}
                 </td>
               </tr>
