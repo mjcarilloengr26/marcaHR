@@ -9,9 +9,10 @@ import SortTh from "../components/SortTh";
 
 const EXPENSE_TYPE_OPTIONS = ["Operating Expenses", "Project Expenses"];
 const EXPENSE_TITLE_OPTIONS = [
-  "Fuel", "Parking", "Toll Fees", "Meals", "Maintenance", "Allowance",
-  "Supplies", "Materials", "Labor", "Airfare", "Hotel", "Foods",
-  "Equipment Rental", "Vehicle Rental", "Others",
+  "Fuel", "Parking", "Toll Fees", "Meals", "Maintenance", "Car Maintenance",
+  "Utilities", "Allowance", "Supplies", "Materials", "Labor", "Airfare",
+  "Hotel", "Foods", "Equipment Rental", "Vehicle Rental", "Office Rental",
+  "Others",
 ];
 const EMPTY_FORM = { title: "", title_other: "", expense_type: "", cash_advance_amount: "", cost_center: "", notes: "" };
 
