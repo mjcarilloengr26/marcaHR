@@ -30,6 +30,7 @@ const PurchaseOrders = lazy(() => import("./pages/PurchaseOrders"));
 const Inventory = lazy(() => import("./pages/Inventory"));
 const Users = lazy(() => import("./pages/Users"));
 const Reports = lazy(() => import("./pages/Reports"));
+const BusinessReview = lazy(() => import("./pages/BusinessReview"));
 const Events = lazy(() => import("./pages/Events"));
 const TermsSettings = lazy(() => import("./pages/TermsSettings"));
 const SecuritySettings = lazy(() => import("./pages/SecuritySettings"));
@@ -80,6 +81,7 @@ export default function App() {
         <Route path="/page-access" element={<Protected roles={["admin"]}><PageAccess /></Protected>} />
         <Route path="/menu-order" element={<Protected roles={["admin"]}><MenuOrder /></Protected>} />
         <Route path="/localization" element={<Protected roles={["admin"]}><LocalizationSettings /></Protected>} />
+        <Route path="/business-review" element={<Protected roles={["admin"]}><BusinessReview /></Protected>} />
         <Route path="/reports" element={<Protected pageKey="reports"><Reports /></Protected>} />
       </Routes>
     </Suspense>

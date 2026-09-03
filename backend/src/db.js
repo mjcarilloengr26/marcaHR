@@ -633,6 +633,28 @@ CREATE TABLE IF NOT EXISTS asset_requests (
 
 CREATE INDEX IF NOT EXISTS idx_asset_requests_employee ON asset_requests(employee_id);
 
+CREATE TABLE IF NOT EXISTS business_reviews (
+  id SERIAL PRIMARY KEY,
+  period_type TEXT NOT NULL CHECK(period_type IN ('monthly','quarterly','yearly')),
+  period_year INTEGER NOT NULL,
+  period_index INTEGER NOT NULL,
+  period_label TEXT NOT NULL,
+  -- The figures the narrative was written from, kept verbatim. A review read
+  -- six months later must be checkable against what was true when it was
+  -- written, not against what the database says today.
+  fact_sheet TEXT NOT NULL,
+  narrative TEXT,
+  model TEXT,
+  input_tokens INTEGER,
+  output_tokens INTEGER,
+  -- Why the written half is missing, when it is: no API key, a refusal, or an
+  -- error. The figures are still worth keeping either way.
+  narrative_error TEXT,
+  generated_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  UNIQUE(period_type, period_year, period_index)
+);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id SERIAL PRIMARY KEY,
   user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
