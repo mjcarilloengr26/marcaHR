@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { appTimezone } = require("../services/timezone");
 const { getSalesTargetsReport, parsePeriod, periodDateRange } = require("../services/salesTargets");
+const { getProfitLoss } = require("../services/profitLoss");
 const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
@@ -207,46 +208,17 @@ router.get(
     const startMonth = Number(start.split("-")[1]);
     const endMonth = Number(end.split("-")[1]);
 
-    // The four cost/revenue totals are independent, so they're fetched
-    // together instead of one round-trip at a time.
-    const [ordersRevenueRow, procurementRow, payrollRow, operatingExpensesRow] = await Promise.all([
-      db
-        .prepare("SELECT COALESCE(SUM(amount), 0) AS v FROM orders WHERE status != 'cancelled' AND order_date BETWEEN ? AND ?")
-        .get(start, end),
-      db
-        .prepare(
-          "SELECT COALESCE(SUM(amount), 0) AS v FROM purchase_orders WHERE status NOT IN ('cancelled', 'draft') AND order_date BETWEEN ? AND ?"
-        )
-        .get(start, end),
-      db
-        .prepare(
-          "SELECT COALESCE(SUM(net_pay), 0) AS v FROM payroll_records WHERE status IN ('finalized', 'paid') AND period_year = ? AND period_month BETWEEN ? AND ?"
-        )
-        .get(period_year, startMonth, endMonth),
-      db
-        .prepare(
-          `SELECT COALESCE(SUM(ei.amount), 0) AS v FROM expense_items ei
-           JOIN expense_reports er ON er.id = ei.report_id
-           WHERE er.status IN ('approved', 'reimbursed') AND ei.expense_date BETWEEN ? AND ?`
-        )
-        .get(start, end),
-    ]);
-
-    const ordersRevenue = ordersRevenueRow.v;
-    const procurement = procurementRow.v;
-    const payroll = payrollRow.v;
-    const operatingExpenses = operatingExpensesRow.v;
-
-    const totalRevenue = ordersRevenue;
-    const totalCosts = procurement + payroll + operatingExpenses;
-    const netProfit = totalRevenue - totalCosts;
-    const profitMarginPercent = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : null;
+    const pnl = await getProfitLoss({
+      start,
+      end,
+      periodYear: period_year,
+      startMonth,
+      endMonth,
+    });
 
     res.json({
       period: { type: period_type, year: period_year, index: period_index, label: periodLabel(period_type, period_year, period_index) },
-      revenue: { ordersRevenue },
-      costs: { procurement, payroll, operatingExpenses },
-      totals: { totalRevenue, totalCosts, netProfit, profitMarginPercent },
+      ...pnl,
     });
   })
 );
