@@ -49,6 +49,7 @@ export const NAV_ITEMS = [
   { to: "/security-settings", label: "Security", icon: "🔒", roles: ["admin"] },
   { to: "/branding-settings", label: "Branding", icon: "🖼️", roles: ["admin"] },
   { to: "/localization", label: "Localization", icon: "🌐", roles: ["admin"] },
+  { to: "/review-schedule", label: "Review Schedule", icon: "🗓️", roles: ["admin"] },
 ];
 
 // Splits the flat list into [{ section, links: [...] }]. The leading

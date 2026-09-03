@@ -5,8 +5,44 @@ const { appTimezone } = require("./timezone");
 const { companyName } = require("./branding");
 const { sendMail } = require("../mailer");
 
-// The hour, in the company's own timezone, a scheduled review is written.
-const SEND_HOUR = Number(process.env.REVIEW_HOUR ?? 7);
+// Defaults for a database that predates the settings screen. REVIEW_HOUR is
+// still read so an existing deployment's environment variable keeps working,
+// but the stored setting wins once an admin has saved one.
+const DEFAULTS = {
+  enabled: true,
+  sendOn: "month_end",
+  sendHour: Number(process.env.REVIEW_HOUR ?? 20),
+  monthly: true,
+  quarterly: true,
+  yearly: true,
+};
+
+// Read fresh on every tick rather than cached at boot: an admin changing the
+// send time should not have to wait for a redeploy for it to take effect.
+async function scheduleSettings() {
+  try {
+    const row = await db
+      .prepare(
+        `SELECT review_enabled, review_send_on, review_send_hour,
+                review_monthly, review_quarterly, review_yearly
+         FROM app_settings WHERE id = 1`
+      )
+      .get();
+    if (!row) return { ...DEFAULTS };
+    const hour = Number(row.review_send_hour);
+    return {
+      enabled: row.review_enabled !== false,
+      sendOn: row.review_send_on === "first_of_next" ? "first_of_next" : "month_end",
+      sendHour: Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : DEFAULTS.sendHour,
+      monthly: row.review_monthly !== false,
+      quarterly: row.review_quarterly !== false,
+      yearly: row.review_yearly !== false,
+    };
+  } catch {
+    // A settings read must never be what stops a review going out.
+    return { ...DEFAULTS };
+  }
+}
 
 // Today as the company sees it. Render runs in UTC, so a job keyed on the
 // server's own date would fire mid-afternoon in Manila and could run twice
@@ -34,28 +70,46 @@ async function localToday() {
   };
 }
 
-// Which reviews are due today. A period can only be reviewed once it has
-// finished, so everything here looks backwards: on the 1st, review what just
-// ended.
-function periodsDue({ year, month, day }) {
-  if (day !== 1) return [];
+// The last calendar day of a month — 28, 29, 30 or 31. Asking for "the 30th or
+// 31st" literally would skip February entirely and fire a day early in every
+// 31-day month, so the rule is the month's own last day.
+function lastDayOfMonth(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+// Which reviews are due today. They go out on the last day of the month, so
+// each one covers the month it is sent in — September's review arrives on
+// 30 September, not on 1 October.
+//
+// The trade-off is deliberate: anything recorded after SEND_HOUR on the final
+// day is not in the figures. Running on the 1st would capture the month whole
+// but deliver it a day late, and month-end delivery is what was asked for.
+// 'first_of_next' is the alternative: on the 1st, review the month that just
+// ended. Nothing is missed, but it lands a day after the month it covers.
+function periodsDue({ year, month, day }, settings = DEFAULTS) {
+  const wanted = (t) =>
+    (t === "monthly" && settings.monthly) ||
+    (t === "quarterly" && settings.quarterly) ||
+    (t === "yearly" && settings.yearly);
+
   const due = [];
 
-  const prevMonth = month === 1 ? 12 : month - 1;
-  const prevMonthYear = month === 1 ? year - 1 : year;
-  due.push({ periodType: "monthly", year: prevMonthYear, index: prevMonth });
-
-  // A quarter ends on the last day of March, June, September or December, so
-  // the 1st of January, April, July and October is the morning after one.
-  if ([1, 4, 7, 10].includes(month)) {
-    const prevQuarter = month === 1 ? 4 : Math.floor((month - 1) / 3);
-    const prevQuarterYear = month === 1 ? year - 1 : year;
-    due.push({ periodType: "quarterly", year: prevQuarterYear, index: prevQuarter });
+  if (settings.sendOn === "first_of_next") {
+    if (day !== 1) return [];
+    const m = month === 1 ? 12 : month - 1;
+    const y = month === 1 ? year - 1 : year;
+    due.push({ periodType: "monthly", year: y, index: m });
+    if (m % 3 === 0) due.push({ periodType: "quarterly", year: y, index: m / 3 });
+    if (m === 12) due.push({ periodType: "yearly", year: y, index: 0 });
+  } else {
+    if (day !== lastDayOfMonth(year, month)) return [];
+    due.push({ periodType: "monthly", year, index: month });
+    // A quarter ends with March, June, September or December.
+    if (month % 3 === 0) due.push({ periodType: "quarterly", year, index: month / 3 });
+    if (month === 12) due.push({ periodType: "yearly", year, index: 0 });
   }
 
-  if (month === 1) due.push({ periodType: "yearly", year: year - 1, index: 0 });
-
-  return due;
+  return due.filter((d) => wanted(d.periodType));
 }
 
 // The table's own unique constraint is the record of what has been written, so
@@ -116,16 +170,38 @@ async function generateAndStore({ periodType, year, index }) {
   return { factSheet, narrative, narrativeError };
 }
 
+// The review is written as markdown for the page. A plain-text email should not
+// show its scaffolding, so headings become underlined lines and bold markers go.
+function toPlainText(markdown) {
+  const out = [];
+  for (const raw of markdown.split("\n")) {
+    const line = raw.replace(/\*\*(.+?)\*\*/g, "$1").trimEnd();
+    if (line.startsWith("## ")) {
+      const heading = line.slice(3);
+      if (out.length) out.push("");
+      out.push(heading.toUpperCase(), "-".repeat(heading.length));
+    } else {
+      out.push(line);
+    }
+  }
+  return out.join("\n").trim();
+}
+
 async function emailReview({ factSheet, narrative, narrativeError }) {
   const to = await adminEmails();
   if (to.length === 0) return;
   const company = await companyName();
   const p = factSheet.period;
 
+  const footer =
+    `\n\n---\nFigures cover ${p.start} to ${p.end}. ` +
+    `Open ${company} and go to Business Review to read this alongside the numbers behind it.`;
+
   const body = narrative
-    ? `${narrative}\n\n—\nFigures cover ${p.start} to ${p.end}. Read the full review in ${company} under Reports.`
+    ? toPlainText(narrative) + footer
     : `The figures for ${p.label} are ready, but the written review could not be generated:\n\n` +
-      `  ${narrativeError}\n\nThe numbers are in ${company} under Reports.`;
+      `  ${narrativeError}\n\nThe numbers are in ${company} under Business Review.` +
+      `\n\n---\nFigures cover ${p.start} to ${p.end}.`;
 
   sendMail({
     to,
@@ -135,11 +211,16 @@ async function emailReview({ factSheet, narrative, narrativeError }) {
 }
 
 async function runDueReviews({ force = null } = {}) {
+  const settings = await scheduleSettings();
   const today = await localToday();
 
-  const due = force ? [force] : periodsDue(today);
-  if (!force && today.hour !== SEND_HOUR) {
-    return { skipped: "outside the send hour", hour: today.hour, tz: today.tz };
+  // A forced run is an admin pressing a button, so it ignores the switch and
+  // the calendar — but not the model, which may still be unconfigured.
+  if (!force && !settings.enabled) return { skipped: "scheduled reviews are switched off" };
+
+  const due = force ? [force] : periodsDue(today, settings);
+  if (!force && today.hour !== settings.sendHour) {
+    return { skipped: "outside the send hour", hour: today.hour, sendHour: settings.sendHour, tz: today.tz };
   }
   if (due.length === 0) return { skipped: "nothing due today", day: today.day };
 
@@ -162,10 +243,17 @@ function scheduleBusinessReviews() {
     return;
   }
   const CHECK_EVERY_MS = 30 * 60 * 1000;
-  console.log(
-    `Business reviews armed for ${String(SEND_HOUR).padStart(2, "0")}:00 app time on the 1st` +
-      (configured() ? "" : " — no ANTHROPIC_API_KEY yet, so figures only")
-  );
+  scheduleSettings()
+    .then((s) =>
+      console.log(
+        s.enabled
+          ? `Business reviews armed for ${String(s.sendHour).padStart(2, "0")}:00 app time ` +
+            (s.sendOn === "month_end" ? "on the last day of each month" : "on the 1st of each month") +
+            (configured() ? "" : " — no ANTHROPIC_API_KEY yet, so figures only")
+          : "Scheduled business reviews are switched off in Administration → Review Schedule"
+      )
+    )
+    .catch(() => {});
   const tick = () =>
     runDueReviews()
       .then((r) => {
@@ -176,4 +264,12 @@ function scheduleBusinessReviews() {
   setInterval(tick, CHECK_EVERY_MS).unref();
 }
 
-module.exports = { scheduleBusinessReviews, runDueReviews, periodsDue, generateAndStore };
+module.exports = {
+  scheduleBusinessReviews,
+  runDueReviews,
+  periodsDue,
+  generateAndStore,
+  emailReview,
+  scheduleSettings,
+  DEFAULTS,
+};

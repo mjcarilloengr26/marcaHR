@@ -751,6 +751,24 @@ async function ensureDealAging() {
   await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS stale_deal_days INTEGER NOT NULL DEFAULT 30");
 }
 
+// When the scheduled business review goes out. This lived in environment
+// variables first, which meant changing the send time was a redeploy and only
+// whoever holds the Render login could do it. It belongs to whoever runs the
+// company, so it lives in the database behind an admin screen.
+//
+// send_on is 'month_end' or 'first_of_next'. Month-end delivers the review
+// inside the month it covers, at the cost of missing whatever is recorded
+// after the send hour on the final day; first_of_next captures the month
+// whole but arrives a day later.
+async function ensureReviewSchedule() {
+  await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS review_enabled BOOLEAN NOT NULL DEFAULT true");
+  await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS review_send_on TEXT NOT NULL DEFAULT 'month_end'");
+  await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS review_send_hour INTEGER NOT NULL DEFAULT 20");
+  await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS review_monthly BOOLEAN NOT NULL DEFAULT true");
+  await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS review_quarterly BOOLEAN NOT NULL DEFAULT true");
+  await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS review_yearly BOOLEAN NOT NULL DEFAULT true");
+}
+
 // Postgres REAL is 4-byte single precision — about seven significant digits.
 // That is enough for 1,234.56 and not enough for 484,012.56, which it silently
 // stores as 484,013. Every money column in the app was REAL, so any amount
@@ -1053,6 +1071,7 @@ db.migrate = function () {
       .then(() => ensureBoardCardAssignees())
       .then(() => ensureAssetMarketValue())
       .then(() => ensureDealAging())
+      .then(() => ensureReviewSchedule())
       .then(() => widenRealColumns())
       .then(() => ensurePurchaseOrderWorkOrder())
       .then(() => ensureExpenseType())

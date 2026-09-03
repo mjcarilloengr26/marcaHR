@@ -1,0 +1,275 @@
+import { useEffect, useMemo, useState } from "react";
+import { api } from "../api/client";
+import { useAppSettings } from "../context/AppSettingsContext";
+
+const HOURS = Array.from({ length: 24 }, (_, h) => ({
+  value: h,
+  label:
+    h === 0 ? "12:00 midnight"
+    : h === 12 ? "12:00 noon"
+    : h < 12 ? `${h}:00 am`
+    : `${h - 12}:00 pm`,
+}));
+
+// Named so the admin can see what each choice actually does to the figures,
+// rather than picking a date and discovering the consequence a month later.
+const SEND_ON = [
+  {
+    value: "month_end",
+    label: "Last day of the month",
+    note: "Arrives inside the month it covers — 30 September for September. Anything recorded after the send time on that last day won't be in the figures.",
+  },
+  {
+    value: "first_of_next",
+    label: "1st of the following month",
+    note: "Covers the month completely, but lands a day after it ends — 1 October for September.",
+  },
+];
+
+export default function ReviewSchedule() {
+  const { t } = useAppSettings();
+  const [form, setForm] = useState(null);
+  const [recipients, setRecipients] = useState([]);
+  const [narrativeAvailable, setNarrativeAvailable] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const apply = (d) => {
+    setForm({
+      enabled: d.enabled,
+      sendOn: d.sendOn,
+      sendHour: d.sendHour,
+      monthly: d.monthly,
+      quarterly: d.quarterly,
+      yearly: d.yearly,
+    });
+    setRecipients(d.recipients || []);
+    setNarrativeAvailable(d.narrativeAvailable);
+  };
+
+  useEffect(() => {
+    api
+      .get("/business-review/schedule")
+      .then(apply)
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const set = (patch) => {
+    setForm((f) => ({ ...f, ...patch }));
+    setNotice("");
+  };
+
+  const save = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      apply(await api.put("/business-review/schedule", form));
+      setNotice("Saved. The next check picks this up — no redeploy needed.");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const sendTest = async () => {
+    setTesting(true);
+    setError("");
+    setNotice("");
+    try {
+      const r = await api.post("/business-review/schedule/test", {});
+      setNotice(`Sent the ${r.period} review to ${r.sent.join(", ")}. Check the inbox — delivery can take a minute.`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  // A plain sentence of what is currently configured, so the effect of the
+  // controls is readable without mentally recombining them.
+  const summary = useMemo(() => {
+    if (!form) return "";
+    if (!form.enabled) return "No reviews are sent automatically.";
+    const cadences = [
+      form.monthly && "monthly",
+      form.quarterly && "quarterly",
+      form.yearly && "yearly",
+    ].filter(Boolean);
+    if (cadences.length === 0) return "Nothing is selected to send.";
+    const when = form.sendOn === "month_end" ? "the last day of the month" : "the 1st of the month";
+    const hour = HOURS.find((h) => h.value === form.sendHour)?.label || `${form.sendHour}:00`;
+    const list =
+      cadences.length === 1 ? cadences[0]
+      : `${cadences.slice(0, -1).join(", ")} and ${cadences[cadences.length - 1]}`;
+    return `The ${list} review${cadences.length > 1 ? "s" : ""} will be written and emailed at ${hour} on ${when}, whenever one falls due.`;
+  }, [form]);
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <h1>{t("Review Schedule")}</h1>
+          <p className="subtitle">
+            When the business review is written automatically, and who receives it
+          </p>
+        </div>
+      </div>
+
+      {error && <div className="error-banner">{error}</div>}
+      {notice && <div className="success-banner">{notice}</div>}
+
+      {loading || !form ? (
+        <div className="page-loading">Loading…</div>
+      ) : (
+        <>
+          <div className="card" style={{ marginBottom: 16 }}>
+            <form onSubmit={save}>
+              <div className="form-row" style={{ marginBottom: 18 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={form.enabled}
+                    onChange={(e) => set({ enabled: e.target.checked })}
+                    style={{ width: 16, height: 16 }}
+                  />
+                  Send business reviews automatically
+                </label>
+                <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
+                  Switching this off stops the emails. Reviews can still be generated by hand
+                  from the Business Review page.
+                </div>
+              </div>
+
+              <fieldset
+                disabled={!form.enabled}
+                style={{ border: 0, padding: 0, margin: 0, opacity: form.enabled ? 1 : 0.5 }}
+              >
+                <div className="grid grid-2">
+                  <div className="form-row">
+                    <label>Send on</label>
+                    <select value={form.sendOn} onChange={(e) => set({ sendOn: e.target.value })}>
+                      {SEND_ON.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    <div className="subtitle" style={{ fontSize: 12, marginTop: 6 }}>
+                      {SEND_ON.find((o) => o.value === form.sendOn)?.note}
+                    </div>
+                  </div>
+
+                  <div className="form-row">
+                    <label>Send at</label>
+                    <select
+                      value={form.sendHour}
+                      onChange={(e) => set({ sendHour: Number(e.target.value) })}
+                    >
+                      {HOURS.map((h) => (
+                        <option key={h.value} value={h.value}>{h.label}</option>
+                      ))}
+                    </select>
+                    <div className="subtitle" style={{ fontSize: 12, marginTop: 6 }}>
+                      Company time. Writing a review takes about a minute, so the email
+                      arrives shortly after this.
+                    </div>
+                  </div>
+                </div>
+
+                <h3 style={{ fontSize: 14, margin: "22px 0 4px" }}>Which reviews</h3>
+                <p className="subtitle" style={{ fontSize: 12, margin: "0 0 10px" }}>
+                  A quarterly review is sent alongside the monthly one when a quarter ends;
+                  the yearly one arrives with December's.
+                </p>
+                {[
+                  ["monthly", "Monthly", "Twelve a year"],
+                  ["quarterly", "Quarterly", "Four a year, in March, June, September and December"],
+                  ["yearly", "Yearly", "One a year, with December"],
+                ].map(([key, label, note]) => (
+                  <label
+                    key={key}
+                    style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10, cursor: "pointer" }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form[key]}
+                      onChange={(e) => set({ [key]: e.target.checked })}
+                      style={{ width: 16, height: 16, marginTop: 2 }}
+                    />
+                    <span>
+                      {label}
+                      <span className="subtitle" style={{ fontSize: 12, display: "block" }}>{note}</span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+
+              <div
+                style={{
+                  margin: "18px 0 4px",
+                  padding: "10px 14px",
+                  border: "1px solid var(--border)",
+                  borderRadius: 8,
+                  fontSize: 13,
+                }}
+              >
+                {summary}
+              </div>
+
+              <div className="form-actions" style={{ marginTop: 16 }}>
+                <button className="btn" type="submit" disabled={saving}>
+                  {saving ? "Saving…" : "Save schedule"}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          <div className="card">
+            <h2>Recipients</h2>
+            <p className="subtitle" style={{ marginTop: 0 }}>
+              Every admin user with an email address. To add someone, give them an admin
+              account under Users — a review reads across payroll and margin together, so
+              it follows that role rather than a separate mailing list.
+            </p>
+            {recipients.length === 0 ? (
+              <div className="error-banner" style={{ marginBottom: 0 }}>
+                No admin user has an email address on record, so nothing can be delivered.
+              </div>
+            ) : (
+              <ul style={{ margin: "8px 0 0", paddingLeft: 20, lineHeight: 1.8 }}>
+                {recipients.map((r) => <li key={r}>{r}</li>)}
+              </ul>
+            )}
+
+            {!narrativeAvailable && (
+              <div className="error-banner" style={{ margin: "14px 0 0" }}>
+                No API key is configured, so scheduled emails will carry the figures with an
+                explanation in place of the written review.
+              </div>
+            )}
+
+            <div className="form-actions" style={{ marginTop: 18 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={sendTest}
+                disabled={testing || recipients.length === 0}
+              >
+                {testing ? "Sending…" : "Send a test email now"}
+              </button>
+              <span className="subtitle" style={{ fontSize: 12, marginLeft: 12 }}>
+                Re-sends the most recent review that has already been written. Costs nothing —
+                it does not call the model.
+              </span>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
