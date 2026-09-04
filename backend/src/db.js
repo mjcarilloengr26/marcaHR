@@ -345,9 +345,16 @@ CREATE TABLE IF NOT EXISTS cash_advances (
   -- the audit log records each change, and a returns table is more machinery
   -- than a figure that moves a handful of times needs.
   returned_amount NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (returned_amount >= 0),
-  -- 'settled' is a human decision, not a computed state: an advance can be
-  -- fully liquidated on paper while a receipt is still being chased.
-  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','settled','cancelled')),
+  -- Requesting money and holding money are different states, so an advance is
+  -- routed for approval before it exists as cash: 'pending' is asked for,
+  -- 'open' is approved and released, 'rejected' was refused. 'settled' is a
+  -- human decision rather than a computed one — an advance can be fully
+  -- liquidated on paper while a receipt is still being chased.
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK(status IN ('pending','open','rejected','settled','cancelled')),
+  decided_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  decided_at TEXT,
+  decision_note TEXT,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
   created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL
@@ -873,6 +880,21 @@ async function ensureDealAging() {
 // go on working exactly as before, and only reports created against an
 // advance carry this. Rewriting live records to fit a new shape is a risk the
 // feature does not need to take.
+// cash_advances predates the approval step, so the CHECK has to be replaced
+// rather than added to — Postgres will not widen one in place. Anything
+// already released stays 'open': it was approved by the act of releasing it,
+// and retro-flagging live advances as unapproved would be a lie.
+async function ensureCashAdvanceApproval() {
+  await pool.query("ALTER TABLE cash_advances ADD COLUMN IF NOT EXISTS decided_by INTEGER REFERENCES employees(id) ON DELETE SET NULL");
+  await pool.query("ALTER TABLE cash_advances ADD COLUMN IF NOT EXISTS decided_at TEXT");
+  await pool.query("ALTER TABLE cash_advances ADD COLUMN IF NOT EXISTS decision_note TEXT");
+  await pool.query("ALTER TABLE cash_advances DROP CONSTRAINT IF EXISTS cash_advances_status_check");
+  await pool.query(
+    "ALTER TABLE cash_advances ADD CONSTRAINT cash_advances_status_check CHECK (status IN ('pending','open','rejected','settled','cancelled'))"
+  );
+  await pool.query("ALTER TABLE cash_advances ALTER COLUMN status SET DEFAULT 'pending'");
+}
+
 async function ensureCashAdvanceLink() {
   await pool.query(
     "ALTER TABLE expense_reports ADD COLUMN IF NOT EXISTS cash_advance_id INTEGER REFERENCES cash_advances(id) ON DELETE SET NULL"
@@ -1205,6 +1227,7 @@ db.migrate = function () {
       .then(() => ensureReviewSchedule())
       .then(() => ensureAssetQuantity())
       .then(() => ensureCashAdvanceLink())
+      .then(() => ensureCashAdvanceApproval())
       .then(() => widenRealColumns())
       .then(() => ensurePurchaseOrderWorkOrder())
       .then(() => ensureExpenseType())

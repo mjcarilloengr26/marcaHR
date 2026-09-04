@@ -209,22 +209,29 @@ router.post(
     if (titleChoice.error) return res.status(400).json({ error: titleChoice.error });
     const title = titleChoice.value;
 
-    // A report can liquidate a released advance instead of carrying its own.
-    // The money then lives on the advance, so the report's own
-    // cash_advance_amount is forced to zero — recording it in both places
-    // would double-count it everywhere the two are summed.
-    let advanceId = null;
+    // Two kinds of claim, and the difference is whether money was handed over
+    // first.
+    //
+    // A liquidation accounts for a released advance: the money lives on the
+    // advance and nowhere else, so the report never carries an amount of its
+    // own — recording it in both places would double-count it everywhere the
+    // two are summed.
+    //
+    // A reimbursement is out of pocket. There is no advance to name and
+    // requiring one would mean nobody could claim back a PHP 200 taxi without
+    // asking for cash first, which is not how anybody works.
+    let advance = null;
     if (cash_advance_id) {
-      const advance = await db.prepare("SELECT * FROM cash_advances WHERE id = ?").get(cash_advance_id);
+      advance = await db.prepare("SELECT * FROM cash_advances WHERE id = ?").get(cash_advance_id);
       if (!advance) return res.status(400).json({ error: "That cash advance does not exist" });
       if (advance.employee_id !== Number(employee_id)) {
         return res.status(400).json({ error: "That advance was released to somebody else" });
       }
       if (advance.status !== "open") {
-        return res.status(400).json({ error: `That advance is ${advance.status} and cannot take further liquidation` });
+        return res.status(400).json({ error: `That advance is ${advance.status} and cannot take liquidation` });
       }
-      advanceId = advance.id;
     }
+    const advanceId = advance ? advance.id : null;
 
     const info = await db
       .prepare(
@@ -235,7 +242,10 @@ router.post(
         employee_id,
         title,
         expense_type || null,
-        advanceId ? 0 : cash_advance_amount || 0,
+        0,
+        // Independent of the advance on purpose: one advance can fund several
+        // projects, so inheriting the advance's cost centre would file work
+        // against the wrong one and be wrong more often than it was right.
         cost_center || null,
         notes || null,
         advanceId
@@ -355,6 +365,94 @@ router.delete(
     }
     await db.prepare("DELETE FROM expense_items WHERE id = ?").run(req.params.itemId);
     res.status(204).end();
+  })
+);
+
+// Edit one line. Removing and retyping was the only way to correct a figure or
+// a category, which on a rejected report meant re-entering the receipt too —
+// the exact thing that had been queried.
+//
+// Guarded like the delete above: the owner while the report is a draft, or HR
+// at any time.
+router.put(
+  "/items/:itemId",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const item = await db.prepare("SELECT * FROM expense_items WHERE id = ?").get(req.params.itemId);
+    if (!item) return res.status(404).json({ error: "Expense item not found" });
+    const report = await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(item.report_id);
+    const isOwner = req.user.employee_id === report.employee_id;
+    const isHr = ["admin", "hr"].includes(req.user.role);
+    if (!isOwner && !isHr) return res.status(403).json({ error: "Insufficient permissions" });
+    if (report.status !== "draft" && !isHr) {
+      return res.status(400).json({ error: "Only draft reports can be edited" });
+    }
+
+    const body = req.body || {};
+    const categoryChoice = resolveChoice({
+      choice: body.category,
+      other: body.category_other,
+      allowed: CATEGORIES,
+      label: "Category",
+    });
+    if (categoryChoice.error) return res.status(400).json({ error: categoryChoice.error });
+
+    const expense_date = String(body.expense_date || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expense_date)) {
+      return res.status(400).json({ error: "expense_date must be YYYY-MM-DD" });
+    }
+    const amount = Number(body.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ error: "Amount must be more than zero" });
+    }
+
+    const text = (v) => {
+      const t = typeof v === "string" ? v.trim() : v == null ? "" : String(v).trim();
+      return t === "" ? null : t;
+    };
+
+    // A new file replaces the old one; sending nothing keeps whatever is
+    // already attached. Replacing a receipt is the common reason for editing a
+    // rejected line, so losing it silently would defeat the point.
+    const photo = parseReceipt(body);
+    const keepReceipt = !body.receipt_data;
+
+    await db
+      .prepare(
+        `UPDATE expense_items SET expense_date = ?, category = ?, description = ?, amount = ?,
+                receipt_ref = ?, supplier_name = ?, supplier_address = ?, supplier_tin = ?,
+                receipt_name = CASE WHEN ?::boolean THEN receipt_name ELSE ? END,
+                receipt_type = CASE WHEN ?::boolean THEN receipt_type ELSE ? END,
+                receipt_data = CASE WHEN ?::boolean THEN receipt_data ELSE ? END
+         WHERE id = ?`
+      )
+      .run(
+        expense_date,
+        categoryChoice.value,
+        text(body.description),
+        amount,
+        text(body.receipt_ref),
+        text(body.supplier_name),
+        text(body.supplier_address),
+        text(body.supplier_tin),
+        keepReceipt, photo.name,
+        keepReceipt, photo.type,
+        keepReceipt, photo.data,
+        req.params.itemId
+      );
+
+    await logRequestEvent(req, "edit_expense_item", {
+      entityType: "expense_item",
+      entityId: Number(req.params.itemId),
+      details: {
+        report_id: item.report_id,
+        was: { category: item.category, amount: item.amount, expense_date: item.expense_date },
+        now: { category: categoryChoice.value, amount, expense_date },
+        receipt_replaced: !keepReceipt,
+      },
+    });
+
+    res.json(await db.prepare(`SELECT ${ITEM_COLUMNS} FROM expense_items WHERE id = ?`).get(req.params.itemId));
   })
 );
 

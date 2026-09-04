@@ -400,17 +400,23 @@ export default function Expenses() {
                 />
               </div>
             )}
-            {/* Either this report liquidates money already released, or it
-                carries its own advance. Both at once would count the same
-                money twice, so choosing an advance hides the amount field. */}
-            {openAdvances.length > 0 && (
+            {/* Two kinds of claim. Liquidating accounts for money already
+                handed over; a reimbursement is out of pocket and needs no
+                advance — requiring one would mean nobody could claim back a
+                taxi fare without asking for cash first. Either way there is no
+                amount to type here: it comes from the advance, or from the
+                receipts. */}
+            <div className="grid grid-2">
               <div className="form-row">
-                <label>Liquidating a cash advance?</label>
+                <label>Cash advance being liquidated</label>
                 <select
                   value={form.cash_advance_id}
+                  // Deliberately does not touch the cost centre: one advance can
+                  // fund several projects, so carrying its cost centre across
+                  // would quietly file work against the wrong one.
                   onChange={(e) => setForm({ ...form, cash_advance_id: e.target.value, cash_advance_amount: "" })}
                 >
-                  <option value="">No — this report has its own advance</option>
+                  <option value="">None — reimbursement, paid out of pocket</option>
                   {openAdvances.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.reference} — {a.employee_name}
@@ -418,26 +424,21 @@ export default function Expenses() {
                     </option>
                   ))}
                 </select>
+                <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
+                  {openAdvances.length === 0
+                    ? "No approved advance available — this will be filed as a reimbursement."
+                    : "Leave as None to claim money back rather than account for an advance."}
+                </div>
               </div>
-            )}
-            {!form.cash_advance_id && (
               <div className="form-row">
-                <label>Cash advance amount</label>
-                <DecimalInput
-                  value={form.cash_advance_amount}
-                  onChange={(e) => setForm({ ...form, cash_advance_amount: e.target.value })}
-                  placeholder="0.00"
+                <label>Cost center</label>
+                <SuggestInput
+                  field="cost_center"
+                  value={form.cost_center}
+                  onChange={(e) => setForm({ ...form, cost_center: e.target.value })}
+                  placeholder="e.g. Sales, Engineering, CC-100"
                 />
               </div>
-            )}
-            <div className="form-row">
-              <label>Cost center</label>
-              <SuggestInput
-                field="cost_center"
-                value={form.cost_center}
-                onChange={(e) => setForm({ ...form, cost_center: e.target.value })}
-                placeholder="e.g. Sales, Engineering, CC-100"
-              />
             </div>
             <div className="form-row">
               <label>Notes</label>
@@ -588,6 +589,38 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
     a.remove();
   };
 
+  // The one form does both jobs. A separate inline row editor would mean two
+  // copies of every field and two places for the category rules to drift.
+  const [editingItemId, setEditingItemId] = useState(null);
+
+  const startEditItem = (it) => {
+    setError("");
+    setEditingItemId(it.id);
+    setItemForm({
+      expense_date: it.expense_date || "",
+      // A stored value that is no longer on the list — an older free-text
+      // category — would leave the select blank and silently change on save.
+      // Route it through "Others" with the original text kept instead.
+      category: options.categories.includes(it.category) ? it.category : it.category ? "Others" : "",
+      category_other: options.categories.includes(it.category) ? "" : it.category || "",
+      description: it.description || "",
+      amount: it.amount == null ? "" : String(it.amount),
+      receipt_ref: it.receipt_ref || "",
+      supplier_name: it.supplier_name || "",
+      supplier_address: it.supplier_address || "",
+      supplier_tin: it.supplier_tin || "",
+    });
+    // Leaving the picker empty keeps whatever is already attached; picking a
+    // file replaces it.
+    setReceipt(null);
+  };
+
+  const cancelEditItem = () => {
+    setEditingItemId(null);
+    setItemForm(EMPTY_ITEM_FORM);
+    setReceipt(null);
+  };
+
   const addItem = async (e) => {
     e.preventDefault();
     setSaving(true);
@@ -596,13 +629,16 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
       // "Others" is a prompt for the real name, not a category to store — a
       // column full of "Others" would be the free-text problem again wearing
       // a different label. category_other never reaches the server.
-      await api.post(`/expenses/${id}/items`, {
+      const payload = {
         ...itemForm,
         amount: Number(itemForm.amount),
         receipt_name: receipt?.name,
         receipt_type: receipt?.type,
         receipt_data: receipt?.data,
-      });
+      };
+      if (editingItemId) await api.put(`/expenses/items/${editingItemId}`, payload);
+      else await api.post(`/expenses/${id}/items`, payload);
+      setEditingItemId(null);
       setItemForm(EMPTY_ITEM_FORM);
       autoFilled.current = { address: "", tin: "" };
       setReceipt(null);
@@ -770,9 +806,14 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
                     <td>{money(it.amount)}</td>
                     {canEdit && (
                       <td>
-                        <button className="link-btn" onClick={() => removeItem(it.id)}>
-                          Remove
-                        </button>
+                        <div className="col-actions">
+                          <button className="link-btn" onClick={() => startEditItem(it)}>
+                            {editingItemId === it.id ? "Editing…" : "Edit"}
+                          </button>
+                          <button className="link-btn" onClick={() => removeItem(it.id)}>
+                            Remove
+                          </button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -878,8 +919,13 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
                   )}
                 </div>
                 <button type="submit" className="btn btn-sm" disabled={saving || attaching}>
-                  {saving ? "Adding…" : "+ Add item"}
+                  {saving ? (editingItemId ? "Saving…" : "Adding…") : editingItemId ? "Save changes" : "+ Add item"}
                 </button>
+                {editingItemId && (
+                  <button type="button" className="link-btn" onClick={cancelEditItem} style={{ marginLeft: 10 }}>
+                    Cancel
+                  </button>
+                )}
               </form>
             )}
 

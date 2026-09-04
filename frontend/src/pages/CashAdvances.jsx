@@ -6,7 +6,7 @@ import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
 
-const STATUS_BADGE = { open: "active", settled: "approved", cancelled: "cancelled" };
+const STATUS_BADGE = { pending: "pending", open: "active", rejected: "rejected", settled: "approved", cancelled: "cancelled" };
 
 const EMPTY = { employee_id: "", amount: "", date_released: "", purpose: "", cost_center: "", notes: "" };
 
@@ -70,9 +70,17 @@ export default function CashAdvances() {
     setError("");
     try {
       if (editingId) await api.put(`/cash-advances/${editingId}`, form);
-      else await api.post("/cash-advances", { ...form, employee_id: Number(form.employee_id) });
+      // An employee's request is always for themselves; the server enforces
+      // that too, so the field is simply not sent.
+      else await api.post("/cash-advances", isHr ? { ...form, employee_id: Number(form.employee_id) } : form);
       setShowForm(false);
-      setNotice(editingId ? "Advance updated." : "Advance released.");
+      setNotice(
+        editingId
+          ? "Advance updated."
+          : isHr
+            ? "Advance released."
+            : "Request sent — it will show as open once admin or HR approves it."
+      );
       await load();
     } catch (err) {
       setError(err.message);
@@ -103,6 +111,34 @@ export default function CashAdvances() {
         updated.outstanding === 0
           ? `${updated.reference} is now fully accounted for — nothing outstanding.`
           : `Recorded. ${money(updated.dueToCompany)} still due from ${updated.employee_name}.`
+      );
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const decide = async (a, decision) => {
+    const note =
+      decision === "rejected"
+        ? prompt(`Why is ${a.reference} being turned down?
+
+${a.employee_name} will see this.`)
+        : "";
+    if (decision === "rejected" && note === null) return;
+    setBusyId(a.id);
+    setError("");
+    try {
+      const updated = await api.put(`/cash-advances/${a.id}/decision`, {
+        decision,
+        decision_note: (note || "").trim() || null,
+      });
+      setNotice(
+        decision === "approved"
+          ? `${updated.reference} approved — ${money(updated.amount)} released to ${updated.employee_name}.`
+          : `${updated.reference} turned down.`
       );
       await load();
     } catch (err) {
@@ -155,6 +191,7 @@ export default function CashAdvances() {
   const { sorted, toggleSort, arrow } = useSort(filtered, "date_released", "desc");
 
   const openAdvances = advances.filter((a) => a.status === "open");
+  const pending = advances.filter((a) => a.status === "pending");
   const totalOut = openAdvances.reduce((n, a) => n + a.dueToCompany, 0);
   const totalOwed = openAdvances.reduce((n, a) => n + a.reimbursementDue, 0);
 
@@ -169,16 +206,24 @@ export default function CashAdvances() {
               : "Cash released to you, and what is left to liquidate."}
           </p>
         </div>
-        {isHr && (
-          <button className="btn" onClick={openNew}>+ Release advance</button>
-        )}
+        {/* Anyone can ask; only admin/HR release. The label says which is
+            happening rather than pretending they are the same act. */}
+        <button className="btn" onClick={openNew}>
+          {isHr ? "+ New cash advance" : "+ Request cash advance"}
+        </button>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
       {notice && <div className="success-banner">{notice}</div>}
 
       {!loading && advances.length > 0 && (
-        <div className="grid grid-3" style={{ marginBottom: 16 }}>
+        <div className="grid grid-4" style={{ marginBottom: 16 }}>
+          <div className="stat-card">
+            <div className="stat-value" style={{ color: pending.length ? "var(--warning)" : undefined }}>
+              {pending.length}
+            </div>
+            <div className="stat-label">Awaiting approval</div>
+          </div>
           <div className="stat-card">
             <div className="stat-value">{openAdvances.length}</div>
             <div className="stat-label">Open advances</div>
@@ -275,10 +320,23 @@ export default function CashAdvances() {
                     </td>
                     <td>
                       <span className={`badge badge-${STATUS_BADGE[a.status] || "neutral"}`}>{a.status}</span>
+                      {a.decision_note && (
+                        <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>{a.decision_note}</div>
+                      )}
                     </td>
                     {isHr && (
                       <td>
                         <div className="col-actions">
+                          {isHr && a.status === "pending" && (
+                            <>
+                              <button className="btn btn-sm" disabled={busyId === a.id} onClick={() => decide(a, "approved")}>
+                                Approve
+                              </button>
+                              <button className="btn btn-sm btn-secondary" disabled={busyId === a.id} onClick={() => decide(a, "rejected")}>
+                                Reject
+                              </button>
+                            </>
+                          )}
                           {a.status === "open" && a.dueToCompany > 0 && (
                             <button className="btn btn-sm" disabled={busyId === a.id} onClick={() => openReturn(a)}>
                               Cash returned
@@ -289,7 +347,7 @@ export default function CashAdvances() {
                               Settle
                             </button>
                           )}
-                          {a.status !== "open" && (
+                          {a.status === "settled" && (
                             <button className="btn btn-sm btn-secondary" disabled={busyId === a.id} onClick={() => setStatus(a, "open")}>
                               Reopen
                             </button>
@@ -317,33 +375,45 @@ export default function CashAdvances() {
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{editingId ? "Edit cash advance" : "Release a cash advance"}</h2>
+            <h2>{editingId ? "Edit cash advance" : isHr ? "Release a cash advance" : "Request a cash advance"}</h2>
             <p className="subtitle" style={{ margin: "0 0 12px" }}>
-              The reference is generated on release. Expense reports then draw against it until it is settled.
+              {isHr
+                ? "Released straight away. Expense reports then draw against it until it is settled."
+                : "Goes to admin/HR for approval. Nothing is released, and no expenses can be claimed against it, until it is approved."}
             </p>
             <form onSubmit={save}>
               <div className="grid grid-2">
-                <div className="form-row">
-                  <label>Employee</label>
-                  <select
-                    value={form.employee_id}
-                    onChange={(e) => setForm({ ...form, employee_id: e.target.value })}
-                    required
-                    disabled={!!editingId}
-                  >
-                    <option value="">Select employee…</option>
-                    {employees.map((emp) => (
-                      <option key={emp.id} value={emp.id}>
-                        {emp.first_name} {emp.last_name}
-                      </option>
-                    ))}
-                  </select>
-                  {editingId && (
+                {isHr ? (
+                  <div className="form-row">
+                    <label>Employee</label>
+                    <select
+                      value={form.employee_id}
+                      onChange={(e) => setForm({ ...form, employee_id: e.target.value })}
+                      required
+                      disabled={!!editingId}
+                    >
+                      <option value="">Select employee…</option>
+                      {employees.map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.first_name} {emp.last_name}
+                        </option>
+                      ))}
+                    </select>
+                    {editingId && (
+                      <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
+                        Who an advance was released to cannot change — release a new one instead.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="form-row">
+                    <label>For</label>
+                    <input value="You" disabled />
                     <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
-                      Who an advance was released to cannot change — release a new one instead.
+                      A request is always for yourself.
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
                 <div className="form-row">
                   <label>Amount released</label>
                   <DecimalInput
@@ -385,7 +455,7 @@ export default function CashAdvances() {
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
                 <button type="submit" className="btn" disabled={saving}>
-                  {saving ? "Saving…" : editingId ? "Save changes" : "Release advance"}
+                  {saving ? "Saving…" : editingId ? "Save changes" : isHr ? "Release advance" : "Send request"}
                 </button>
               </div>
             </form>

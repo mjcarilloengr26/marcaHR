@@ -8,6 +8,7 @@ const router = express.Router();
 
 const isHr = (req) => ["admin", "hr"].includes(req.user.role);
 const money = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const nowStamp = () => new Date().toISOString().slice(0, 19).replace("T", " ");
 
 // Liquidated is the sum of every linked report's items, and rejected reports
 // are excluded on purpose: a rejected liquidation has not accounted for
@@ -28,10 +29,12 @@ const SELECT = `
          ), 0) AS liquidated,
          COALESCE((
            SELECT COUNT(*) FROM expense_reports r WHERE r.cash_advance_id = a.id
-         ), 0)::int AS report_count
+         ), 0)::int AS report_count,
+         (dv.first_name || ' ' || dv.last_name) AS decided_by_name
   FROM cash_advances a
   JOIN employees e ON e.id = a.employee_id
-  LEFT JOIN departments d ON d.id = e.department_id`;
+  LEFT JOIN departments d ON d.id = e.department_id
+  LEFT JOIN employees dv ON dv.id = a.decided_by`;
 
 // outstanding > 0 means the employee still holds company cash.
 // outstanding < 0 means they spent more than they were given, and that excess
@@ -126,14 +129,15 @@ function readBody(body) {
   };
 }
 
-// Releasing money is an HR/admin act — an employee requesting one goes through
-// the ordinary approval conversation, not by writing their own advance.
+// Anyone can ask for an advance; nobody grants their own. An employee's
+// request is always for themselves — letting them name a recipient would be a
+// way to route company cash to someone else without a decision.
 router.post(
   "/",
   requireAuth,
-  requireRole("admin", "hr"),
   asyncHandler(async (req, res) => {
     const v = readBody(req.body);
+    if (!isHr(req)) v.employee_id = req.user.employee_id;
     if (!v.employee_id) return res.status(400).json({ error: "Choose who the advance is for" });
     if (!Number.isFinite(v.amount) || v.amount <= 0) return res.status(400).json({ error: "Amount must be more than zero" });
     if (!v.date_released || !/^\d{4}-\d{2}-\d{2}$/.test(v.date_released)) {
@@ -142,20 +146,73 @@ router.post(
     const employee = await db.prepare("SELECT id FROM employees WHERE id = ?").get(v.employee_id);
     if (!employee) return res.status(400).json({ error: "That employee does not exist" });
 
+    // HR raising one is the handover actually happening, so it is open from
+    // the start. An employee's goes to pending and waits for a decision.
+    const status = isHr(req) ? "open" : "pending";
     const reference = await nextReference(v.date_released);
     const info = await db
       .prepare(
-        `INSERT INTO cash_advances (reference, employee_id, amount, date_released, purpose, cost_center, notes, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO cash_advances (reference, employee_id, amount, date_released, purpose, cost_center, notes, created_by, status,
+                                    decided_by, decided_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(reference, v.employee_id, money(v.amount), v.date_released, v.purpose, v.cost_center, v.notes, req.user.employee_id || null);
+      .run(
+        reference, v.employee_id, money(v.amount), v.date_released, v.purpose, v.cost_center, v.notes,
+        req.user.employee_id || null, status,
+        status === "open" ? req.user.employee_id || null : null,
+        status === "open" ? nowStamp() : null
+      );
 
-    await logRequestEvent(req, "release_cash_advance", {
+    await logRequestEvent(req, status === "open" ? "release_cash_advance" : "request_cash_advance", {
       entityType: "cash_advance",
       entityId: info.lastInsertRowid,
-      details: { reference, employee_id: v.employee_id, amount: money(v.amount) },
+      details: { reference, employee_id: v.employee_id, amount: money(v.amount), status },
     });
     res.status(201).json(withBalance(await db.prepare(`${SELECT} WHERE a.id = ?`).get(info.lastInsertRowid)));
+  })
+);
+
+// Approve or refuse a request. Approving is the release: the money exists from
+// this moment, so the decision and the release are one act rather than two
+// steps somebody can forget the second half of.
+router.put(
+  "/:id/decision",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const { decision, decision_note } = req.body || {};
+    if (!["approved", "rejected"].includes(decision)) {
+      return res.status(400).json({ error: "decision must be approved or rejected" });
+    }
+    const existing = await db.prepare("SELECT * FROM cash_advances WHERE id = ?").get(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Cash advance not found" });
+    if (existing.status !== "pending") {
+      return res.status(400).json({ error: `That request is already ${existing.status}` });
+    }
+    // Nobody decides on their own request, however senior. The whole point of
+    // routing it is that a second person looks at it.
+    if (existing.employee_id && existing.employee_id === req.user.employee_id) {
+      return res.status(403).json({ error: "You cannot decide on your own cash advance request" });
+    }
+
+    await db
+      .prepare(
+        `UPDATE cash_advances SET status = ?, decided_by = ?, decided_at = ?, decision_note = ? WHERE id = ?`
+      )
+      .run(
+        decision === "approved" ? "open" : "rejected",
+        req.user.employee_id || null,
+        nowStamp(),
+        (decision_note || "").trim() || null,
+        req.params.id
+      );
+
+    await logRequestEvent(req, "decide_cash_advance", {
+      entityType: "cash_advance",
+      entityId: Number(req.params.id),
+      details: { reference: existing.reference, decision, amount: existing.amount },
+    });
+    res.json(withBalance(await db.prepare(`${SELECT} WHERE a.id = ?`).get(req.params.id)));
   })
 );
 
