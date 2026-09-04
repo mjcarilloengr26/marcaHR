@@ -320,6 +320,41 @@ CREATE TABLE IF NOT EXISTS expense_reports (
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 
+-- Money released to an employee, tracked in its own right so one advance can
+-- be liquidated by several reports and carry a running balance until it is
+-- settled. Before this, the advance lived on the report itself, which meant a
+-- single PHP 100,000 release had to be liquidated in one submission or not at
+-- all, and unused cash could only sit forever as "due to company".
+--
+-- The balance is never stored. outstanding = amount - returned - liquidated,
+-- computed on read from the linked reports, because a stored copy is a second
+-- source of truth that drifts the first time a report is edited.
+--
+-- A negative outstanding is the employee having spent more than they were
+-- given: that excess is a reimbursement owed back to them against this same
+-- advance, not a separate claim.
+CREATE TABLE IF NOT EXISTS cash_advances (
+  id SERIAL PRIMARY KEY,
+  reference TEXT NOT NULL UNIQUE,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+  date_released TEXT NOT NULL,
+  purpose TEXT,
+  cost_center TEXT,
+  -- Cash handed back unspent. Cumulative rather than one row per hand-back:
+  -- the audit log records each change, and a returns table is more machinery
+  -- than a figure that moves a handful of times needs.
+  returned_amount NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (returned_amount >= 0),
+  -- 'settled' is a human decision, not a computed state: an advance can be
+  -- fully liquidated on paper while a receipt is still being chased.
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','settled','cancelled')),
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cash_advances_employee ON cash_advances(employee_id);
+
 CREATE TABLE IF NOT EXISTS expense_items (
   id SERIAL PRIMARY KEY,
   report_id INTEGER NOT NULL REFERENCES expense_reports(id) ON DELETE CASCADE,
@@ -833,6 +868,18 @@ async function ensureDealAging() {
 // employee_assets predates quantity, and CREATE TABLE IF NOT EXISTS will not
 // add a column to a table that already exists. Everything already issued was
 // recorded as a single item, which is what the default says.
+// expense_reports predates cash advances having their own identity. Nothing
+// is migrated: existing reports keep the advance recorded on themselves and
+// go on working exactly as before, and only reports created against an
+// advance carry this. Rewriting live records to fit a new shape is a risk the
+// feature does not need to take.
+async function ensureCashAdvanceLink() {
+  await pool.query(
+    "ALTER TABLE expense_reports ADD COLUMN IF NOT EXISTS cash_advance_id INTEGER REFERENCES cash_advances(id) ON DELETE SET NULL"
+  );
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_expense_reports_advance ON expense_reports(cash_advance_id)");
+}
+
 async function ensureAssetQuantity() {
   await pool.query("ALTER TABLE employee_assets ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1");
   await pool.query("ALTER TABLE employee_assets ADD COLUMN IF NOT EXISTS returned_quantity INTEGER NOT NULL DEFAULT 0");
@@ -1157,6 +1204,7 @@ db.migrate = function () {
       .then(() => ensureDealAging())
       .then(() => ensureReviewSchedule())
       .then(() => ensureAssetQuantity())
+      .then(() => ensureCashAdvanceLink())
       .then(() => widenRealColumns())
       .then(() => ensurePurchaseOrderWorkOrder())
       .then(() => ensureExpenseType())

@@ -37,6 +37,7 @@ const SecuritySettings = lazy(() => import("./pages/SecuritySettings"));
 const BrandingSettings = lazy(() => import("./pages/BrandingSettings"));
 const PageAccess = lazy(() => import("./pages/PageAccess"));
 const MenuOrder = lazy(() => import("./pages/MenuOrder"));
+const CashAdvances = lazy(() => import("./pages/CashAdvances"));
 const LocalizationSettings = lazy(() => import("./pages/LocalizationSettings"));
 const ReviewSchedule = lazy(() => import("./pages/ReviewSchedule"));
 
@@ -66,6 +67,7 @@ export default function App() {
         <Route path="/performance" element={<Protected><Performance /></Protected>} />
         <Route path="/assets" element={<Protected><Assets /></Protected>} />
         <Route path="/board" element={<Protected><Board /></Protected>} />
+        <Route path="/cash-advances" element={<Protected><CashAdvances /></Protected>} />
         <Route path="/expenses" element={<Protected pageKey="expenses"><Expenses /></Protected>} />
         <Route path="/sales" element={<Protected roles={["admin", "hr"]} pageKey="sales"><SalesDashboard /></Protected>} />
         <Route path="/deals" element={<Protected roles={["admin", "hr", "employee"]} pageKey="deals"><Deals /></Protected>} />

@@ -36,7 +36,7 @@ const EXPENSE_CATEGORY_OPTIONS = [
   "Others",
 ];
 
-const EMPTY_FORM = { title: "", title_other: "", expense_type: "", cash_advance_amount: "", cost_center: "", notes: "" };
+const EMPTY_FORM = { title: "", title_other: "", expense_type: "", cash_advance_amount: "", cost_center: "", notes: "", cash_advance_id: "" };
 const EMPTY_ITEM_FORM = {
   expense_date: "",
   category: "",
@@ -63,6 +63,16 @@ export default function Expenses() {
   const [search, setSearch] = useState("");
 
   const load = () => api.get("/expenses").then(setReports).catch((err) => setError(err.message));
+
+  // Open advances this person can liquidate. An employee gets their own; HR
+  // gets everyone's, filtered client-side once a report's owner is known.
+  const [openAdvances, setOpenAdvances] = useState([]);
+  useEffect(() => {
+    api
+      .get("/cash-advances?status=open")
+      .then(setOpenAdvances)
+      .catch(() => {});
+  }, []);
 
   // Deleting from the list is an HR/admin tool. The server would also accept an
   // employee removing their own draft, but employee-facing access is deliberately
@@ -196,6 +206,7 @@ export default function Expenses() {
         cash_advance_amount: form.cash_advance_amount ? Number(form.cash_advance_amount) : 0,
         cost_center: form.cost_center,
         notes: form.notes,
+        cash_advance_id: form.cash_advance_id ? Number(form.cash_advance_id) : null,
       });
       setShowForm(false);
       setForm(EMPTY_FORM);
@@ -325,7 +336,16 @@ export default function Expenses() {
                   )}
                 </td>
                 <td>{r.cost_center || "—"}</td>
-                <td>{money(r.cash_advance_amount)}</td>
+                <td>
+                  {r.advance_reference ? (
+                    <>
+                      {money(r.advance_amount)}
+                      <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>from {r.advance_reference}</div>
+                    </>
+                  ) : (
+                    money(r.cash_advance_amount)
+                  )}
+                </td>
                 <td>{money(r.total_expenses)}</td>
                 <td>
                   {r.balance > 0 ? `${money(r.balance)} due to company` : r.balance < 0 ? `${money(-r.balance)} due to employee` : money(0)}
@@ -403,14 +423,36 @@ export default function Expenses() {
                 />
               </div>
             )}
-            <div className="form-row">
-              <label>Cash advance amount</label>
-              <DecimalInput
-                value={form.cash_advance_amount}
-                onChange={(e) => setForm({ ...form, cash_advance_amount: e.target.value })}
-                placeholder="0.00"
-              />
-            </div>
+            {/* Either this report liquidates money already released, or it
+                carries its own advance. Both at once would count the same
+                money twice, so choosing an advance hides the amount field. */}
+            {openAdvances.length > 0 && (
+              <div className="form-row">
+                <label>Liquidating a cash advance?</label>
+                <select
+                  value={form.cash_advance_id}
+                  onChange={(e) => setForm({ ...form, cash_advance_id: e.target.value, cash_advance_amount: "" })}
+                >
+                  <option value="">No — this report has its own advance</option>
+                  {openAdvances.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.reference} — {a.employee_name}
+                      {a.purpose ? ` · ${a.purpose}` : ""} · {money(a.dueToCompany)} left
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {!form.cash_advance_id && (
+              <div className="form-row">
+                <label>Cash advance amount</label>
+                <DecimalInput
+                  value={form.cash_advance_amount}
+                  onChange={(e) => setForm({ ...form, cash_advance_amount: e.target.value })}
+                  placeholder="0.00"
+                />
+              </div>
+            )}
             <div className="form-row">
               <label>Cost center</label>
               <SuggestInput

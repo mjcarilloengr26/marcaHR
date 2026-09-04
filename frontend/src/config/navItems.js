@@ -21,6 +21,7 @@ export const NAV_ITEMS = [
 
   { section: "Collaboration", icon: "🤝", roles: ["admin", "hr", "employee"] },
   { to: "/board", label: "Task Board", icon: "🗒️", roles: ["admin", "hr", "employee"] },
+  { to: "/cash-advances", label: "Cash Advances", icon: "💵", roles: ["admin", "hr", "employee"] },
   { to: "/expenses", label: "Expenses", icon: "🧾", roles: ["admin", "hr", "employee"] },
 
   { section: "Sales", icon: "💹", roles: ["admin", "hr", "employee"], salesOnly: true },

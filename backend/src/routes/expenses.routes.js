@@ -106,8 +106,12 @@ router.get(
   "/",
   requireAuth,
   asyncHandler(async (req, res) => {
-    let sql = `SELECT r.*, (e.first_name || ' ' || e.last_name) AS employee_name
-             FROM expense_reports r JOIN employees e ON e.id = r.employee_id WHERE 1=1`;
+    let sql = `SELECT r.*, (e.first_name || ' ' || e.last_name) AS employee_name,
+                    a.reference AS advance_reference, a.amount AS advance_amount
+             FROM expense_reports r
+             JOIN employees e ON e.id = r.employee_id
+             LEFT JOIN cash_advances a ON a.id = r.cash_advance_id
+             WHERE 1=1`;
     const params = [];
 
     if (req.user.role === "employee") {
@@ -179,17 +183,43 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = req.body || {};
     const employee_id = req.user.role === "employee" ? req.user.employee_id : body.employee_id || req.user.employee_id;
-    const { title, expense_type, cash_advance_amount, cost_center, notes } = body;
+    const { title, expense_type, cash_advance_amount, cost_center, notes, cash_advance_id } = body;
     if (!employee_id || !title) return res.status(400).json({ error: "title is required" });
     if (expense_type && !EXPENSE_TYPES.includes(expense_type)) {
       return res.status(400).json({ error: `expense_type must be one of: ${EXPENSE_TYPES.join(", ")}` });
     }
+
+    // A report can liquidate a released advance instead of carrying its own.
+    // The money then lives on the advance, so the report's own
+    // cash_advance_amount is forced to zero — recording it in both places
+    // would double-count it everywhere the two are summed.
+    let advanceId = null;
+    if (cash_advance_id) {
+      const advance = await db.prepare("SELECT * FROM cash_advances WHERE id = ?").get(cash_advance_id);
+      if (!advance) return res.status(400).json({ error: "That cash advance does not exist" });
+      if (advance.employee_id !== Number(employee_id)) {
+        return res.status(400).json({ error: "That advance was released to somebody else" });
+      }
+      if (advance.status !== "open") {
+        return res.status(400).json({ error: `That advance is ${advance.status} and cannot take further liquidation` });
+      }
+      advanceId = advance.id;
+    }
+
     const info = await db
       .prepare(
-        `INSERT INTO expense_reports (employee_id, title, expense_type, cash_advance_amount, cost_center, notes, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'draft')`
+        `INSERT INTO expense_reports (employee_id, title, expense_type, cash_advance_amount, cost_center, notes, status, cash_advance_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)`
       )
-      .run(employee_id, title, expense_type || null, cash_advance_amount || 0, cost_center || null, notes || null);
+      .run(
+        employee_id,
+        title,
+        expense_type || null,
+        advanceId ? 0 : cash_advance_amount || 0,
+        cost_center || null,
+        notes || null,
+        advanceId
+      );
     res
       .status(201)
       .json(await withTotals(await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(info.lastInsertRowid)));
