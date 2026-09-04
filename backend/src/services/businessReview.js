@@ -7,7 +7,32 @@ const { staleDealDays } = require("./dealAging");
 // that four other surfaces depend on — a sales target has no use for these.
 const PERIOD_TYPES = ["monthly", "quarterly", "yearly"];
 
-function reviewPeriod(type, year, index) {
+// "ytd" is available to the fact sheet but deliberately not to PERIOD_TYPES:
+// stored reviews are written against a finished period, and a year-to-date
+// review would be a different document every time it was regenerated. The
+// Snapshot reads live figures, so it can use it freely.
+const FACT_PERIOD_TYPES = [...PERIOD_TYPES, "ytd"];
+
+// `asOf` is the cut-off day for a year-to-date period, as YYYY-MM-DD. It is
+// applied to whatever year is asked for, so last year's comparison covers the
+// same calendar span rather than the whole of it — comparing eight months
+// against twelve would show a fall every time.
+function reviewPeriod(type, year, index, asOf) {
+  if (type === "ytd") {
+    const cut = asOf || new Date().toLocaleDateString("en-CA");
+    const [, m, d] = cut.split("-");
+    const endMonth = Number(m);
+    // Clamped to the month's length so a 29 February cut-off does not produce
+    // an impossible date in a non-leap comparison year.
+    const lastDay = new Date(year, endMonth, 0).getDate();
+    const day = Math.min(Number(d), lastDay);
+    return {
+      start: `${year}-01-01`,
+      end: `${year}-${m}-${String(day).padStart(2, "0")}`,
+      label: `${year} year to date`,
+      months: [1, endMonth],
+    };
+  }
   if (type === "yearly") {
     return { start: `${year}-01-01`, end: `${year}-12-31`, label: String(year), months: [1, 12] };
   }
@@ -27,7 +52,7 @@ function reviewPeriod(type, year, index) {
 // The period immediately before this one, of the same length — what "up 12%"
 // is measured against.
 function previousPeriod(type, year, index) {
-  if (type === "yearly") return { year: year - 1, index: 0 };
+  if (type === "ytd" || type === "yearly") return { year: year - 1, index: 0 };
   if (type === "quarterly") return index > 1 ? { year, index: index - 1 } : { year: year - 1, index: 4 };
   return index > 1 ? { year, index: index - 1 } : { year: year - 1, index: 12 };
 }
@@ -66,8 +91,17 @@ async function metricsFor({ start, end, year, months }) {
        FROM orders WHERE status <> 'cancelled' AND order_date BETWEEN ? AND ?`
     ).get(start, end),
 
+    // Drafts are excluded from "invoiced" for the same reason draft expense
+    // reports are excluded from spend: a draft has not been sent to anybody, so
+    // nothing has been billed and nobody owes it yet. Counting them made the
+    // collection rate read as a failure to collect on money that was never
+    // asked for. They are reported separately instead, because unsent invoices
+    // are worth seeing — that is revenue sitting still.
     db.prepare(
-      `SELECT COUNT(*)::int AS issued, COALESCE(SUM(amount), 0) AS issued_value,
+      `SELECT COUNT(*) FILTER (WHERE status <> 'draft')::int AS issued,
+              COALESCE(SUM(amount) FILTER (WHERE status <> 'draft'), 0) AS issued_value,
+              COUNT(*) FILTER (WHERE status = 'draft')::int AS draft_count,
+              COALESCE(SUM(amount) FILTER (WHERE status = 'draft'), 0) AS draft_value,
               COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) AS paid_value,
               COALESCE(SUM(amount) FILTER (WHERE status IN ('sent', 'overdue')), 0) AS outstanding_value,
               COUNT(*) FILTER (WHERE status = 'overdue')::int AS overdue_count
@@ -157,6 +191,8 @@ async function metricsFor({ start, end, year, months }) {
       ordersDelivered: orders.delivered,
       invoicesIssued: invoices.issued,
       invoicedValue: num(invoices.issued_value),
+      draftInvoices: invoices.draft_count,
+      draftInvoiceValue: num(invoices.draft_value),
       collectedValue: num(invoices.paid_value),
       outstandingValue: num(invoices.outstanding_value),
       overdueInvoices: invoices.overdue_count,
@@ -213,9 +249,15 @@ async function standingPosition() {
     db.prepare("SELECT COUNT(*)::int AS pending FROM asset_requests WHERE status = 'pending'").get(),
     db.prepare("SELECT COUNT(*)::int AS active FROM employees WHERE status = 'active'").get(),
     db.prepare(
-      `SELECT COALESCE(SUM(amount), 0) AS outstanding,
-              COALESCE(SUM(amount) FILTER (WHERE status = 'overdue'), 0) AS overdue
-       FROM invoices WHERE status IN ('sent', 'overdue')`
+      // Unsent drafts are counted here too, as their own figure. They are not a
+      // receivable — nobody has been asked to pay — but a pile of invoices that
+      // were written and never sent is money the company has earned and is not
+      // chasing, which is worth surfacing next to the money it is.
+      `SELECT COALESCE(SUM(amount) FILTER (WHERE status IN ('sent', 'overdue')), 0) AS outstanding,
+              COALESCE(SUM(amount) FILTER (WHERE status = 'overdue'), 0) AS overdue,
+              COUNT(*) FILTER (WHERE status = 'draft')::int AS draft_count,
+              COALESCE(SUM(amount) FILTER (WHERE status = 'draft'), 0) AS draft_value
+       FROM invoices WHERE status <> 'cancelled'`
     ).get(),
   ]);
 
@@ -227,19 +269,20 @@ async function standingPosition() {
     pendingAssetRequests: requests.pending,
     activeHeadcount: headcount.active,
     receivables: { outstanding: num(receivables.outstanding), overdue: num(receivables.overdue) },
+    unsentInvoices: { count: receivables.draft_count, value: num(receivables.draft_value) },
   };
 }
 
 // Assembles the whole fact sheet. This is what the narrative layer reads — it
 // never sees a raw row, so it can only interpret figures the app already
 // stands behind.
-async function buildFactSheet({ periodType, year, index }) {
-  if (!PERIOD_TYPES.includes(periodType)) {
-    throw new Error(`period_type must be one of ${PERIOD_TYPES.join(", ")}`);
+async function buildFactSheet({ periodType, year, index, asOf }) {
+  if (!FACT_PERIOD_TYPES.includes(periodType)) {
+    throw new Error(`period_type must be one of ${FACT_PERIOD_TYPES.join(", ")}`);
   }
-  const current = reviewPeriod(periodType, year, index);
+  const current = reviewPeriod(periodType, year, index, asOf);
   const prevRef = previousPeriod(periodType, year, index);
-  const previous = reviewPeriod(periodType, prevRef.year, prevRef.index);
+  const previous = reviewPeriod(periodType, prevRef.year, prevRef.index, asOf);
 
   const [now, before, standing] = await Promise.all([
     metricsFor({ start: current.start, end: current.end, year, months: current.months }),
@@ -266,4 +309,4 @@ async function buildFactSheet({ periodType, year, index }) {
   };
 }
 
-module.exports = { buildFactSheet, reviewPeriod, previousPeriod, PERIOD_TYPES };
+module.exports = { buildFactSheet, reviewPeriod, previousPeriod, PERIOD_TYPES, FACT_PERIOD_TYPES };

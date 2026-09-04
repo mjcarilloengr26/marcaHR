@@ -3,7 +3,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import useContainerWidth from "../hooks/useContainerWidth";
 
 
-const HEIGHT = 280;
+const DEFAULT_HEIGHT = 280;
 const PAD_LEFT = 56;
 const PAD_RIGHT = 12;
 const PAD_TOP = 16;
@@ -32,7 +32,12 @@ function buildAreaPath(values, xFor, yFor, yBase) {
   return `${top} L ${lastX} ${yBase} L ${firstX} ${yBase} Z`;
 }
 
-export default function RevenueTrendChart({ thisYear, lastYear, months }) {
+// `height` and `embedded` exist for the Snapshot, which gives the chart a card
+// and a heading of its own and needs it to fill a band whose height comes from
+// the viewport. Both default to the dashboard's original behaviour, so that
+// page renders exactly as before.
+export default function RevenueTrendChart({ thisYear, lastYear, months, height, embedded = false }) {
+  const HEIGHT = height || DEFAULT_HEIGHT;
   const [containerRef, measuredWidth] = useContainerWidth();
   const { money, moneyCompact } = useAppSettings();
   const gradientId = useId();
@@ -62,28 +67,21 @@ export default function RevenueTrendChart({ thisYear, lastYear, months }) {
   const thisYearGradientId = `${gradientId}-this-year`;
   const lastYearGradientId = `${gradientId}-last-year`;
 
-  return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <div className="page-header" style={{ marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
-        <div>
-          <h2>Revenue Trend</h2>
-          <p className="subtitle" style={{ margin: 0 }}>
-            Monthly order revenue — {thisYear} vs {lastYear}
-          </p>
-        </div>
-        <div style={{ display: "flex", gap: 16, fontSize: 13 }}>
+  const legend = (
+    <div style={{ display: "flex", gap: 16, fontSize: 13 }}>
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ width: 12, height: 12, borderRadius: 2, background: THIS_YEAR_COLOR, display: "inline-block" }} />
             {thisYear}
           </span>
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ width: 12, height: 12, borderRadius: 2, background: LAST_YEAR_COLOR, display: "inline-block" }} />
-            {lastYear}
-          </span>
-        </div>
-      </div>
+      {lastYear}
+      </span>
+    </div>
+  );
 
-      <div ref={containerRef}>
+  const plot = (
+    <div ref={containerRef} style={embedded ? { flex: 1, minHeight: 0, overflow: "hidden" } : undefined}>
         {width > 0 && (
           <svg width={width} height={HEIGHT} viewBox={`0 0 ${width} ${HEIGHT}`} style={{ display: "block" }} role="img" aria-label={`Monthly order revenue, ${thisYear} versus ${lastYear}`}>
             <defs>
@@ -132,8 +130,31 @@ export default function RevenueTrendChart({ thisYear, lastYear, months }) {
               </circle>
             ))}
           </svg>
-        )}
+      )}
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <>
+        {legend}
+        {plot}
+      </>
+    );
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="page-header" style={{ marginBottom: 4, flexWrap: "wrap", gap: 8 }}>
+        <div>
+          <h2>Revenue Trend</h2>
+          <p className="subtitle" style={{ margin: 0 }}>
+            Monthly order revenue — {thisYear} vs {lastYear}
+          </p>
+        </div>
+        {legend}
       </div>
+      {plot}
     </div>
   );
 }

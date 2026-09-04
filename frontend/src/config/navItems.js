@@ -38,6 +38,7 @@ export const NAV_ITEMS = [
   { to: "/inventory", label: "Inventory", icon: "📦", roles: ["admin", "hr"], pageKey: "inventory" },
 
   { section: "Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true },
+  { to: "/snapshot", label: "Snapshot", icon: "🧮", roles: ["admin", "hr"] },
   { to: "/business-review", label: "Business Review", icon: "🧭", roles: ["admin"] },
   { to: "/reports", label: "Export Reports", icon: "📤", roles: ["admin", "hr", "employee"], financeOnly: true, pageKey: "reports" },
 

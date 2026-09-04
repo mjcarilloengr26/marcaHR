@@ -1241,3 +1241,171 @@ input[type="date"]::-webkit-datetime-edit-year-field {
 
   .board-column { width: 260px; }
 }
+
+/* ---- Snapshot (wall display) ----------------------------------------
+   An iOS-widget treatment: large radii, layered elevation and a light source
+   from the top-left, so the cards read as objects sitting on the surface
+   rather than boxes drawn on it. Depth comes from stacked shadows and a
+   one-pixel lit edge, not from perspective tricks — a data screen has to stay
+   legible from across a room, and tilted panels cost legibility for nothing.
+
+   Built to fill exactly one landscape screen as three bands: headline figures
+   beside the chart in the top half, a matrix of supporting numbers under it,
+   and the wins along the bottom. Every size is drawn from the viewport, so the
+   same page reads on a laptop and on a 1920x1080 wall panel. */
+.snap {
+  --snap-r: clamp(14px, 1.15vw, 26px);
+  --snap-gap: clamp(8px, 0.72vw, 18px);
+  --snap-edge: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --snap-lift: 0 1px 2px rgba(17, 22, 36, 0.05), 0 6px 14px rgba(17, 22, 36, 0.07), 0 16px 36px rgba(17, 22, 36, 0.05);
+  --snap-lift-hi: 0 2px 5px rgba(17, 22, 36, 0.08), 0 14px 30px rgba(17, 22, 36, 0.12), 0 30px 64px rgba(17, 22, 36, 0.08);
+  --snap-sheen: linear-gradient(158deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.35) 24%, rgba(255, 255, 255, 0) 52%);
+  --snap-pill: rgba(120, 128, 148, 0.12);
+  --accent-soft: rgba(52, 84, 209, 0.12);
+
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: var(--snap-gap);
+  font-variant-numeric: tabular-nums;
+}
+:root[data-theme="dark"] .snap {
+  --snap-edge: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --snap-lift: 0 1px 2px rgba(0, 0, 0, 0.5), 0 8px 20px rgba(0, 0, 0, 0.42), 0 22px 50px rgba(0, 0, 0, 0.3);
+  --snap-lift-hi: 0 2px 5px rgba(0, 0, 0, 0.55), 0 16px 34px rgba(0, 0, 0, 0.5), 0 36px 74px rgba(0, 0, 0, 0.38);
+  --snap-sheen: linear-gradient(158deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.035) 28%, rgba(255, 255, 255, 0) 58%);
+  --snap-pill: rgba(255, 255, 255, 0.08);
+  --accent-soft: rgba(102, 133, 245, 0.18);
+}
+.snap > * { min-height: 0; }
+
+/* One surface treatment, shared by every widget on the page. */
+.snap-card, .snap-kpi, .snap-flag {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--snap-r);
+  background:
+    radial-gradient(125% 95% at 100% 0%, var(--accent-soft), transparent 62%),
+    var(--snap-sheen),
+    var(--surface);
+  box-shadow: var(--snap-lift), var(--snap-edge);
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+  min-width: 0;
+}
+.snap-card:hover, .snap-kpi:hover, .snap-flag:hover {
+  box-shadow: var(--snap-lift-hi), var(--snap-edge);
+  transform: translateY(-2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .snap-card, .snap-kpi, .snap-flag { transition: none; }
+  .snap-card:hover, .snap-kpi:hover, .snap-flag:hover { transform: none; }
+}
+.snap-card {
+  padding: clamp(10px, 1.15vh, 22px) clamp(12px, 0.95vw, 24px);
+  display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+}
+.snap-card h2 {
+  font-size: clamp(11px, 0.8vw, 18px); margin: 0; font-weight: 600;
+  letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted);
+}
+.snap-note { font-size: clamp(10px, 0.68vw, 15px); color: var(--text-muted); margin: 3px 0 0; }
+
+.snap-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.snap-title { font-size: clamp(19px, 1.85vw, 44px); font-weight: 700; margin: 0; letter-spacing: -0.03em; }
+.snap-sub { color: var(--text-muted); font-size: clamp(11px, 0.76vw, 17px); margin: 2px 0 0; }
+.snap-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.snap-controls select, .snap-controls .btn { border-radius: 999px; }
+
+/* Band 1 — headline figures beside the chart. */
+.snap-top { display: grid; grid-template-columns: 1fr 1.45fr; gap: var(--snap-gap); min-height: 0; }
+.snap-kpis { display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; gap: var(--snap-gap); min-height: 0; }
+.snap-kpi {
+  padding: clamp(9px, 1.05vh, 22px) clamp(11px, 0.85vw, 22px);
+  display: flex; flex-direction: column; justify-content: center; min-height: 0; overflow: hidden;
+}
+.snap-kpi[data-accent="blue"]   { --accent-soft: rgba(52, 84, 209, 0.13); }
+.snap-kpi[data-accent="green"]  { --accent-soft: rgba(30, 142, 90, 0.15); }
+.snap-kpi[data-accent="amber"]  { --accent-soft: rgba(184, 134, 11, 0.16); }
+.snap-kpi[data-accent="teal"]   { --accent-soft: rgba(13, 148, 136, 0.15); }
+.snap-kpi[data-accent="violet"] { --accent-soft: rgba(124, 92, 240, 0.15); }
+:root[data-theme="dark"] .snap-kpi[data-accent="blue"]   { --accent-soft: rgba(102, 133, 245, 0.2); }
+:root[data-theme="dark"] .snap-kpi[data-accent="green"]  { --accent-soft: rgba(53, 194, 136, 0.18); }
+:root[data-theme="dark"] .snap-kpi[data-accent="amber"]  { --accent-soft: rgba(224, 171, 60, 0.18); }
+:root[data-theme="dark"] .snap-kpi[data-accent="teal"]   { --accent-soft: rgba(45, 212, 191, 0.16); }
+:root[data-theme="dark"] .snap-kpi[data-accent="violet"] { --accent-soft: rgba(155, 128, 255, 0.2); }
+
+.snap-kpi-value {
+  font-size: clamp(15px, 1.3vw, 36px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.08;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.snap-kpi-label { font-size: clamp(10px, 0.74vw, 17px); font-weight: 600; margin-top: 4px; }
+.snap-kpi-hint  { font-size: clamp(9px, 0.6vw, 14px); color: var(--text-muted); margin-top: 1px; }
+.snap-kpi-delta {
+  align-self: flex-start; margin-top: clamp(4px, 0.6vh, 10px);
+  font-size: clamp(9px, 0.65vw, 15px); font-weight: 600;
+  padding: 0.2em 0.62em; border-radius: 999px; background: var(--snap-pill);
+  white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* The chart is the dashboard's own RevenueTrendChart, embedded. It is handed a
+   measured pixel height, so the slot must be the thing that flexes. */
+.snap-chart-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.snap-chart-slot { flex: 1; min-height: 0; display: flex; flex-direction: column; margin-top: clamp(4px, 0.6vh, 10px); }
+.snap-chart-slot > div:first-child { justify-content: flex-end; }
+
+/* Band 2 — the matrix of supporting figures. */
+.snap-matrix { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--snap-gap); }
+@media (max-width: 1180px) { .snap-matrix { grid-template-columns: 1fr; } }
+.snap-matrix-rows { list-style: none; margin: clamp(5px, 0.7vh, 12px) 0 0; padding: 0; }
+.snap-matrix-row {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+  padding: clamp(3px, 0.5vh, 9px) 0; border-bottom: 1px solid var(--border);
+  font-size: clamp(10px, 0.74vw, 17px); color: var(--text-muted);
+}
+.snap-matrix-row:last-child { border-bottom: none; }
+.snap-matrix-row b { color: var(--text); font-weight: 700; white-space: nowrap; font-size: clamp(11px, 0.82vw, 19px); letter-spacing: -0.02em; }
+
+/* Band 3 — the wins, along the bottom. */
+.snap-attention { display: flex; align-items: stretch; gap: var(--snap-gap); }
+.snap-flag {
+  flex: 1 1 0; min-width: 0;
+  padding: clamp(8px, 0.95vh, 18px) clamp(11px, 0.85vw, 20px);
+  --accent-soft: rgba(30, 142, 90, 0.13);
+}
+:root[data-theme="dark"] .snap-flag { --accent-soft: rgba(53, 194, 136, 0.16); }
+.snap-flag-title {
+  font-size: clamp(10px, 0.76vw, 18px); font-weight: 700;
+  display: flex; align-items: center; gap: 0.45em;
+}
+.snap-flag-title::before {
+  content: ""; width: 0.5em; height: 0.5em; border-radius: 999px; flex: none;
+  background: var(--success); box-shadow: 0 0 0 0.18em rgba(30, 142, 90, 0.18);
+}
+.snap-flag-detail { font-size: clamp(9px, 0.64vw, 15px); color: var(--text-muted); margin-top: 3px; }
+.snap-ok { color: var(--success); font-size: clamp(11px, 0.8vw, 18px); }
+
+/* Below a real display's size the one-screen promise stops being a promise and
+   starts being a squeeze, so it is dropped: the bands stack at their natural
+   height and the page scrolls like any other. A wall panel never sees this. */
+@media (max-width: 1180px), (max-height: 660px) {
+  .snap { height: auto; grid-template-rows: none; }
+  .snap-top { grid-template-columns: 1fr; }
+  .snap-kpis { grid-auto-rows: auto; }
+  .snap-chart-slot { height: clamp(160px, 26vh, 260px); flex: none; }
+  .snap-attention { flex-wrap: wrap; }
+  .snap-flag { flex: 1 1 220px; }
+}
+
+/* TV mode: the sidebar and topbar are navigation, and a wall panel has nobody
+   to navigate it. Hidden so the figures get the whole screen, and the ground
+   gets a lit wash so the widgets have something to sit on. */
+body.snapshot-tv .sidebar,
+body.snapshot-tv .topbar { display: none; }
+body.snapshot-tv .content {
+  --content-pad: clamp(12px, 1.3vw, 32px);
+  background:
+    radial-gradient(80% 60% at 12% -10%, rgba(52, 84, 209, 0.1), transparent 70%),
+    radial-gradient(70% 55% at 100% 0%, rgba(124, 92, 240, 0.08), transparent 68%),
+    var(--bg);
+}

@@ -311,6 +311,9 @@ ${
         ["Open pipeline", `${cur.sales.openPipelineCount} worth ${peso(cur.sales.openPipelineValue)}`],
         ["Stalled " + st.staleThresholdDays + "+ days", `${st.stalledOpportunities.count} worth ${peso(st.stalledOpportunities.value)}`],
         ["Invoiced", peso(cur.revenue.invoicedValue)],
+        // Unsent drafts no longer hide inside "Invoiced" — they are revenue
+        // sitting still, which is worth its own line rather than silence.
+        ["Drafted, not sent", `${cur.revenue.draftInvoices} worth ${peso(cur.revenue.draftInvoiceValue)}`],
         ["Collected", `${peso(cur.revenue.collectedValue)} (${pct(cur.revenue.collectionRatePercent)} of invoiced)`],
         ["Receivables outstanding", `${peso(st.receivables.outstanding)} (${peso(st.receivables.overdue)} overdue)`],
         ["Expense liquidation", `${pct(cur.expenses.liquidationRatePercent)} of ${peso(cur.expenses.cashAdvanced)} advanced`],
@@ -424,6 +427,7 @@ function buildText({ factSheet, narrative, narrativeError, company }) {
   L.push(`  Open pipeline            ${cur.sales.openPipelineCount} worth ${peso(cur.sales.openPipelineValue)}`);
   L.push(`  Stalled ${st.staleThresholdDays}+ days          ${st.stalledOpportunities.count} worth ${peso(st.stalledOpportunities.value)}`);
   L.push(`  Invoiced                 ${peso(cur.revenue.invoicedValue)}`);
+  L.push(`  Drafted, not sent        ${cur.revenue.draftInvoices} worth ${peso(cur.revenue.draftInvoiceValue)}`);
   L.push(`  Collected                ${peso(cur.revenue.collectedValue)} (${pct(cur.revenue.collectionRatePercent)} of invoiced)`);
   L.push(`  Receivables outstanding  ${peso(st.receivables.outstanding)} (${peso(st.receivables.overdue)} overdue)`);
   L.push(`  Expense liquidation      ${pct(cur.expenses.liquidationRatePercent)} of ${peso(cur.expenses.cashAdvanced)} advanced`);
