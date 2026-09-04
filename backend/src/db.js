@@ -597,6 +597,10 @@ CREATE TABLE IF NOT EXISTS employee_assets (
   model TEXT,
   serial_number TEXT,
   asset_tag TEXT,
+  -- How many of the item were handed over. A request for five pairs of gloves
+  -- was becoming one row that said "gloves", and the count was lost at the
+  -- point of issue with nothing on the employee's page to show it.
+  quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity >= 1),
   date_issued TEXT NOT NULL,
   date_returned TEXT,
   -- 'replaced' is kept distinct from 'returned' on purpose: both mean the item
@@ -632,6 +636,46 @@ CREATE TABLE IF NOT EXISTS asset_requests (
 );
 
 CREATE INDEX IF NOT EXISTS idx_asset_requests_employee ON asset_requests(employee_id);
+
+-- An employee handing an issued asset back. Filing one does not return the
+-- asset: the row sits pending until HR accepts it, and only acceptance moves
+-- employee_assets to 'returned'. Until then the item is still charged to the
+-- employee, which is the point — otherwise anyone could clear their own
+-- record by declaring it handed back.
+--
+-- asset_condition is the reviewer's judgement, not the employee's claim. HR
+-- can accept a return and still record it as damaged; the two decisions are
+-- separate because an item can genuinely come back broken and still need to
+-- come off the employee's list.
+--
+-- photo_data is a base64 data URL, the same storage pattern as expense
+-- receipts and clock-in photos. It is never selected by the list query — see
+-- the has_photo column in assetReturns.routes.js — because these are phone
+-- photos and a list of them would be megabytes.
+CREATE TABLE IF NOT EXISTS asset_returns (
+  id SERIAL PRIMARY KEY,
+  asset_id INTEGER NOT NULL REFERENCES employee_assets(id) ON DELETE CASCADE,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  return_date TEXT NOT NULL,
+  employee_note TEXT,
+  photo_data TEXT,
+  photo_name TEXT,
+  photo_type TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected')),
+  asset_condition TEXT CHECK(asset_condition IN ('good','damaged','incomplete')),
+  review_note TEXT,
+  reviewed_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  reviewed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_asset_returns_employee ON asset_returns(employee_id);
+CREATE INDEX IF NOT EXISTS idx_asset_returns_asset ON asset_returns(asset_id);
+
+-- One open return per asset. Enforced here rather than only in the route so
+-- two quick submissions cannot both pass the check and both insert.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_asset_returns_one_pending
+  ON asset_returns(asset_id) WHERE status = 'pending';
 
 CREATE TABLE IF NOT EXISTS business_reviews (
   id SERIAL PRIMARY KEY,
@@ -760,6 +804,13 @@ async function ensureDealAging() {
 // inside the month it covers, at the cost of missing whatever is recorded
 // after the send hour on the final day; first_of_next captures the month
 // whole but arrives a day later.
+// employee_assets predates quantity, and CREATE TABLE IF NOT EXISTS will not
+// add a column to a table that already exists. Everything already issued was
+// recorded as a single item, which is what the default says.
+async function ensureAssetQuantity() {
+  await pool.query("ALTER TABLE employee_assets ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1");
+}
+
 async function ensureReviewSchedule() {
   await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS review_enabled BOOLEAN NOT NULL DEFAULT true");
   await pool.query("ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS review_send_on TEXT NOT NULL DEFAULT 'month_end'");
@@ -1072,6 +1123,7 @@ db.migrate = function () {
       .then(() => ensureAssetMarketValue())
       .then(() => ensureDealAging())
       .then(() => ensureReviewSchedule())
+      .then(() => ensureAssetQuantity())
       .then(() => widenRealColumns())
       .then(() => ensurePurchaseOrderWorkOrder())
       .then(() => ensureExpenseType())

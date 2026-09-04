@@ -154,6 +154,44 @@ const notifyAssetRequestDecision = guarded(async ({ employee_id, asset_type, sta
   });
 });
 
+// Filing a return does not return anything — it asks someone to accept it —
+// so this has to reach whoever can accept it, not just acknowledge the filing.
+const notifyAssetReturnFiled = guarded(async (ret) => {
+  const managerEmail = await getManagerEmail(ret.employee_id);
+  const to = [...new Set([...(await getHrEmails()), managerEmail].filter(Boolean))];
+  if (to.length === 0) return;
+
+  const item = [ret.brand, ret.model, ret.asset_type].filter(Boolean).join(" ");
+  const lines = [
+    `${ret.employee_name} is returning ${item}${ret.serial_number ? ` (serial ${ret.serial_number})` : ""}.`,
+    `Return date: ${ret.return_date}`,
+    ret.employee_note ? `Their note: ${ret.employee_note}` : null,
+    ret.has_photo ? "A photo of the item is attached to the return." : "No photo was attached.",
+    "",
+    `The asset stays on ${ret.employee_name}'s record until this is accepted.`,
+    `Accept or reject it in ${await companyName()} under Company Assets.`,
+  ].filter((l) => l !== null);
+
+  sendMail({ to, subject: `Asset return filed — ${item}`, text: lines.join("\n") });
+});
+
+const notifyAssetReturnDecision = guarded(async (ret) => {
+  const emp = await getEmployee(ret.employee_id);
+  if (!emp) return;
+  const item = [ret.brand, ret.model, ret.asset_type].filter(Boolean).join(" ");
+  const body =
+    ret.status === "accepted"
+      ? `Your return of ${item} was accepted, recorded in ${ret.asset_condition} condition. ` +
+        `It is no longer on your record.`
+      : `Your return of ${item} was not accepted, so the item is still on your record.`;
+
+  sendMail({
+    to: emp.email,
+    subject: `Asset return ${ret.status} — ${item}`,
+    text: `Hi ${emp.first_name},\n\n${body}` + (ret.review_note ? `\n\nNote: ${ret.review_note}` : ""),
+  });
+});
+
 const money = (n) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // One line per opportunity, ordered worst-first by the caller.
@@ -221,5 +259,7 @@ module.exports = {
   notifyLowStockAlarm,
   notifyAssetRequested,
   notifyAssetRequestDecision,
+  notifyAssetReturnFiled,
+  notifyAssetReturnDecision,
   notifyStaleDeals,
 };

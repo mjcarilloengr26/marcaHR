@@ -87,6 +87,7 @@ app.use("/api/payroll", payrollRoutes);
 app.use("/api/performance", performanceRoutes);
 app.use("/api/assets", require("./routes/assets.routes"));
 app.use("/api/asset-requests", require("./routes/assetRequests.routes"));
+app.use("/api/asset-returns", require("./routes/assetReturns.routes"));
 app.use("/api/business-review", require("./routes/businessreview.routes"));
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/users", usersRoutes);

@@ -9,8 +9,22 @@ const db = require("../db");
 // (Terms, Security, Branding, Page Access). Temporary access to user
 // management is a privilege-escalation path — a grantee could mint themselves
 // a permanent admin account — so those stay admin-only, permanently.
+// Most pages are one screen over one API prefix. A few are not: Company Assets
+// is a single screen over three routers, and a grant that unlocked only one of
+// them would produce a page that loads and then fails on everything it does.
+// extraApiPrefixes lists the rest.
 const GRANTABLE_PAGES = [
   { key: "inventory", label: "Inventory", route: "/inventory", apiPrefix: "/api/inventory" },
+  {
+    key: "assets",
+    label: "Company Assets",
+    route: "/assets",
+    apiPrefix: "/api/assets",
+    // The register alone is not the job. Receiving a returned item means
+    // accepting the return, and handing kit out means acting on requests, so
+    // a grant covers all three or it covers nothing useful.
+    extraApiPrefixes: ["/api/asset-requests", "/api/asset-returns"],
+  },
   { key: "employees", label: "Employees", route: "/employees", apiPrefix: "/api/employees" },
   { key: "departments", label: "Departments", route: "/departments", apiPrefix: "/api/departments" },
   { key: "locations", label: "Locations", route: "/locations", apiPrefix: "/api/locations" },
@@ -26,7 +40,9 @@ const GRANTABLE_PAGES = [
 ];
 
 const PAGE_BY_KEY = new Map(GRANTABLE_PAGES.map((p) => [p.key, p]));
-const PAGE_KEY_BY_API_PREFIX = new Map(GRANTABLE_PAGES.map((p) => [p.apiPrefix, p.key]));
+const PAGE_KEY_BY_API_PREFIX = new Map(
+  GRANTABLE_PAGES.flatMap((p) => [p.apiPrefix, ...(p.extraApiPrefixes || [])].map((prefix) => [prefix, p.key]))
+);
 
 function isGrantablePageKey(key) {
   return PAGE_BY_KEY.has(key);

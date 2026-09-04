@@ -75,6 +75,7 @@ function readBody(body) {
     model: text(b.model),
     serial_number: text(b.serial_number),
     asset_tag: text(b.asset_tag),
+    quantity: b.quantity === "" || b.quantity === null || b.quantity === undefined ? 1 : Number(b.quantity),
     date_issued: text(b.date_issued),
     date_returned: text(b.date_returned),
     status: text(b.status) || "active",
@@ -91,6 +92,7 @@ function validate(v) {
   if (!v.employee_id) return "employee_id is required";
   if (!v.asset_type) return "asset_type is required";
   if (!v.date_issued) return "date_issued is required";
+  if (!Number.isInteger(v.quantity) || v.quantity < 1) return "quantity must be a whole number of one or more";
   if (!STATUSES.includes(v.status)) return `status must be one of ${STATUSES.join(", ")}`;
   // An item that has come back needs the date it came back on, otherwise the
   // register can say "returned" without anyone being able to say when.
@@ -118,8 +120,8 @@ router.post(
     const info = await db
       .prepare(
         `INSERT INTO employee_assets
-           (employee_id, asset_type, brand, model, serial_number, asset_tag, date_issued, date_returned, status, condition_note, notes, market_value)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (employee_id, asset_type, brand, model, serial_number, asset_tag, quantity, date_issued, date_returned, status, condition_note, notes, market_value)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         v.employee_id,
@@ -128,6 +130,7 @@ router.post(
         v.model,
         v.serial_number,
         v.asset_tag,
+        v.quantity,
         v.date_issued,
         v.date_returned,
         v.status,
@@ -163,7 +166,7 @@ router.put(
     await db
       .prepare(
         `UPDATE employee_assets SET employee_id = ?, asset_type = ?, brand = ?, model = ?, serial_number = ?,
-                asset_tag = ?, date_issued = ?, date_returned = ?, status = ?, condition_note = ?, notes = ?,
+                asset_tag = ?, quantity = ?, date_issued = ?, date_returned = ?, status = ?, condition_note = ?, notes = ?,
                 market_value = ?
          WHERE id = ?`
       )
@@ -174,6 +177,7 @@ router.put(
         merged.model,
         merged.serial_number,
         merged.asset_tag,
+        merged.quantity,
         merged.date_issued,
         merged.date_returned,
         merged.status,

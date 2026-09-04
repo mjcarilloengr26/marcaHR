@@ -6,6 +6,7 @@ import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import SuggestInput from "../components/SuggestInput";
 import DecimalInput from "../components/DecimalInput";
+import { compressImageFile } from "../utils/image";
 
 // Starting points only — the field stays free text, because the next thing a
 // company hands someone is never on anybody's list.
@@ -24,6 +25,7 @@ const EMPTY = {
   model: "",
   serial_number: "",
   asset_tag: "",
+  quantity: 1,
   date_issued: "",
   date_returned: "",
   status: "active",
@@ -39,6 +41,10 @@ const STATUS_BADGE = { active: "active", returned: "approved", replaced: "draft"
 // Requests waiting on somebody get the attention-seeking badge; settled ones
 // read as done.
 const REQUEST_BADGE = { pending: "pending", approved: "approved", rejected: "rejected", issued: "active" };
+
+// A filed return is pending until someone accepts it; accepted means the item
+// is genuinely back, rejected means it never left the employee's record.
+const RETURN_BADGE = { pending: "pending", accepted: "approved", rejected: "rejected" };
 
 const EMPTY_REQUEST = { asset_type: "", quantity: 1, reason: "", needed_by: "" };
 
@@ -66,7 +72,12 @@ function BulkBar({ selected, clear, onDelete, busy }) {
 export default function Assets() {
   const { user } = useAuth();
   const { money } = useAppSettings();
-  const isHr = user.role === "admin" || user.role === "hr";
+  // A temporary Page Access grant on this page is what lets a stand-in receive
+  // returned kit and act on requests while someone is away. The server honours
+  // the grant on every endpoint this page uses, so the UI has to offer the
+  // controls too — otherwise the grant unlocks an API nobody can reach.
+  const hasAssetGrant = (user.page_grants || []).includes("assets");
+  const isHr = user.role === "admin" || user.role === "hr" || hasAssetGrant;
 
   const [assets, setAssets] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -92,8 +103,17 @@ export default function Assets() {
   const [selectedRequests, setSelectedRequests] = useState(() => new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
 
-  // The asset being handed back, and the details of its return.
+  // The asset being handed back, and the details of its return. This is HR
+  // recording an in-person handover directly — separate from the returns an
+  // employee files below, which need accepting before anything changes.
   const [returning, setReturning] = useState(null);
+
+  // Returns filed by employees, awaiting acceptance.
+  const [returns, setReturns] = useState([]);
+  const [filing, setFiling] = useState(null); // { asset, form } — employee filing a return
+  const [filingSaving, setFilingSaving] = useState(false);
+  const [accepting, setAccepting] = useState(null); // { ret, form } — HR accepting one
+  const [busyReturnId, setBusyReturnId] = useState(null);
 
   const load = () =>
     api.get("/assets").then(setAssets).catch((err) => setError(err.message));
@@ -101,9 +121,13 @@ export default function Assets() {
   const loadRequests = () =>
     api.get("/asset-requests").then(setRequests).catch((err) => setError(err.message));
 
+  const loadReturns = () =>
+    api.get("/asset-returns").then(setReturns).catch((err) => setError(err.message));
+
   useEffect(() => {
     load();
     loadRequests();
+    loadReturns();
     // The employee picker is only ever shown to HR, so don't make every
     // employee fetch the whole staff list just to read their own two rows.
     if (isHr) api.get("/employees").then(setEmployees).catch(() => {});
@@ -149,6 +173,7 @@ export default function Assets() {
       model: a.model || "",
       serial_number: a.serial_number || "",
       asset_tag: a.asset_tag || "",
+      quantity: a.quantity ?? 1,
       date_issued: a.date_issued || "",
       date_returned: a.date_returned || "",
       status: a.status,
@@ -269,6 +294,9 @@ export default function Assets() {
         model: "",
         serial_number: "",
         asset_tag: "",
+        // Carried from the request so the count is not quietly lost at the
+        // point of issue, which is exactly what used to happen.
+        quantity: r.quantity ?? 1,
         date_issued: new Date().toISOString().slice(0, 10),
         market_value: "",
         notes: "",
@@ -375,6 +403,130 @@ export default function Assets() {
       },
     });
 
+  // --- Returns filed by an employee ---------------------------------------
+  // Filing one does not return the asset. It sits pending until HR accepts it,
+  // and only acceptance moves the asset off the employee's record.
+
+  const openFiling = (asset) => {
+    setError("");
+    setFiling({
+      asset,
+      form: {
+        return_date: new Date().toISOString().slice(0, 10),
+        employee_note: "",
+        photo_name: "",
+        photo_type: "",
+        photo_data: "",
+      },
+      attaching: false,
+    });
+  };
+
+  const attachReturnPhoto = async (file) => {
+    if (!file) return;
+    setError("");
+    setFiling((f) => ({ ...f, attaching: true }));
+    try {
+      const data = await compressImageFile(file, 1200, 0.75);
+      setFiling((f) => ({
+        ...f,
+        attaching: false,
+        form: { ...f.form, photo_name: file.name, photo_type: "image/jpeg", photo_data: data },
+      }));
+    } catch (err) {
+      setError(err.message);
+      setFiling((f) => ({ ...f, attaching: false }));
+    }
+  };
+
+  const submitFiling = async (e) => {
+    e.preventDefault();
+    setFilingSaving(true);
+    setError("");
+    try {
+      await api.post("/asset-returns", { asset_id: filing.asset.id, ...filing.form });
+      setFiling(null);
+      await Promise.all([load(), loadReturns()]);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setFilingSaving(false);
+    }
+  };
+
+  const withdrawReturn = async (ret) => {
+    if (!confirm("Withdraw this return? The asset stays on the record and you can file again later.")) return;
+    setBusyReturnId(ret.id);
+    setError("");
+    try {
+      await api.del(`/asset-returns/${ret.id}`);
+      await Promise.all([load(), loadReturns()]);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyReturnId(null);
+    }
+  };
+
+  const rejectReturn = async (ret) => {
+    const note = prompt("Why is this return not being accepted?\n\nThe item stays on the employee's record.");
+    if (note === null) return;
+    setBusyReturnId(ret.id);
+    setError("");
+    try {
+      await api.put(`/asset-returns/${ret.id}`, { status: "rejected", review_note: note.trim() || null });
+      await Promise.all([load(), loadReturns()]);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyReturnId(null);
+    }
+  };
+
+  // Accepting is a statement about condition, so it goes through a form rather
+  // than a single click.
+  const openAccept = (ret) => {
+    setError("");
+    setAccepting({ ret, form: { asset_condition: "good", review_note: "" } });
+  };
+
+  const confirmAccept = async (e) => {
+    e.preventDefault();
+    setBusyReturnId(accepting.ret.id);
+    setError("");
+    try {
+      await api.put(`/asset-returns/${accepting.ret.id}`, { status: "accepted", ...accepting.form });
+      setAccepting(null);
+      await Promise.all([load(), loadReturns()]);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyReturnId(null);
+    }
+  };
+
+  const viewReturnPhoto = async (ret) => {
+    setError("");
+    try {
+      const p = await api.get(`/asset-returns/${ret.id}/photo`);
+      // Chrome and Edge block top-level navigation to a data: URL, so the
+      // photo is opened through a synthesised anchor rather than window.open.
+      const a = document.createElement("a");
+      a.href = p.photo_data;
+      a.download = p.photo_name || "returned-item.jpg";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  // An asset with a return already awaiting a decision must not offer the
+  // button again.
+  const pendingReturnFor = (assetId) =>
+    returns.find((r) => r.asset_id === assetId && r.status === "pending");
+
   const confirmReturn = async (e) => {
     e.preventDefault();
     setSaving(true);
@@ -392,6 +544,7 @@ export default function Assets() {
 
   const stillOut = assets.filter((a) => a.status === "active").length;
   const openRequests = requests.filter((r) => r.status === "pending").length;
+  const openReturns = returns.filter((r) => r.status === "pending").length;
 
   return (
     <div>
@@ -408,7 +561,12 @@ export default function Assets() {
           <button className="btn btn-secondary" onClick={() => setShowRequest(true)}>
             Request an asset
           </button>
-          {isHr && (
+          {/* Issuing needs the staff list to pick a recipient, and a Page
+              Access grantee is still an employee as far as /employees is
+              concerned — so they get an empty picker. Better to not offer the
+              button than to offer one that cannot be completed. Receiving
+              returns, which is what the grant is for, works either way. */}
+          {isHr && employees.length > 0 && (
             <button className="btn" onClick={openNew}>
               + Issue asset
             </button>
@@ -565,6 +723,126 @@ export default function Assets() {
         busy={bulkBusy}
       />
 
+      {returns.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>
+            Asset returns
+            {openReturns > 0 && (
+              <span className="badge badge-pending" style={{ marginLeft: 8 }}>
+                {openReturns} awaiting acceptance
+              </span>
+            )}
+          </h2>
+          <p className="subtitle" style={{ margin: "0 0 10px" }}>
+            {isHr
+              ? "An item stays on the employee's record until the return is accepted. Accepting is also where its condition is recorded."
+              : "Your item stays on your record until someone accepts the return."}
+          </p>
+          <div className="table-scroll">
+            <table className="sticky-head">
+              <thead>
+                <tr>
+                  {isHr && <th>Employee</th>}
+                  <th>Asset</th>
+                  <th>Serial number</th>
+                  <th>Return date</th>
+                  <th>Their note</th>
+                  <th>Photo</th>
+                  <th>Status</th>
+                  <th>Condition</th>
+                  <th>Decision note</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {returns.map((r) => (
+                  <tr key={r.id}>
+                    {isHr && (
+                      <td>
+                        {r.employee_name}
+                        {r.department_name && (
+                          <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>{r.department_name}</div>
+                        )}
+                      </td>
+                    )}
+                    <td>
+                      {r.asset_type}
+                      {(r.brand || r.model) && (
+                        <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>
+                          {[r.brand, r.model].filter(Boolean).join(" ")}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ fontVariantNumeric: "tabular-nums" }}>{r.serial_number || "—"}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{r.return_date}</td>
+                    <td>{r.employee_note || "—"}</td>
+                    <td>
+                      {r.has_photo ? (
+                        <button type="button" className="link-btn location-link" onClick={() => viewReturnPhoto(r)}>
+                          📷 view
+                        </button>
+                      ) : (
+                        <span className="subtitle">none</span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`badge badge-${RETURN_BADGE[r.status] || "neutral"}`}>{r.status}</span>
+                    </td>
+                    <td>{r.asset_condition || "—"}</td>
+                    <td>
+                      {r.review_note || "—"}
+                      {r.reviewed_by_name && (
+                        <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>by {r.reviewed_by_name}</div>
+                      )}
+                    </td>
+                    <td>
+                      <div className="col-actions">
+                        {isHr && r.status === "pending" && (
+                          <>
+                            <button
+                              className="btn btn-sm"
+                              disabled={busyReturnId === r.id}
+                              onClick={() => openAccept(r)}
+                            >
+                              Accept
+                            </button>
+                            <button
+                              className="btn btn-sm btn-secondary"
+                              disabled={busyReturnId === r.id}
+                              onClick={() => rejectReturn(r)}
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        {!isHr && r.status === "pending" && (
+                          <button
+                            className="btn btn-sm btn-secondary"
+                            disabled={busyReturnId === r.id}
+                            onClick={() => withdrawReturn(r)}
+                          >
+                            Withdraw
+                          </button>
+                        )}
+                        {isHr && r.status !== "pending" && (
+                          <button
+                            className="btn btn-sm btn-danger"
+                            disabled={busyReturnId === r.id}
+                            onClick={() => withdrawReturn(r)}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="form-inline">
           <div className="form-row" style={{ flex: 1 }}>
@@ -624,11 +902,12 @@ export default function Assets() {
               <SortTh label="Model" sortKey="model" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Serial number" sortKey="serial_number" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Asset tag" sortKey="asset_tag" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Qty" sortKey="quantity" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Issued" sortKey="date_issued" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Returned" sortKey="date_returned" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
               {isHr && <SortTh label="Market value" sortKey="market_value" toggleSort={toggleSort} arrow={arrow} />}
-              {isHr && <th></th>}
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -657,6 +936,7 @@ export default function Assets() {
                 <td>{a.model || "—"}</td>
                 <td style={{ fontVariantNumeric: "tabular-nums" }}>{a.serial_number || "—"}</td>
                 <td>{a.asset_tag || "—"}</td>
+                <td style={{ fontVariantNumeric: "tabular-nums" }}>{a.quantity ?? 1}</td>
                 <td style={{ whiteSpace: "nowrap" }}>{a.date_issued}</td>
                 <td style={{ whiteSpace: "nowrap" }}>{a.date_returned || "—"}</td>
                 <td>
@@ -667,27 +947,39 @@ export default function Assets() {
                     {a.market_value == null ? "—" : money(a.market_value)}
                   </td>
                 )}
-                {isHr && (
-                  <td>
-                    <div className="col-actions">
-                      {a.status === "active" && (
+                <td>
+                  <div className="col-actions">
+                    {/* HR's "Return" records a handover that already happened.
+                        An employee's "Return" files one for acceptance — the
+                        asset does not move until someone accepts it. */}
+                    {a.status === "active" &&
+                      (pendingReturnFor(a.id) ? (
+                        <span className="badge badge-pending">return pending</span>
+                      ) : isHr ? (
                         <button className="btn btn-sm" onClick={() => openReturn(a)}>
                           Return
                         </button>
-                      )}
-                      <button className="btn btn-sm btn-secondary" onClick={() => openEdit(a)}>
-                        Edit
-                      </button>
-                      <button
-                        className="btn btn-sm btn-danger"
-                        disabled={deletingId === a.id}
-                        onClick={() => remove(a)}
-                      >
-                        {deletingId === a.id ? "Deleting…" : "Delete"}
-                      </button>
-                    </div>
-                  </td>
-                )}
+                      ) : (
+                        <button className="btn btn-sm" onClick={() => openFiling(a)}>
+                          Return
+                        </button>
+                      ))}
+                    {isHr && (
+                      <>
+                        <button className="btn btn-sm btn-secondary" onClick={() => openEdit(a)}>
+                          Edit
+                        </button>
+                        <button
+                          className="btn btn-sm btn-danger"
+                          disabled={deletingId === a.id}
+                          onClick={() => remove(a)}
+                        >
+                          {deletingId === a.id ? "Deleting…" : "Delete"}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -818,6 +1110,19 @@ export default function Assets() {
                     onChange={(e) => setIssuing({ ...issuing, form: { ...issuing.form, asset_tag: e.target.value } })}
                   />
                 </div>
+                <div className="form-row">
+                  <label>Quantity</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={issuing.form.quantity}
+                    onChange={(e) => setIssuing({ ...issuing, form: { ...issuing.form, quantity: e.target.value } })}
+                  />
+                  <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
+                    Prefilled from the request. Change it if a different number was actually handed over.
+                  </div>
+                </div>
               </div>
               <div className="grid grid-2">
                 <div className="form-row">
@@ -844,6 +1149,149 @@ export default function Assets() {
                 </button>
                 <button type="submit" className="btn" disabled={requestSaving}>
                   {requestSaving ? "Issuing…" : "Issue asset"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* An employee filing a return. Nothing about the asset changes here —
+          the wording says so, because a form that looks like it hands the item
+          back and then does not is how people end up thinking they are clear. */}
+      {filing && (
+        <div className="modal-backdrop" onClick={() => setFiling(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Return {filing.asset.asset_type}</h2>
+            <p className="subtitle" style={{ margin: "0 0 12px" }}>
+              {[filing.asset.brand, filing.asset.model].filter(Boolean).join(" ")}
+              {filing.asset.serial_number ? ` (${filing.asset.serial_number})` : ""}, issued to you on{" "}
+              {filing.asset.date_issued}. This goes to admin/HR — the item stays on your record until
+              they accept it and confirm its condition.
+            </p>
+            <form onSubmit={submitFiling}>
+              <div className="form-row">
+                <label>Date returned</label>
+                <input
+                  type="date"
+                  value={filing.form.return_date}
+                  max={new Date().toISOString().slice(0, 10)}
+                  min={filing.asset.date_issued || undefined}
+                  onChange={(e) =>
+                    setFiling({ ...filing, form: { ...filing.form, return_date: e.target.value } })
+                  }
+                  required
+                />
+              </div>
+              <div className="form-row">
+                <label>Anything they should know? (optional)</label>
+                <textarea
+                  rows={3}
+                  placeholder="e.g. the charger is included, there is a scratch on the lid"
+                  value={filing.form.employee_note}
+                  onChange={(e) =>
+                    setFiling({ ...filing, form: { ...filing.form, employee_note: e.target.value } })
+                  }
+                />
+              </div>
+              <div className="form-row">
+                <label>Photo of the item</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  disabled={filing.attaching}
+                  onChange={(e) => attachReturnPhoto(e.target.files?.[0])}
+                />
+                <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
+                  {filing.attaching
+                    ? "Preparing the photo…"
+                    : filing.form.photo_data
+                      ? `Attached: ${filing.form.photo_name}`
+                      : "Shows the condition it was handed back in. Strongly recommended — it is the only evidence if the condition is later disputed."}
+                </div>
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setFiling(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn" disabled={filingSaving || filing.attaching}>
+                  {filingSaving ? "Filing…" : "File return"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Accepting a return is the moment the asset actually comes back, and
+          it is also the condition assessment — so the two are one form. */}
+      {accepting && (
+        <div className="modal-backdrop" onClick={() => setAccepting(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Accept return</h2>
+            <p className="subtitle" style={{ margin: "0 0 12px" }}>
+              {accepting.ret.asset_type}
+              {accepting.ret.brand ? ` — ${accepting.ret.brand}` : ""}
+              {accepting.ret.model ? ` ${accepting.ret.model}` : ""}
+              {accepting.ret.serial_number ? ` (${accepting.ret.serial_number})` : ""}, returned by{" "}
+              {accepting.ret.employee_name} on {accepting.ret.return_date}. Accepting takes it off their
+              record and marks the asset returned.
+            </p>
+            {accepting.ret.employee_note && (
+              <p className="subtitle" style={{ margin: "0 0 12px" }}>
+                Their note: {accepting.ret.employee_note}
+              </p>
+            )}
+            {accepting.ret.has_photo && (
+              <p style={{ margin: "0 0 12px" }}>
+                <button
+                  type="button"
+                  className="link-btn location-link"
+                  onClick={() => viewReturnPhoto(accepting.ret)}
+                >
+                  📷 View the photo they attached
+                </button>
+              </p>
+            )}
+            <form onSubmit={confirmAccept}>
+              <div className="form-row">
+                <label>Condition received</label>
+                <select
+                  value={accepting.form.asset_condition}
+                  onChange={(e) =>
+                    setAccepting({ ...accepting, form: { ...accepting.form, asset_condition: e.target.value } })
+                  }
+                >
+                  <option value="good">Good — no issues</option>
+                  <option value="damaged">Damaged</option>
+                  <option value="incomplete">Incomplete — parts or accessories missing</option>
+                </select>
+              </div>
+              <div className="form-row">
+                <label>
+                  Note {accepting.form.asset_condition === "good" ? "(optional)" : "— what is wrong?"}
+                </label>
+                <textarea
+                  rows={3}
+                  required={accepting.form.asset_condition !== "good"}
+                  placeholder={
+                    accepting.form.asset_condition === "good"
+                      ? "Anything worth recording"
+                      : "Describe the damage or what is missing — this goes onto the asset record"
+                  }
+                  value={accepting.form.review_note}
+                  onChange={(e) =>
+                    setAccepting({ ...accepting, form: { ...accepting.form, review_note: e.target.value } })
+                  }
+                />
+              </div>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setAccepting(null)}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn" disabled={busyReturnId === accepting.ret.id}>
+                  {busyReturnId === accepting.ret.id ? "Accepting…" : "Accept return"}
                 </button>
               </div>
             </form>
@@ -990,6 +1438,17 @@ export default function Assets() {
                     value={form.asset_tag}
                     onChange={(e) => setForm({ ...form, asset_tag: e.target.value })}
                     placeholder="Internal reference"
+                  />
+                </div>
+                <div className="form-row">
+                  <label>Quantity</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={form.quantity}
+                    onChange={(e) => setForm({ ...form, quantity: e.target.value })}
+                    required
                   />
                 </div>
               </div>

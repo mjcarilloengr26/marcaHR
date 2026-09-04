@@ -152,6 +152,13 @@ router.post(
       return s === "" ? null : s;
     };
     const date_issued = text(b.date_issued) || new Date().toISOString().slice(0, 10);
+    const quantity =
+      b.quantity === "" || b.quantity === null || b.quantity === undefined
+        ? request.quantity || 1
+        : Number(b.quantity);
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      return res.status(400).json({ error: "quantity must be a whole number of one or more" });
+    }
     const market_value =
       b.market_value === "" || b.market_value === null || b.market_value === undefined ? null : Number(b.market_value);
     if (market_value !== null && (!Number.isFinite(market_value) || market_value < 0)) {
@@ -161,8 +168,8 @@ router.post(
     const info = await db
       .prepare(
         `INSERT INTO employee_assets
-           (employee_id, asset_type, brand, model, serial_number, asset_tag, date_issued, status, notes, market_value)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
+           (employee_id, asset_type, brand, model, serial_number, asset_tag, quantity, date_issued, status, notes, market_value)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)`
       )
       .run(
         request.employee_id,
@@ -171,6 +178,9 @@ router.post(
         text(b.model),
         text(b.serial_number),
         text(b.asset_tag),
+        // The request said how many. Issuing was dropping that, so a request
+        // for five pairs of gloves became one row reading "gloves".
+        quantity,
         date_issued,
         text(b.notes) || `Issued against request #${request.id}`,
         market_value
