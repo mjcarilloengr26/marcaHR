@@ -474,6 +474,13 @@ tbody tr:last-child td { border-bottom: none; }
    sideways beyond that. Past 20 it clips with an ellipsis; the whole code is
    still in the cell's tooltip. The inner span carries the width because
    max-width on a table cell isn't reliably honoured under auto layout. */
+/* For columns whose value is a single unbreakable token or a short phrase that
+   reads wrongly split across lines — an order number, a "3d in proposal"
+   status. Auto table layout will otherwise wrap them to save width that a
+   wrappable neighbour (a title, a description) can give up far more cheaply.
+   Applies to the header too, so a two-word heading does not stack. */
+.col-nowrap { white-space: nowrap; }
+
 .col-sku { white-space: nowrap; }
 .col-sku span {
   display: inline-block;

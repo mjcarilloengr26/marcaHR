@@ -179,18 +179,30 @@ export default function Deals() {
               <SortTh label="Competitor" sortKey="competitor" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Value" sortKey="value" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Owner" sortKey="owner_name" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Expected close" sortKey="expected_close_date" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh
+                label="Expected close"
+                sortKey="expected_close_date"
+                toggleSort={toggleSort}
+                arrow={arrow}
+                className="col-nowrap"
+              />
               {/* Named for what it sorts by and for the figure in large type.
                   "Aging" read as total age, which is the small grey number
                   underneath — so sorting by it appeared to put the oldest
                   opportunity last. "Aging" still belongs to the Pipeline aging
                   card on the Sales Dashboard, where it means a bucketed
                   report. */}
-              <SortTh label="Days in stage" sortKey="days_in_stage" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh
+                label="Days in stage"
+                sortKey="days_in_stage"
+                toggleSort={toggleSort}
+                arrow={arrow}
+                className="col-nowrap"
+              />
               {/* "Linked order", not "Order": the value is an order number
                   formatted ORD-OPP-<opportunity id>, which reads like an
                   opportunity reference at a glance. */}
-              <th>Linked order</th>
+              <th className="col-nowrap">Linked order</th>
               <SortTh label="Stage" sortKey="stage" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
@@ -203,8 +215,14 @@ export default function Deals() {
                 <td>{d.competitor || "—"}</td>
                 <td>{money(d.value)}</td>
                 <td>{d.owner_name || "—"}</td>
+                {/* This cell was missing entirely: the header row had ten
+                    columns and the body nine, so everything from here right
+                    sat one column left of its own heading — days-in-stage
+                    under "Expected close", the order number under "Aging",
+                    the stage dropdown under the order column. */}
+                <td className="col-nowrap">{d.expected_close_date || "—"}</td>
                 <td><AgingCell deal={d} staleAfter={staleAfter} /></td>
-                <td>{d.linked_order_number || "—"}</td>
+                <td className="col-nowrap">{d.linked_order_number || "—"}</td>
                 <td>
                   <select value={d.stage} onChange={(e) => quickSetStage(d.id, e.target.value)} style={{ width: "auto" }}>
                     {STAGES.map((s) => (
