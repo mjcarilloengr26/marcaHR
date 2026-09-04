@@ -24,6 +24,19 @@ function parseReceipt(body) {
   };
 }
 
+// Receipt blobs are deliberately excluded from the item list. A report's
+// receipts are the overwhelming majority of its payload — a single one runs to
+// a third of a megabyte base64 — and opening a report only needs to know that
+// an attachment exists, not to carry it. has_receipt drives the paperclip
+// link, which fetches the bytes from GET /:id/items/:itemId/receipt when
+// someone actually clicks it.
+//
+// Same reasoning, and the same shape, as the attendance list's
+// has_clock_in_photo.
+const ITEM_COLUMNS = `id, report_id, expense_date, category, description, amount, receipt_ref,
+  receipt_name, receipt_type, supplier_name, supplier_address, supplier_tin,
+  (receipt_data IS NOT NULL) AS has_receipt`;
+
 async function withTotals(report) {
   const totals = await db
     .prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM expense_items WHERE report_id = ?")
@@ -100,9 +113,32 @@ router.get(
       .prepare("SELECT first_name, last_name, email FROM employees WHERE id = ?")
       .get(req.expenseReport.employee_id);
     const items = await db
-      .prepare("SELECT * FROM expense_items WHERE report_id = ? ORDER BY expense_date, id")
+      .prepare(`SELECT ${ITEM_COLUMNS} FROM expense_items WHERE report_id = ? ORDER BY expense_date, id`)
       .all(req.params.id);
     res.json({ ...(await withTotals(req.expenseReport)), employee, items });
+  })
+);
+
+// One receipt's actual bytes, fetched only when someone opens it. Guarded the
+// same way as the report it belongs to: the owner, or HR/admin.
+router.get(
+  "/:id/items/:itemId/receipt",
+  requireAuth,
+  asyncHandler(async (req, res, next) => {
+    const report = await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(req.params.id);
+    if (!report) return res.status(404).json({ error: "Expense report not found" });
+    req.expenseReport = report;
+    next();
+  }),
+  requireSelfOrRole((req) => req.expenseReport.employee_id, "admin", "hr"),
+  asyncHandler(async (req, res) => {
+    // Matched on the report too, so an id from another report cannot be read
+    // through a report the caller happens to have access to.
+    const item = await db
+      .prepare("SELECT receipt_name, receipt_type, receipt_data FROM expense_items WHERE id = ? AND report_id = ?")
+      .get(req.params.itemId, req.params.id);
+    if (!item || !item.receipt_data) return res.status(404).json({ error: "No receipt attached to that item" });
+    res.json({ receipt_name: item.receipt_name, receipt_type: item.receipt_type, receipt_data: item.receipt_data });
   })
 );
 
@@ -206,7 +242,12 @@ router.post(
         supplier_address?.trim() || null,
         supplier_tin?.trim() || null
       );
-    res.status(201).json(await db.prepare("SELECT * FROM expense_items WHERE id = ?").get(info.lastInsertRowid));
+    // Without ITEM_COLUMNS this echoes the receipt straight back to the client
+    // that just uploaded it, doubling the cost of every attachment for bytes
+    // the caller already holds.
+    res
+      .status(201)
+      .json(await db.prepare(`SELECT ${ITEM_COLUMNS} FROM expense_items WHERE id = ?`).get(info.lastInsertRowid));
   })
 );
 

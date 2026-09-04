@@ -448,6 +448,9 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
 
   const [receipt, setReceipt] = useState(null); // { name, type, data }
   const [attaching, setAttaching] = useState(false);
+  // Item id whose receipt is being fetched, and the ones already fetched.
+  const [fetchingReceipt, setFetchingReceipt] = useState(null);
+  const receiptCache = useRef({});
   const [reviewNote, setReviewNote] = useState("");
 
   const load = () =>
@@ -478,6 +481,36 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
     } finally {
       setAttaching(false);
     }
+  };
+
+  // The report no longer carries receipt bytes, so a receipt is fetched the
+  // moment someone asks for it and then kept — reopening the same one in a
+  // sitting shouldn't go back to the server.
+  const openReceipt = async (item) => {
+    setError("");
+    let file = receiptCache.current[item.id];
+    if (!file) {
+      setFetchingReceipt(item.id);
+      try {
+        file = await api.get(`/expenses/${id}/items/${item.id}/receipt`);
+        receiptCache.current[item.id] = file;
+      } catch (err) {
+        setError(err.message);
+        return;
+      } finally {
+        setFetchingReceipt(null);
+      }
+    }
+    // A data: URL can't be given to window.open in Chrome or Edge — they block
+    // top-level navigation to data URLs. A synthesised anchor still works, and
+    // keeps the original filename on the saved file.
+    const a = document.createElement("a");
+    a.href = file.receipt_data;
+    a.download = file.receipt_name || "receipt";
+    a.rel = "noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   };
 
   const addItem = async (e) => {
@@ -611,19 +644,20 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                     </td>
                     <td>
                       {it.receipt_ref || ""}
-                      {it.receipt_data && (
-                        <a
-                          href={it.receipt_data}
-                          download={it.receipt_name || "receipt"}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="location-link"
+                      {it.has_receipt && (
+                        <button
+                          type="button"
+                          // link-btn supplies the button reset; location-link
+                          // keeps the size and nowrap the anchor had.
+                          className="link-btn location-link"
                           style={{ marginLeft: it.receipt_ref ? 6 : 0 }}
+                          disabled={fetchingReceipt === it.id}
+                          onClick={() => openReceipt(it)}
                         >
-                          📎 {it.receipt_name || "receipt"}
-                        </a>
+                          📎 {fetchingReceipt === it.id ? "Opening…" : it.receipt_name || "receipt"}
+                        </button>
                       )}
-                      {!it.receipt_ref && !it.receipt_data && "—"}
+                      {!it.receipt_ref && !it.has_receipt && "—"}
                     </td>
                     <td>{money(it.amount)}</td>
                     {canEdit && (
