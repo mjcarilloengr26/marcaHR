@@ -180,8 +180,17 @@ export default function Deals() {
               <SortTh label="Value" sortKey="value" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Owner" sortKey="owner_name" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Expected close" sortKey="expected_close_date" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Aging" sortKey="days_in_stage" toggleSort={toggleSort} arrow={arrow} />
-              <th>Order</th>
+              {/* Named for what it sorts by and for the figure in large type.
+                  "Aging" read as total age, which is the small grey number
+                  underneath — so sorting by it appeared to put the oldest
+                  opportunity last. "Aging" still belongs to the Pipeline aging
+                  card on the Sales Dashboard, where it means a bucketed
+                  report. */}
+              <SortTh label="Days in stage" sortKey="days_in_stage" toggleSort={toggleSort} arrow={arrow} />
+              {/* "Linked order", not "Order": the value is an order number
+                  formatted ORD-OPP-<opportunity id>, which reads like an
+                  opportunity reference at a glance. */}
+              <th>Linked order</th>
               <SortTh label="Stage" sortKey="stage" toggleSort={toggleSort} arrow={arrow} />
               <th></th>
             </tr>
