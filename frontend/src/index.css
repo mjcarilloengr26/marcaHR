@@ -927,6 +927,20 @@ input[type="date"]::-webkit-datetime-edit-year-field {
    slides under the button. */
 .input-with-action { position: relative; }
 .input-with-action input { padding-right: 40px; }
+
+/* Edge draws its own reveal eye inside every password field, and IE drew a
+   clear "x". Both land exactly where our button is, so the field ends up with
+   two overlapping eyes that disagree about state — Edge's tracks its own
+   toggle, ours tracks React's. Hide theirs and keep one control that the
+   label, the aria-pressed state and the tooltip all describe correctly.
+   Password-manager buttons are deliberately left alone: those do a different
+   job and suppressing them would take a feature away.
+
+   Written as two rules rather than one grouped selector: a browser that
+   recognises only one of these pseudo-elements would throw the whole combined
+   rule away, taking the half it did understand with it. */
+.input-with-action input::-ms-reveal { display: none; width: 0; height: 0; }
+.input-with-action input::-ms-clear { display: none; width: 0; height: 0; }
 .input-action {
   position: absolute;
   top: 50%;
