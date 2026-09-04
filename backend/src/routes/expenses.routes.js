@@ -200,6 +200,23 @@ router.post(
     if (expense_type && !EXPENSE_TYPES.includes(expense_type)) {
       return res.status(400).json({ error: `expense_type must be one of: ${EXPENSE_TYPES.join(", ")}` });
     }
+    // Cost centre must be one an admin has defined. It used to be free text,
+    // which is how "Engineering" and "engineering" became two cost centres as
+    // far as any budget was concerned. Blank is still allowed — not every
+    // claim belongs to one.
+    const costCenter = String(body.cost_center || "").trim();
+    if (costCenter) {
+      const known = await db
+        .prepare("SELECT name FROM cost_centers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND active")
+        .get(costCenter);
+      if (!known) {
+        return res.status(400).json({ error: "Choose a cost center from the list — new ones are added by an admin" });
+      }
+      // Stored under the spelling the admin defined, so spend always folds
+      // back onto the right budget however it was picked.
+      body.cost_center = known.name;
+    }
+
     const titleChoice = resolveChoice({
       choice: body.title,
       other: body.title_other,
@@ -243,10 +260,12 @@ router.post(
         title,
         expense_type || null,
         0,
-        // Independent of the advance on purpose: one advance can fund several
-        // projects, so inheriting the advance's cost centre would file work
-        // against the wrong one and be wrong more often than it was right.
-        cost_center || null,
+        // body.cost_center, not the destructured copy: the check above rewrites
+        // it to the spelling the admin defined, and the copy was taken before
+        // that. Independent of the advance on purpose — one advance can fund
+        // several projects, so inheriting its cost centre would file work
+        // against the wrong one more often than the right one.
+        body.cost_center || null,
         notes || null,
         advanceId
       );

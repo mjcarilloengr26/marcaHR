@@ -94,6 +94,7 @@ app.use("/api/users", usersRoutes);
 app.use("/api/board", boardRoutes);
 app.use("/api/expenses", expensesRoutes);
 app.use("/api/cash-advances", require("./routes/cashadvances.routes"));
+app.use("/api/cost-centers", require("./routes/costcenters.routes"));
 app.use("/api/locations", locationsRoutes);
 app.use("/api/deals", dealsRoutes);
 app.use("/api/orders", ordersRoutes);

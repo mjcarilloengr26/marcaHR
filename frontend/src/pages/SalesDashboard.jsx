@@ -54,6 +54,128 @@ function categoryColor(label, index) {
   return label === "Uncategorised" ? "#6b7280" : TITLE_PALETTE[index % TITLE_PALETTE.length];
 }
 
+// Year-to-date spend against each cost centre's allocation. The bars answer
+// "who is close to the line"; the table underneath answers "by how much",
+// which a bar cannot say precisely enough to act on.
+function CostCenterSpend({ money, moneyWhole }) {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    api
+      .get(`/cost-centers?year=${year}`)
+      .then(setData)
+      .catch((err) => setError(err.message));
+  }, [year]);
+
+  if (error || !data) return null;
+
+  // Only cost centres that have an allocation or some spend. A list padded
+  // with untouched, unbudgeted rows buries the ones that matter.
+  const rows = data.centers.filter((c) => c.budget > 0 || c.spent > 0);
+  const years = [];
+  for (let y = new Date().getFullYear(); y >= new Date().getFullYear() - 3; y -= 1) years.push(y);
+
+  const overspent = rows.filter((c) => c.overBudget);
+  const nearing = rows.filter((c) => !c.overBudget && c.usedPercent !== null && c.usedPercent >= 80);
+  const unbudgeted = rows.filter((c) => c.budget === 0 && c.spent > 0);
+
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <div className="page-header" style={{ marginBottom: 8 }}>
+        <div>
+          <h2 style={{ marginBottom: 2 }}>Cost center spending</h2>
+          <p className="subtitle" style={{ margin: 0 }}>
+            Year-to-date spend against each allocation. Set the allocations under
+            Administration &rsaquo; Cost Centers.
+          </p>
+        </div>
+        <select value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ width: "auto" }}>
+          {years.map((y) => (
+            <option key={y} value={y}>{y}</option>
+          ))}
+        </select>
+      </div>
+
+      {rows.length === 0 ? (
+        <div className="empty-state">
+          Nothing allocated or spent in {year}. Add a cost center and its allocation to start tracking.
+        </div>
+      ) : (
+        <>
+          {(overspent.length > 0 || nearing.length > 0 || unbudgeted.length > 0) && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              {overspent.length > 0 && (
+                <span className="badge badge-rejected">
+                  {overspent.length} over allocation — {moneyWhole(overspent.reduce((n, c) => n + Math.abs(c.remaining), 0))} above
+                </span>
+              )}
+              {nearing.length > 0 && (
+                <span className="badge badge-pending">{nearing.length} past 80% of allocation</span>
+              )}
+              {unbudgeted.length > 0 && (
+                <span className="badge badge-draft">{unbudgeted.length} spending with no allocation set</span>
+              )}
+            </div>
+          )}
+
+          <BarChart
+            data={rows.map((c) => ({ label: c.name, current: c.spent, previous: c.budget }))}
+            currentLabel="Spent"
+            previousLabel="Allocated"
+            currentColor="#2f6fed"
+            previousColor="#a9c6fb"
+          />
+
+          <div className="table-scroll" style={{ marginTop: 14 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th className="th-plain">Cost center</th>
+                  <th className="th-plain">Allocated</th>
+                  <th className="th-plain">Spent</th>
+                  <th className="th-plain">Remaining</th>
+                  <th className="th-plain">Used</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((c) => (
+                  <tr key={c.id}>
+                    <td>{c.name}</td>
+                    <td className="col-nowrap">{c.budget > 0 ? money(c.budget) : <span className="subtitle">none set</span>}</td>
+                    <td className="col-nowrap">{money(c.spent)}</td>
+                    <td className="col-nowrap" style={{ color: c.remaining < 0 ? "var(--danger)" : undefined }}>
+                      {c.budget > 0 ? money(c.remaining) : "—"}
+                    </td>
+                    <td className="col-nowrap">
+                      {c.usedPercent === null ? (
+                        <span className="subtitle">—</span>
+                      ) : (
+                        <span style={{ color: c.overBudget ? "var(--danger)" : c.usedPercent >= 80 ? "var(--warning)" : undefined }}>
+                          {c.usedPercent}%
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {data.unassigned.length > 0 && (
+            <p className="subtitle" style={{ marginTop: 12, marginBottom: 0 }}>
+              {moneyWhole(data.unassigned.reduce((n, u) => n + u.spent, 0))} was booked to names that are
+              not set up as cost centers, so no allocation is watching it — listed under Administration
+              &rsaquo; Cost Centers.
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function periodLabel(periodType, year, index) {
   if (periodType === "yearly") return `${year}`;
   if (periodType === "quarterly") return `Q${index} ${year}`;
@@ -735,6 +857,8 @@ export default function SalesDashboard() {
             </>
           )}
         </div>
+
+      <CostCenterSpend money={money} moneyWhole={moneyWhole} />
 
       <div className="grid grid-2" style={{ marginBottom: 16 }}>
         <Funnel

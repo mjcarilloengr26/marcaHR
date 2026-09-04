@@ -1,4 +1,5 @@
 const express = require("express");
+const { COUNTED_SQL } = require("../services/expenseScope");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
@@ -231,7 +232,7 @@ async function fetchExpenseRows(start, end) {
        FROM expense_reports er
        -- A rejected report is spend the company refused. Counting it inflates
        -- every figure on this card and reports money that was never accepted.
-       WHERE er.created_at::date BETWEEN ? AND ? AND er.status <> 'rejected'`
+       WHERE er.created_at::date BETWEEN ? AND ? AND er.status IN ${COUNTED_SQL}`
     )
     .all(start, end);
 }
@@ -248,7 +249,7 @@ async function fetchExpenseItemRows(start, end) {
       `SELECT i.category, i.amount, r.expense_type
        FROM expense_items i
        JOIN expense_reports r ON r.id = i.report_id
-       WHERE r.created_at::date BETWEEN ? AND ? AND r.status <> 'rejected'`
+       WHERE r.created_at::date BETWEEN ? AND ? AND r.status IN ${COUNTED_SQL}`
     )
     .all(start, end);
 }

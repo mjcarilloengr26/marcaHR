@@ -38,8 +38,13 @@ export default function Expenses() {
   const [search, setSearch] = useState("");
 
   const [options, setOptions] = useState({ types: [], titles: [], categories: [] });
+  // Cost centres are a managed list an admin maintains — staff pick from it and
+  // cannot invent one, so the same spend cannot arrive under three spellings
+  // and slip past whichever budget was meant to catch it.
+  const [costCenters, setCostCenters] = useState([]);
   useEffect(() => {
     api.get("/expenses/options").then(setOptions).catch(() => {});
+    api.get("/cost-centers/options").then(setCostCenters).catch(() => {});
   }, []);
 
   const load = () => api.get("/expenses").then(setReports).catch((err) => setError(err.message));
@@ -432,12 +437,19 @@ export default function Expenses() {
               </div>
               <div className="form-row">
                 <label>Cost center</label>
-                <SuggestInput
-                  field="cost_center"
-                  value={form.cost_center}
-                  onChange={(e) => setForm({ ...form, cost_center: e.target.value })}
-                  placeholder="e.g. Sales, Engineering, CC-100"
-                />
+                <select value={form.cost_center} onChange={(e) => setForm({ ...form, cost_center: e.target.value })}>
+                  <option value="">None</option>
+                  {costCenters.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}{c.code ? ` · ${c.code}` : ""}
+                    </option>
+                  ))}
+                </select>
+                <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
+                  {costCenters.length === 0
+                    ? "No cost centers set up yet — an admin adds them under Administration."
+                    : "Set up by an admin. Ask for a new one rather than filing under the nearest match."}
+                </div>
               </div>
             </div>
             <div className="form-row">

@@ -1,4 +1,5 @@
 const db = require("../db");
+const { COUNTED_SQL } = require("../services/expenseScope");
 const { appTimezone } = require("./timezone");
 
 // Expense summary per employee — every liquidated/claimed expense item,
@@ -25,7 +26,7 @@ async function getExpenseSummary() {
       // is not somebody's expense figure.
       `SELECT r.employee_id, i.amount, i.expense_date FROM expense_items i
        JOIN expense_reports r ON r.id = i.report_id
-       WHERE r.status <> 'rejected'`
+       WHERE r.status IN ${COUNTED_SQL}`
     )
     .all();
   for (const it of expenseItemRows) {

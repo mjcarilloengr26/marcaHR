@@ -1,4 +1,5 @@
 const express = require("express");
+const { COUNTED_SQL } = require("../services/expenseScope");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
@@ -25,7 +26,7 @@ const SELECT = `
            SELECT SUM(i.amount)
            FROM expense_reports r
            JOIN expense_items i ON i.report_id = r.id
-           WHERE r.cash_advance_id = a.id AND r.status <> 'rejected'
+           WHERE r.cash_advance_id = a.id AND r.status IN ${COUNTED_SQL}
          ), 0) AS liquidated,
          COALESCE((
            SELECT COUNT(*) FROM expense_reports r WHERE r.cash_advance_id = a.id

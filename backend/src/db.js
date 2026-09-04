@@ -538,6 +538,40 @@ CREATE TABLE IF NOT EXISTS page_access_grants (
 );
 CREATE INDEX IF NOT EXISTS idx_page_access_grants_user ON page_access_grants(user_id);
 
+-- The cost centres the company books spend against, and what each is allowed
+-- to spend in a year. Kept as a managed list rather than the free text the
+-- expense form used to accept: "Engineering" and "engineering" were two cost
+-- centres as far as any total was concerned, and a budget cannot be checked
+-- against spend that is spelled three ways.
+--
+-- Names are matched case-insensitively by the unique index, so a second
+-- spelling cannot be created at all.
+CREATE TABLE IF NOT EXISTS cost_centers (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  code TEXT,
+  -- Retired rather than deleted: spend already booked against a cost centre
+  -- has to keep reporting even after the company stops using it.
+  active BOOLEAN NOT NULL DEFAULT true,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cost_centers_name ON cost_centers(LOWER(TRIM(name)));
+
+-- One allocation per cost centre per year. A year of its own rather than a
+-- single "budget" column, because last year's figure is what this year's
+-- overspend is judged against and overwriting it loses that.
+CREATE TABLE IF NOT EXISTS cost_center_budgets (
+  id SERIAL PRIMARY KEY,
+  cost_center_id INTEGER NOT NULL REFERENCES cost_centers(id) ON DELETE CASCADE,
+  year INTEGER NOT NULL,
+  amount NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (amount >= 0),
+  updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE(cost_center_id, year)
+);
+
 -- One row per pair per day, written whenever the header reads a live rate.
 -- The provider only returns the latest figure, so a day-on-day comparison has
 -- to come from our own history. Snapshots are kept from the same provider the
@@ -884,6 +918,24 @@ async function ensureDealAging() {
 // rather than added to — Postgres will not widen one in place. Anything
 // already released stays 'open': it was approved by the act of releasing it,
 // and retro-flagging live advances as unapproved would be a lie.
+// Seed the managed list from whatever the free-text field already holds, so
+// the dropdown starts with the cost centres actually in use rather than empty
+// — an empty list would make every existing report unfileable and force
+// somebody to retype names they had already entered.
+//
+// Only ever inserts. A name an admin has since renamed or retired is not
+// resurrected by a stale report still carrying the old spelling.
+async function seedCostCenters() {
+  await pool.query(
+    `INSERT INTO cost_centers (name)
+     SELECT DISTINCT ON (LOWER(TRIM(cost_center))) TRIM(cost_center)
+     FROM expense_reports
+     WHERE COALESCE(TRIM(cost_center), '') <> ''
+       AND LOWER(TRIM(cost_center)) NOT IN (SELECT LOWER(TRIM(name)) FROM cost_centers)
+     ORDER BY LOWER(TRIM(cost_center)), TRIM(cost_center)`
+  );
+}
+
 async function ensureCashAdvanceApproval() {
   await pool.query("ALTER TABLE cash_advances ADD COLUMN IF NOT EXISTS decided_by INTEGER REFERENCES employees(id) ON DELETE SET NULL");
   await pool.query("ALTER TABLE cash_advances ADD COLUMN IF NOT EXISTS decided_at TEXT");
@@ -1228,6 +1280,7 @@ db.migrate = function () {
       .then(() => ensureAssetQuantity())
       .then(() => ensureCashAdvanceLink())
       .then(() => ensureCashAdvanceApproval())
+      .then(() => seedCostCenters())
       .then(() => widenRealColumns())
       .then(() => ensurePurchaseOrderWorkOrder())
       .then(() => ensureExpenseType())

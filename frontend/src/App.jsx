@@ -38,6 +38,7 @@ const BrandingSettings = lazy(() => import("./pages/BrandingSettings"));
 const PageAccess = lazy(() => import("./pages/PageAccess"));
 const MenuOrder = lazy(() => import("./pages/MenuOrder"));
 const CashAdvances = lazy(() => import("./pages/CashAdvances"));
+const CostCenters = lazy(() => import("./pages/CostCenters"));
 const LocalizationSettings = lazy(() => import("./pages/LocalizationSettings"));
 const ReviewSchedule = lazy(() => import("./pages/ReviewSchedule"));
 
@@ -83,6 +84,7 @@ export default function App() {
         <Route path="/branding-settings" element={<Protected roles={["admin"]}><BrandingSettings /></Protected>} />
         <Route path="/page-access" element={<Protected roles={["admin"]}><PageAccess /></Protected>} />
         <Route path="/menu-order" element={<Protected roles={["admin"]}><MenuOrder /></Protected>} />
+        <Route path="/cost-centers" element={<Protected roles={["admin", "hr"]}><CostCenters /></Protected>} />
         <Route path="/localization" element={<Protected roles={["admin"]}><LocalizationSettings /></Protected>} />
         <Route path="/review-schedule" element={<Protected roles={["admin"]}><ReviewSchedule /></Protected>} />
         <Route path="/business-review" element={<Protected roles={["admin"]}><BusinessReview /></Protected>} />

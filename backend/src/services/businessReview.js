@@ -1,4 +1,5 @@
 const db = require("../db");
+const { COUNTED_SQL } = require("../services/expenseScope");
 const { getProfitLoss } = require("./profitLoss");
 const { staleDealDays } = require("./dealAging");
 
@@ -89,9 +90,9 @@ async function metricsFor({ start, end, year, months }) {
               COALESCE(SUM(r.cash_advance_amount), 0) AS advances,
               COALESCE((SELECT SUM(ei.amount) FROM expense_items ei
                         JOIN expense_reports er ON er.id = ei.report_id
-                        WHERE ei.expense_date BETWEEN ? AND ? AND er.status <> 'rejected'), 0) AS spent
+                        WHERE ei.expense_date BETWEEN ? AND ? AND er.status IN ${COUNTED_SQL}), 0) AS spent
        FROM expense_reports r
-       WHERE substr(r.created_at, 1, 10) BETWEEN ? AND ? AND r.status <> 'rejected'`
+       WHERE substr(r.created_at, 1, 10) BETWEEN ? AND ? AND r.status IN ${COUNTED_SQL}`
     ).get(start, end, start, end),
 
     db.prepare(
