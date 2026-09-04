@@ -10,22 +10,55 @@ const EXPENSE_TYPES = ["Operating Expenses", "Project Expenses"];
 
 const OTHER = "Others";
 
-const TITLES = [
-  "Fuel", "Parking", "Toll Fees", "Meals", "Maintenance", "Car Maintenance",
-  "Utilities", "Allowance per diem", "Supplies", "Materials", "Labor", "Airfare",
-  "Hotel", "Foods", "Equipment Rental", "Vehicle Rental", "Office Rental",
-  "SOP", "Marketing", "Government Fees",
+// One list for both the report's title and the line item's category.
+//
+// They were two lists, and the overlap fought: "Maintenance" and "Car
+// Maintenance" as titles against "Vehicle Maintenance" as a category, "Hotel"
+// against "Hotel / Accommodation", "Foods" against "Meals", "Parts" against
+// "Spare Parts". The same spend then landed under different words depending on
+// which field it went in, and the purpose and category charts could not be
+// read against each other even when they described the same money.
+//
+// Overlaps were resolved to the more specific wording — Vehicle Maintenance
+// covers a mechanic's bill and a service, Spare Parts covers Parts, Meals
+// covers Foods, Hotel / Accommodation covers Hotel — and the result is sorted
+// alphabetically, because at two dozen entries finding a word beats any
+// grouping someone has to learn.
+const TERMS = [
+  "Airfare",
+  "Allowance per diem",
+  "Bank & Transfer Fees",
+  "Communication / Load",
+  "Equipment Rental",
+  "Fuel",
+  "Government Fees",
+  "Hotel / Accommodation",
+  "Labor",
+  "Laundry",
+  "Marketing",
+  "Materials",
+  "Meals",
+  "Office Rental",
+  "Parking",
+  "SOP",
+  "Spare Parts",
+  "Supplies",
+  "Toll Fees",
+  "Transport",
+  "Utilities",
+  "Vehicle Maintenance",
+  "Vehicle Rental",
+  // Always last: it is the escape hatch, and a reader scanning the list should
+  // reach it after the real choices.
   OTHER,
 ];
 
-const CATEGORIES = [
-  "Meals", "Transport", "Fuel", "Parking", "Toll Fees", "Airfare",
-  "Hotel / Accommodation", "Vehicle Maintenance", "Spare Parts",
-  "Supplies", "Materials", "Labor", "Equipment Rental", "Vehicle Rental",
-  "Utilities", "Communication / Load", "Laundry", "Bank & Transfer Fees",
-  "Government Fees", "SOP", "Marketing",
-  OTHER,
-];
+// Both fields draw on the same list. Kept as two exported names because the
+// two are different questions — what the advance was for, and what the money
+// bought — and a future divergence should be a deliberate edit here rather
+// than a surprise.
+const TITLES = TERMS;
+const CATEGORIES = TERMS;
 
 // Resolves a { choice, other } pair to the value to store, or an error.
 //
@@ -55,4 +88,4 @@ function resolveChoice({ choice, other, allowed, label, required = true }) {
   return { value: typed.slice(0, 120) };
 }
 
-module.exports = { EXPENSE_TYPES, TITLES, CATEGORIES, OTHER, resolveChoice };
+module.exports = { EXPENSE_TYPES, TERMS, TITLES, CATEGORIES, OTHER, resolveChoice };

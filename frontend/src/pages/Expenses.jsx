@@ -265,9 +265,10 @@ export default function Expenses() {
               <SortTh label="Type" sortKey="expense_type" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} />
               {/* Not sortable: a report has several categories, so there is no
-                  single value to sort a row by. */}
-              <th>Category</th>
-              <th>Cost center</th>
+                  single value to sort a row by. th-plain keeps it the same
+                  colour as the sortable headings either way. */}
+              <th className="th-plain">Category</th>
+              <th className="th-plain">Cost center</th>
               <SortTh label="Cash advance" sortKey="cash_advance_amount" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Expenses" sortKey="total_expenses" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Balance" sortKey="balance" toggleSort={toggleSort} arrow={arrow} />

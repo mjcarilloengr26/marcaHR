@@ -564,6 +564,12 @@ tbody tr:last-child td { border-bottom: none; }
    status. Auto table layout will otherwise wrap them to save width that a
    wrappable neighbour (a title, a description) can give up far more cheaply.
    Applies to the header too, so a two-word heading does not stack. */
+/* A column heading that is not sortable. Sortable ones render a link-styled
+   button and so pick up the primary colour; without this the header row reads
+   as two different kinds of thing depending on an implementation detail the
+   reader cannot see. */
+.th-plain { color: var(--primary); }
+
 .col-nowrap { white-space: nowrap; }
 
 /* The per-report category split in the expenses list. Name and amount are
