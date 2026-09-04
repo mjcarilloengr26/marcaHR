@@ -48,6 +48,12 @@ function titleColor(title, index) {
   return title === "Unspecified" ? "#6b7280" : TITLE_PALETTE[index % TITLE_PALETTE.length];
 }
 
+// Same rotation for line-item categories, with the neutral gray reserved for
+// items nobody categorised — an absence, not an identity.
+function categoryColor(label, index) {
+  return label === "Uncategorised" ? "#6b7280" : TITLE_PALETTE[index % TITLE_PALETTE.length];
+}
+
 function periodLabel(periodType, year, index) {
   if (periodType === "yearly") return `${year}`;
   if (periodType === "quarterly") return `Q${index} ${year}`;
@@ -608,6 +614,11 @@ export default function SalesDashboard() {
                   value: t.current,
                   color: titleColor(t.label, i),
                 }));
+                const byCategoryPieData = (expensesReport.byCategory || []).map((t, i) => ({
+                  label: t.label,
+                  value: t.current,
+                  color: categoryColor(t.label, i),
+                }));
                 const currentYearLabel = `${expensesReport.period.year}`;
                 const previousYearLabel = `${expensesReport.previousPeriod.year}`;
                 return (
@@ -639,7 +650,16 @@ export default function SalesDashboard() {
                       </div>
                     </div>
                     <div>
-                      <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>By Title / Purpose</h3>
+                      {/* Renamed from "By Title / Purpose", which read as a
+                          breakdown of what was bought. It is the report's own
+                          purpose — the reason an advance was raised — and the
+                          category chart below is what the money went on. */}
+                      <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>By report purpose</h3>
+                      <p className="subtitle" style={{ margin: "0 0 12px", fontSize: 12 }}>
+                        What each cash advance was raised for. A report titled "Allowance" may hold
+                        meals, transport and laundry — see the category breakdown below for what was
+                        actually spent.
+                      </p>
                       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
                         <div style={{ flex: "0 1 460px", minWidth: 0 }}>
                           <PieChart data={byTitlePieData} />
@@ -654,6 +674,31 @@ export default function SalesDashboard() {
                           />
                         </div>
                       </div>
+                    </div>
+                    <div>
+                      <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>By category</h3>
+                      <p className="subtitle" style={{ margin: "0 0 12px", fontSize: 12 }}>
+                        What the money actually bought, taken from the individual expense lines.
+                        Spellings that differ only by case are counted as one category.
+                      </p>
+                      {byCategoryPieData.length === 0 ? (
+                        <div className="empty-state">No expense lines in this period.</div>
+                      ) : (
+                        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+                          <div style={{ flex: "0 1 460px", minWidth: 0 }}>
+                            <PieChart data={byCategoryPieData} />
+                          </div>
+                          <div style={{ flex: "1 1 300px", minWidth: 0 }}>
+                            <BarChart
+                              data={expensesReport.byCategory || []}
+                              currentLabel={currentYearLabel}
+                              previousLabel={previousYearLabel}
+                              currentColor="#0891b2"
+                              previousColor="#a5e4ef"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

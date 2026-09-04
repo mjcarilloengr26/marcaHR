@@ -234,6 +234,65 @@ async function fetchExpenseRows(start, end) {
     .all(start, end);
 }
 
+// Line items, not report totals. The report's title says what an advance was
+// *for*; the item's category says what the money actually bought, and the two
+// are routinely different — a report titled "Allowance" holds meals,
+// transport and laundry. Grouping only by title made Meals read PHP 220 when
+// PHP 18,976 had been spent on it across 67 items, and hid Transport
+// entirely because no report happened to be titled that.
+async function fetchExpenseItemRows(start, end) {
+  return db
+    .prepare(
+      `SELECT i.category, i.amount
+       FROM expense_items i
+       JOIN expense_reports r ON r.id = i.report_id
+       WHERE r.created_at::date BETWEEN ? AND ?`
+    )
+    .all(start, end);
+}
+
+// Category is free text with suggestions, so it drifts: "sop" and "SOP" are
+// one category typed twice and must not become two slices. Grouped on a
+// case-folded key, and the label shown is the spelling used most often.
+//
+// Both periods are resolved together on purpose — deciding the display
+// spelling per period could label the same category "sop" one year and "SOP"
+// the next, which would split it across the year-on-year bars.
+function groupExpenseItemsByCategory(currentRows, previousRows) {
+  const spellings = new Map(); // folded key -> Map(label -> times seen)
+  const noteSpelling = (rows) => {
+    for (const r of rows) {
+      const label = String(r.category || "").trim() || "Uncategorised";
+      const key = label.toLowerCase();
+      const seen = spellings.get(key) || new Map();
+      seen.set(label, (seen.get(label) || 0) + 1);
+      spellings.set(key, seen);
+    }
+  };
+  noteSpelling(currentRows);
+  noteSpelling(previousRows);
+
+  const display = new Map();
+  for (const [key, seen] of spellings) {
+    display.set(
+      key,
+      [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0]
+    );
+  }
+
+  const total = (rows) => {
+    const out = new Map();
+    for (const r of rows) {
+      const key = (String(r.category || "").trim() || "Uncategorised").toLowerCase();
+      const label = display.get(key);
+      out.set(label, (out.get(label) || 0) + (Number(r.amount) || 0));
+    }
+    return out;
+  };
+
+  return { current: total(currentRows), previous: total(previousRows) };
+}
+
 function groupExpenseRows(rows) {
   const byType = new Map();
   const byTitle = new Map();
@@ -273,7 +332,14 @@ router.get(
     const { start, end } = periodDateRange(period_type, period_year, period_index);
     const { start: prevStart, end: prevEnd } = periodDateRange(period_type, period_year - 1, period_index);
 
-    const [rows, prevRows] = await Promise.all([fetchExpenseRows(start, end), fetchExpenseRows(prevStart, prevEnd)]);
+    const [rows, prevRows, itemRows, prevItemRows] = await Promise.all([
+      fetchExpenseRows(start, end),
+      fetchExpenseRows(prevStart, prevEnd),
+      // Same date window as the report-level rows, so the three breakdowns
+      // reconcile to the same total rather than quietly disagreeing.
+      fetchExpenseItemRows(start, end),
+      fetchExpenseItemRows(prevStart, prevEnd),
+    ]);
 
     const totalCashAdvance = rows.reduce((sum, r) => sum + r.cash_advance_amount, 0);
     const totalExpenses = rows.reduce((sum, r) => sum + r.total_expenses, 0);
@@ -282,6 +348,7 @@ router.get(
 
     const grouped = groupExpenseRows(rows);
     const prevGrouped = groupExpenseRows(prevRows);
+    const byCategory = groupExpenseItemsByCategory(itemRows, prevItemRows);
 
     res.json({
       period: { type: period_type, year: period_year, index: period_index, label: periodLabel(period_type, period_year, period_index) },
@@ -289,6 +356,7 @@ router.get(
       totals: { totalCashAdvance, totalExpenses, balance, liquidationRatePercent },
       byType: mergeByLabel(grouped.byType, prevGrouped.byType),
       byTitle: mergeByLabel(grouped.byTitle, prevGrouped.byTitle),
+      byCategory: mergeByLabel(byCategory.current, byCategory.previous),
     });
   })
 );
