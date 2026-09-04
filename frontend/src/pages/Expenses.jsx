@@ -473,6 +473,7 @@ export default function Expenses() {
 // in a modal off a parent's state, and reading a list off undefined took the
 // whole page blank once already.
 function ReportDetail({ id, isHr, options = { types: [], titles: [], categories: [] }, onClose, onChanged }) {
+  const { user } = useAuth();
   // Its own hook call — this is a separate component from Expenses above, so
   // it can't see that one's formatter.
   const { moneyPrecise: money } = useAppSettings();
@@ -623,6 +624,25 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
     }
   };
 
+  // Owner or HR, and only from rejected — matching what the server allows, so
+  // the button is never offered where it would be refused.
+  const canReopen = report && report.status === "rejected" && (isHr || report.employee_id === user?.employee_id);
+  const [reopening, setReopening] = useState(false);
+
+  const reopenReport = async () => {
+    setReopening(true);
+    setError("");
+    try {
+      await api.put(`/expenses/${id}/reopen`, {});
+      await load();
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setReopening(false);
+    }
+  };
+
   const submitReport = async () => {
     try {
       await api.put(`/expenses/${id}/submit`, {});
@@ -690,6 +710,17 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
               </div>
               {report.notes && <div><strong>Notes</strong><div>{report.notes}</div></div>}
             </div>
+
+            {report.review_note && report.status === "rejected" && (
+              <div className="error-banner" style={{ marginTop: 4 }}>
+                <strong>Sent back:</strong> {report.review_note}
+              </div>
+            )}
+            {report.review_note && report.status !== "rejected" && (
+              <div className="subtitle" style={{ margin: "0 0 12px" }}>
+                Reviewer's note: {report.review_note}
+              </div>
+            )}
 
             <h2>Expense items</h2>
             <table style={{ marginBottom: 12 }}>
@@ -870,6 +901,15 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
                 {isOwnerEditable && (
                   <button className="btn" onClick={submitReport}>
                     Submit for approval
+                  </button>
+                )}
+                {/* A rejection used to be terminal: the report froze and the
+                    only way to claim the money was to type it all again.
+                    Reopening returns it to draft, where the existing edit and
+                    submit flow already works. */}
+                {canReopen && (
+                  <button className="btn" disabled={reopening} onClick={reopenReport}>
+                    {reopening ? "Reopening…" : "Edit & resubmit"}
                   </button>
                 )}
                 {isHr && report.status === "submitted" && (

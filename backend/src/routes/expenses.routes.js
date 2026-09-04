@@ -3,6 +3,7 @@ const db = require("../db");
 const { requireAuth, requireRole, requireSelfOrRole } = require("../middleware/auth");
 const { notifyExpenseSubmitted, notifyExpenseStatusChanged } = require("../notifications");
 const asyncHandler = require("../middleware/asyncHandler");
+const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
 
@@ -375,6 +376,40 @@ router.put(
       .prepare("UPDATE expense_reports SET status = 'submitted', submitted_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') WHERE id = ?")
       .run(report.id);
     notifyExpenseSubmitted({ employee_id: report.employee_id, title: report.title });
+    res.json(await withTotals(await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(report.id)));
+  })
+);
+
+// Send a rejected report back to draft so it can be corrected and submitted
+// again. Without this a rejection was terminal: the report froze, and the only
+// way to claim the money was to type the whole thing in a second time.
+//
+// review_note is deliberately kept. Whoever is fixing the report needs to see
+// why it came back while they are editing it, and the next decision overwrites
+// the note anyway.
+router.put(
+  "/:id/reopen",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const report = await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(req.params.id);
+    if (!report) return res.status(404).json({ error: "Expense report not found" });
+    const isOwner = req.user.employee_id === report.employee_id;
+    const isHr = ["admin", "hr"].includes(req.user.role);
+    if (!isOwner && !isHr) return res.status(403).json({ error: "Insufficient permissions" });
+    // Only a rejection reopens. Pulling an approved or reimbursed report back
+    // into draft would let settled money be edited after the fact.
+    if (report.status !== "rejected") {
+      return res.status(400).json({ error: `Only a rejected report can be reopened — this one is ${report.status}` });
+    }
+
+    await db
+      .prepare("UPDATE expense_reports SET status = 'draft', submitted_at = NULL WHERE id = ?")
+      .run(report.id);
+    await logRequestEvent(req, "reopen_expense_report", {
+      entityType: "expense_report",
+      entityId: report.id,
+      details: { title: report.title, employee_id: report.employee_id, was: report.review_note || null },
+    });
     res.json(await withTotals(await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(report.id)));
   })
 );

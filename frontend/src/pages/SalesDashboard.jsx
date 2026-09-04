@@ -678,37 +678,57 @@ export default function SalesDashboard() {
                         </div>
                       </div>
                     </div>
-                    {(expensesReport.breakdownsByType || []).map((section) => (
-                      <div key={section.type}>
-                        <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>
-                          {section.type} — {moneyWhole(section.total)}
-                          {expensesReport.totals.totalExpenses > 0 && (
-                            <span className="subtitle" style={{ fontSize: 12, fontWeight: 400, marginLeft: 8 }}>
-                              {Math.round((section.total / expensesReport.totals.totalExpenses) * 100)}% of all spend
-                            </span>
-                          )}
-                        </h3>
-                        <p className="subtitle" style={{ margin: "0 0 12px", fontSize: 12 }}>
-                          Left: what each advance was raised for. Right: what the money actually bought.
-                          A purpose holds several categories, so the two describe the same total
-                          different ways.
-                        </p>
-                        {section.total === 0 ? (
-                          <div className="empty-state">Nothing spent under {section.type} this period.</div>
-                        ) : (
+                    {(expensesReport.breakdownsByType || []).map((section) => {
+                      // One pie and one bar per dimension, laid out exactly
+                      // like the By Expenses Type card above: the pie gives the
+                      // split within this year, the bar gives the movement
+                      // against last year. Losing the bars lost the only
+                      // year-on-year comparison on the card.
+                      const block = (heading, rows, barColor, prevBarColor) => (
+                        <div key={heading} style={{ marginTop: 20 }}>
+                          <h4 style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 600 }}>{heading}</h4>
                           <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-                            <div style={{ flex: "1 1 380px", minWidth: 0 }}>
-                              <div className="subtitle" style={{ fontSize: 12, marginBottom: 6 }}>By report purpose</div>
-                              <PieChart data={section.byTitle.map((t) => ({ label: t.label, value: t.current, color: purposeColor(t.label) }))} />
+                            <div style={{ flex: "0 1 460px", minWidth: 0 }}>
+                              <PieChart data={rows.map((r) => ({ label: r.label, value: r.current, color: sharedColor(r.label) }))} />
                             </div>
-                            <div style={{ flex: "1 1 380px", minWidth: 0 }}>
-                              <div className="subtitle" style={{ fontSize: 12, marginBottom: 6 }}>By category</div>
-                              <PieChart data={section.byCategory.map((c) => ({ label: c.label, value: c.current, color: catColor(c.label) }))} />
+                            <div style={{ flex: "1 1 300px", minWidth: 0 }}>
+                              <BarChart
+                                data={rows}
+                                currentLabel={currentYearLabel}
+                                previousLabel={previousYearLabel}
+                                currentColor={barColor}
+                                previousColor={prevBarColor}
+                              />
                             </div>
                           </div>
-                        )}
-                      </div>
-                    ))}
+                        </div>
+                      );
+                      return (
+                        <div key={section.type}>
+                          <h3 style={{ margin: "0 0 2px", fontSize: 14 }}>
+                            {section.type} — {moneyWhole(section.total)}
+                            {expensesReport.totals.totalExpenses > 0 && (
+                              <span className="subtitle" style={{ fontSize: 12, fontWeight: 400, marginLeft: 8 }}>
+                                {Math.round((section.total / expensesReport.totals.totalExpenses) * 100)}% of all spend
+                              </span>
+                            )}
+                          </h3>
+                          <p className="subtitle" style={{ margin: 0, fontSize: 12 }}>
+                            Purpose is what each advance was raised for; category is what the money actually
+                            bought. A purpose holds several categories, so the two describe the same total
+                            different ways.
+                          </p>
+                          {section.total === 0 ? (
+                            <div className="empty-state">Nothing spent under {section.type} this period.</div>
+                          ) : (
+                            <>
+                              {block(`${section.type} — by report purpose`, section.byTitle, "#7c3aed", "#cbb6fa")}
+                              {block(`${section.type} — by category`, section.byCategory, "#0891b2", "#a5e4ef")}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })()}
