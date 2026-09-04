@@ -552,7 +552,145 @@ export default function SalesDashboard() {
         </div>
       </div>
 
+      {/* Section heading. The page mixed money in among the sales cards —
+          Profit & Loss and the expense breakdowns sat between the KPI tiles
+          and the pipeline funnels — so reading it meant crossing subjects
+          twice. Everything about winning work comes first, everything about
+          spending after, with a heading so the break is visible. */}
+      <h2 style={{ margin: "26px 0 2px", fontSize: 18 }}>Sales performance</h2>
+      <p className="subtitle" style={{ marginBottom: 14 }}>Pipeline, fulfilment and how each rep is tracking.</p>
+
       {revenueTrend && <RevenueTrendChart thisYear={revenueTrend.thisYear} lastYear={revenueTrend.lastYear} months={revenueTrend.months} />}
+
+
+      <div className="grid grid-2" style={{ marginBottom: 16 }}>
+        <Funnel
+          title="Sales pipeline"
+          subtitle="Opportunities by stage reached"
+          stages={stats.dealFunnel.stages}
+          branchLabel="Lost"
+          branchCount={stats.dealFunnel.lost}
+          branchUnit="opportunity"
+          branchUnitPlural="opportunities"
+        />
+        <Funnel
+          title="Order fulfillment"
+          subtitle="Orders by status reached"
+          stages={stats.orderFunnel.stages}
+          branchLabel="Cancelled"
+          branchCount={stats.orderFunnel.cancelled}
+          branchUnit="order"
+        />
+      </div>
+
+      <PipelineAging
+        aging={aging}
+        money={money}
+        moneyWhole={moneyWhole}
+        isHr={isHrUser}
+        thresholdDraft={thresholdDraft}
+        setThresholdDraft={setThresholdDraft}
+        saveThreshold={saveThreshold}
+        savingThreshold={savingThreshold}
+      />
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h2>Sales Lead Summary</h2>
+        <p className="subtitle" style={{ margin: "0 0 12px" }}>
+          Every opportunity owned by each rep, bucketed by when it was created — live from Sales Opportunities
+        </p>
+        {targets.length === 0 && <div className="empty-state">No sales employees found.</div>}
+        {targets.length > 0 && (
+          <table className="sticky-head">
+            <thead>
+              <tr>
+                <th>Employee</th>
+                <th>Monthly</th>
+                <th>Quarterly</th>
+                <th>Annually</th>
+                <th>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {targets.map((row) => (
+                <tr key={row.employee_id}>
+                  <td>{row.employee_name}</td>
+                  <td>{row.monthly_leads} · {money(row.monthly_lead_value)}</td>
+                  <td>{row.quarterly_leads} · {money(row.quarterly_lead_value)}</td>
+                  <td>{row.annual_leads} · {money(row.annual_lead_value)}</td>
+                  <td>{row.total_leads} · {money(row.total_lead_value)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="page-header" style={{ marginBottom: 4 }}>
+          <div>
+            <h2>Sales targets</h2>
+            <p className="subtitle" style={{ margin: 0 }}>
+              Won opportunity value + order revenue vs. each rep's target
+            </p>
+          </div>
+          <div className="form-inline">
+            <div className="form-row">
+              <label>Period</label>
+              <select value={periodType} onChange={(e) => changePeriodType(e.target.value)}>
+                <option value="monthly">Monthly</option>
+                <option value="quarterly">Quarterly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+            {periodType === "monthly" && (
+              <div className="form-row">
+                <label>Month</label>
+                <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
+                  {MONTH_NAMES.slice(1).map((name, i) => (
+                    <option key={name} value={i + 1}>{name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {periodType === "quarterly" && (
+              <div className="form-row">
+                <label>Quarter</label>
+                <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
+                  <option value={1}>Q1</option>
+                  <option value={2}>Q2</option>
+                  <option value={3}>Q3</option>
+                  <option value={4}>Q4</option>
+                </select>
+              </div>
+            )}
+            <div className="form-row">
+              <label>Year</label>
+              <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} />
+            </div>
+          </div>
+        </div>
+
+        {targets.length === 0 && (
+          <div className="empty-state">No sales employees found for {periodLabel(periodType, year, periodIndex)}.</div>
+        )}
+        {targets.map((row) => (
+          <Meter
+            key={row.employee_id}
+            label={row.employee_name}
+            value={row.actual_amount}
+            max={row.target_amount}
+            formatValue={money}
+            onEdit={() => openEdit(row)}
+          />
+        ))}
+      </div>
+
+      <h2 style={{ margin: "30px 0 2px", fontSize: 18 }}>Money and spending</h2>
+      <p className="subtitle" style={{ marginBottom: 14 }}>
+        What the work earned after costs, where the money went, and how each cost center is
+        tracking against its allocation.
+      </p>
 
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="page-header" style={{ marginBottom: 4 }}>
@@ -859,129 +997,6 @@ export default function SalesDashboard() {
         </div>
 
       <CostCenterSpend money={money} moneyWhole={moneyWhole} />
-
-      <div className="grid grid-2" style={{ marginBottom: 16 }}>
-        <Funnel
-          title="Sales pipeline"
-          subtitle="Opportunities by stage reached"
-          stages={stats.dealFunnel.stages}
-          branchLabel="Lost"
-          branchCount={stats.dealFunnel.lost}
-          branchUnit="opportunity"
-          branchUnitPlural="opportunities"
-        />
-        <Funnel
-          title="Order fulfillment"
-          subtitle="Orders by status reached"
-          stages={stats.orderFunnel.stages}
-          branchLabel="Cancelled"
-          branchCount={stats.orderFunnel.cancelled}
-          branchUnit="order"
-        />
-      </div>
-
-      <PipelineAging
-        aging={aging}
-        money={money}
-        moneyWhole={moneyWhole}
-        isHr={isHrUser}
-        thresholdDraft={thresholdDraft}
-        setThresholdDraft={setThresholdDraft}
-        saveThreshold={saveThreshold}
-        savingThreshold={savingThreshold}
-      />
-
-      <div className="card" style={{ marginBottom: 16 }}>
-        <h2>Sales Lead Summary</h2>
-        <p className="subtitle" style={{ margin: "0 0 12px" }}>
-          Every opportunity owned by each rep, bucketed by when it was created — live from Sales Opportunities
-        </p>
-        {targets.length === 0 && <div className="empty-state">No sales employees found.</div>}
-        {targets.length > 0 && (
-          <table className="sticky-head">
-            <thead>
-              <tr>
-                <th>Employee</th>
-                <th>Monthly</th>
-                <th>Quarterly</th>
-                <th>Annually</th>
-                <th>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {targets.map((row) => (
-                <tr key={row.employee_id}>
-                  <td>{row.employee_name}</td>
-                  <td>{row.monthly_leads} · {money(row.monthly_lead_value)}</td>
-                  <td>{row.quarterly_leads} · {money(row.quarterly_lead_value)}</td>
-                  <td>{row.annual_leads} · {money(row.annual_lead_value)}</td>
-                  <td>{row.total_leads} · {money(row.total_lead_value)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
-      <div className="card">
-        <div className="page-header" style={{ marginBottom: 4 }}>
-          <div>
-            <h2>Sales targets</h2>
-            <p className="subtitle" style={{ margin: 0 }}>
-              Won opportunity value + order revenue vs. each rep's target
-            </p>
-          </div>
-          <div className="form-inline">
-            <div className="form-row">
-              <label>Period</label>
-              <select value={periodType} onChange={(e) => changePeriodType(e.target.value)}>
-                <option value="monthly">Monthly</option>
-                <option value="quarterly">Quarterly</option>
-                <option value="yearly">Yearly</option>
-              </select>
-            </div>
-            {periodType === "monthly" && (
-              <div className="form-row">
-                <label>Month</label>
-                <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
-                  {MONTH_NAMES.slice(1).map((name, i) => (
-                    <option key={name} value={i + 1}>{name}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            {periodType === "quarterly" && (
-              <div className="form-row">
-                <label>Quarter</label>
-                <select value={periodIndex} onChange={(e) => setPeriodIndex(Number(e.target.value))}>
-                  <option value={1}>Q1</option>
-                  <option value={2}>Q2</option>
-                  <option value={3}>Q3</option>
-                  <option value={4}>Q4</option>
-                </select>
-              </div>
-            )}
-            <div className="form-row">
-              <label>Year</label>
-              <input type="number" value={year} onChange={(e) => setYear(Number(e.target.value))} />
-            </div>
-          </div>
-        </div>
-
-        {targets.length === 0 && (
-          <div className="empty-state">No sales employees found for {periodLabel(periodType, year, periodIndex)}.</div>
-        )}
-        {targets.map((row) => (
-          <Meter
-            key={row.employee_id}
-            label={row.employee_name}
-            value={row.actual_amount}
-            max={row.target_amount}
-            formatValue={money}
-            onEdit={() => openEdit(row)}
-          />
-        ))}
-      </div>
 
       {editingTarget && (
         <div className="modal-backdrop" onClick={() => setEditingTarget(null)}>
