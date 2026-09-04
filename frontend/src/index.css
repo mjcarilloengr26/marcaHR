@@ -1266,7 +1266,10 @@ input[type="date"]::-webkit-datetime-edit-year-field {
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  /* The matrix gets a share of the slack too. When the top band was the only
+     flexible row it absorbed everything, growing the headline cards tall
+     around centred text while the figures underneath stayed cramped. */
+  grid-template-rows: auto minmax(0, 1.2fr) minmax(0, 1fr) auto;
   gap: var(--snap-gap);
   font-variant-numeric: tabular-nums;
 }
@@ -1306,10 +1309,10 @@ input[type="date"]::-webkit-datetime-edit-year-field {
   display: flex; flex-direction: column; min-height: 0; overflow: hidden;
 }
 .snap-card h2 {
-  font-size: clamp(11px, 0.8vw, 18px); margin: 0; font-weight: 600;
+  font-size: clamp(11px, 0.88vw, 20px); margin: 0; font-weight: 600;
   letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted);
 }
-.snap-note { font-size: clamp(10px, 0.68vw, 15px); color: var(--text-muted); margin: 3px 0 0; }
+.snap-note { font-size: clamp(10px, 0.72vw, 16px); color: var(--text-muted); margin: 3px 0 0; }
 
 .snap-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .snap-title { font-size: clamp(19px, 1.85vw, 44px); font-weight: 700; margin: 0; letter-spacing: -0.03em; }
@@ -1336,7 +1339,7 @@ input[type="date"]::-webkit-datetime-edit-year-field {
 :root[data-theme="dark"] .snap-kpi[data-accent="violet"] { --accent-soft: rgba(155, 128, 255, 0.2); }
 
 .snap-kpi-value {
-  font-size: clamp(15px, 1.3vw, 36px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.08;
+  font-size: clamp(14px, 1.2vw, 32px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.08;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .snap-kpi-label { font-size: clamp(10px, 0.74vw, 17px); font-weight: 600; margin-top: 4px; }
@@ -1357,14 +1360,18 @@ input[type="date"]::-webkit-datetime-edit-year-field {
 /* Band 2 — the matrix of supporting figures. */
 .snap-matrix { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--snap-gap); }
 @media (max-width: 1180px) { .snap-matrix { grid-template-columns: 1fr; } }
-.snap-matrix-rows { list-style: none; margin: clamp(5px, 0.7vh, 12px) 0 0; padding: 0; }
+.snap-matrix > .snap-card { min-height: 0; }
+.snap-matrix-rows {
+  list-style: none; margin: clamp(5px, 0.7vh, 12px) 0 0; padding: 0;
+  flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: space-evenly;
+}
 .snap-matrix-row {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   padding: clamp(3px, 0.5vh, 9px) 0; border-bottom: 1px solid var(--border);
-  font-size: clamp(10px, 0.74vw, 17px); color: var(--text-muted);
+  font-size: clamp(10px, 0.88vw, 21px); color: var(--text-muted);
 }
 .snap-matrix-row:last-child { border-bottom: none; }
-.snap-matrix-row b { color: var(--text); font-weight: 700; white-space: nowrap; font-size: clamp(11px, 0.82vw, 19px); letter-spacing: -0.02em; }
+.snap-matrix-row b { color: var(--text); font-weight: 700; white-space: nowrap; font-size: clamp(11px, 0.98vw, 24px); letter-spacing: -0.02em; }
 
 /* Band 3 — the wins, along the bottom. */
 .snap-attention { display: flex; align-items: stretch; gap: var(--snap-gap); }
@@ -1375,14 +1382,14 @@ input[type="date"]::-webkit-datetime-edit-year-field {
 }
 :root[data-theme="dark"] .snap-flag { --accent-soft: rgba(53, 194, 136, 0.16); }
 .snap-flag-title {
-  font-size: clamp(10px, 0.76vw, 18px); font-weight: 700;
+  font-size: clamp(10px, 0.84vw, 20px); font-weight: 700;
   display: flex; align-items: center; gap: 0.45em;
 }
 .snap-flag-title::before {
   content: ""; width: 0.5em; height: 0.5em; border-radius: 999px; flex: none;
   background: var(--success); box-shadow: 0 0 0 0.18em rgba(30, 142, 90, 0.18);
 }
-.snap-flag-detail { font-size: clamp(9px, 0.64vw, 15px); color: var(--text-muted); margin-top: 3px; }
+.snap-flag-detail { font-size: clamp(9px, 0.72vw, 17px); color: var(--text-muted); margin-top: 3px; }
 .snap-ok { color: var(--success); font-size: clamp(11px, 0.8vw, 18px); }
 
 /* Below a real display's size the one-screen promise stops being a promise and

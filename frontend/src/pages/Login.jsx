@@ -42,8 +42,16 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      await login(email, password);
-      navigate("/");
+      const data = await login(email, password);
+      // Admins land on the Snapshot: it is the page they open the app to read,
+      // and sending them to the welcome screen first is a click they always
+      // undo. Everyone else keeps the Overview — Snapshot is admin/HR only and
+      // an employee has no business figures on it to see.
+      //
+      // Branching on the returned user rather than the context: setUser has
+      // been called but this render still closes over the previous value, so
+      // reading `user` here would send the first sign-in to the wrong page.
+      navigate(data?.user?.role === "admin" ? "/snapshot" : "/");
     } catch (err) {
       setError(err.message);
     } finally {
