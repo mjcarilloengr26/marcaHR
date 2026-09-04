@@ -5,13 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>MARCA GROUP</title>
     <script>
-      // Applied before first paint so the page never flashes light before
-      // switching to a previously-chosen dark theme.
+      // Applied before first paint so the page never flashes the wrong theme.
+      // Dark is the default: anything but an explicit stored "light" goes
+      // dark, including a first visit and a browser that refuses storage.
       (function () {
         try {
           var stored = localStorage.getItem("marca-theme");
-          if (stored === "dark") document.documentElement.dataset.theme = "dark";
-        } catch (e) {}
+          document.documentElement.dataset.theme = stored === "light" ? "light" : "dark";
+        } catch (e) {
+          document.documentElement.dataset.theme = "dark";
+        }
       })();
     </script>
   </head>

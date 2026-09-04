@@ -496,6 +496,24 @@ CREATE TABLE IF NOT EXISTS page_access_grants (
 );
 CREATE INDEX IF NOT EXISTS idx_page_access_grants_user ON page_access_grants(user_id);
 
+-- One row per pair per day, written whenever the header reads a live rate.
+-- The provider only returns the latest figure, so a day-on-day comparison has
+-- to come from our own history. Snapshots are kept from the same provider the
+-- current rate comes from: comparing against a second provider would fold the
+-- spread between them into the movement and report drift that never happened.
+CREATE TABLE IF NOT EXISTS exchange_rate_history (
+  id SERIAL PRIMARY KEY,
+  base TEXT NOT NULL,
+  quote TEXT NOT NULL,
+  rate_date TEXT NOT NULL,
+  rate NUMERIC(18,6) NOT NULL,
+  recorded_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  UNIQUE(base, quote, rate_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_exchange_rate_history_pair
+  ON exchange_rate_history(base, quote, rate_date DESC);
+
 -- App-wide currency and language, set by an admin at Administration >
 -- Localization. Only the ISO currency code is stored — the symbol and where
 -- it sits relative to the number are derived per-locale by Intl on the

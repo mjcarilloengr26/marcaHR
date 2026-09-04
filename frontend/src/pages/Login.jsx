@@ -11,6 +11,7 @@ export default function Login() {
   const location = useLocation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [loginNotice, setLoginNotice] = useState("");
@@ -76,13 +77,37 @@ export default function Login() {
         </div>
         <div className="form-row">
           <label>{t("Password")}</label>
-          <input
-            type="password"
-            placeholder="••••••••"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+          {/* The toggle sits inside the field rather than beside it, so the
+              input keeps the full width the email field has and the two rows
+              stay aligned. Padding on the input reserves the space so a long
+              password never runs under the button. */}
+          <div className="input-with-action">
+            <input
+              type={showPassword ? "text" : "password"}
+              placeholder="••••••••"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            <button
+              type="button"
+              className="input-action"
+              onClick={() => setShowPassword((v) => !v)}
+              // Announced to a screen reader, and shown on hover for everyone
+              // else — an eye glyph alone does not say which state it means.
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              aria-pressed={showPassword}
+              title={showPassword ? "Hide password" : "Show password"}
+              // Swallowing mousedown is what actually keeps the caret in the
+              // field — without it the click blurs the input and typing
+              // resumes nowhere. tabIndex keeps it out of the tab order too,
+              // so Tab still goes password -> Sign in.
+              onMouseDown={(e) => e.preventDefault()}
+              tabIndex={-1}
+            >
+              {showPassword ? "🙈" : "👁"}
+            </button>
+          </div>
         </div>
         <button className="btn" type="submit" disabled={loading} style={{ width: "100%" }}>
           {loading ? "Signing in…" : t("Sign in")}

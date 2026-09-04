@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import { NAV_ITEMS, applyNavOrder } from "../config/navItems";
 import { useAppSettings } from "../context/AppSettingsContext";
 import ThemeToggle from "./ThemeToggle";
+import ClockZonePicker, { readClockZonePref, resolveClockZone } from "./ClockZonePicker";
 
 // Built per timezone rather than once at module load, so changing the setting
 // re-renders the clock in the new zone instead of needing a page reload.
@@ -31,30 +32,75 @@ const offsetLabel = (tz) => {
   }
 };
 
-// Shows the company's own timezone regardless of the viewer's device — it
-// matches how attendance and expense timestamps are anchored server-side, so
-// what's on screen agrees with what got recorded.
+// The clock reads in company time by default, because that is the zone
+// attendance and expense timestamps are anchored to server-side — what is on
+// screen then agrees with what got recorded.
+//
+// Someone working from another country can point it at their own zone or at
+// their device. That is a display choice only: nothing server-side moves, so
+// the menu says so plainly, and whenever the clock is not on company time the
+// company's own time stays visible beside it. A clock-in at 11pm in a zone
+// ahead of the company still lands on the company's next day, and hiding that
+// would be the worst kind of convenience.
 function TopbarClock() {
   const { timezone } = useAppSettings();
   const [now, setNow] = useState(() => new Date());
-  const clockFormatter = useMemo(() => makeClockFormatter(timezone), [timezone]);
+  const [pref, setPref] = useState(readClockZonePref);
+  const [open, setOpen] = useState(false);
+
+  const zone = resolveClockZone(pref, timezone);
+  const showingCompany = zone === timezone;
+
+  const clockFormatter = useMemo(() => makeClockFormatter(zone), [zone]);
+  const companyFormatter = useMemo(() => makeClockFormatter(timezone), [timezone]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
 
+  const choose = (value) => {
+    setPref(value);
+    try {
+      localStorage.setItem("marca-clock-zone", value);
+    } catch {
+      /* a browser refusing storage still gets the change for this session */
+    }
+  };
+
   return (
-    <div className="topbar-clock">
-      {clockFormatter.format(now)} <span className="topbar-clock-tz">{offsetLabel(timezone)}</span>
+    <div className="topbar-clock-wrap">
+      <button
+        type="button"
+        className="topbar-clock topbar-clock-btn"
+        onClick={() => setOpen((v) => !v)}
+        title={
+          showingCompany
+            ? `Company time (${timezone}). Click to show another zone.`
+            : `Showing ${zone}. Company time is ${companyFormatter.format(now)} (${timezone}).`
+        }
+        aria-haspopup="dialog"
+        aria-expanded={open}
+      >
+        {clockFormatter.format(now)} <span className="topbar-clock-tz">{offsetLabel(zone)}</span>
+        {!showingCompany && (
+          <span className="topbar-clock-company">
+            {" "}· company {companyFormatter.format(now)} {offsetLabel(timezone)}
+          </span>
+        )}
+      </button>
+      {open && (
+        <ClockZonePicker
+          companyZone={timezone}
+          pref={pref}
+          onChange={choose}
+          onClose={() => setOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
-// Reference FX rate beside the clock — USD against the app's currency by
-// default. Rendering nothing (rather than an error) when the rate provider is
-// unreachable keeps a third-party outage from putting a broken element in the
-// header of every page.
 function TopbarRate() {
   const [fx, setFx] = useState(null);
 
@@ -80,15 +126,40 @@ function TopbarRate() {
   const formatted = fx.rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const asOf = new Date(fx.fetched_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 
+  // Movement against the last day we have a reading for. Deliberately not
+  // green-for-up: this is a peso-based business, and a rising USD/PHP makes
+  // imports and USD-denominated costs dearer, so painting that green would
+  // assert it is good news. The arrow carries the direction and the tooltip
+  // says what it means in words, rather than leaving it to a colour.
+  const moved = fx.direction === "up" || fx.direction === "down";
+  const arrow = fx.direction === "up" ? "▲" : "▼";
+  const deltaAbs = fx.change === null ? null : Math.abs(fx.change).toFixed(2);
+  const pctAbs = fx.change_percent === null ? null : Math.abs(fx.change_percent).toFixed(2);
+  const movementLine = moved
+    ? `${fx.direction === "up" ? "Up" : "Down"} ${deltaAbs} (${pctAbs}%) since ${fx.previous_date} — ` +
+      `${fx.base} is ${fx.direction === "up" ? "stronger" : "weaker"} against ${fx.quote} than then.`
+    : fx.direction === "flat"
+      ? `Unchanged since ${fx.previous_date}.`
+      : "No earlier reading yet to compare against.";
+
   return (
     <div
       className="topbar-fx"
-      title={`1 ${fx.base} = ${formatted} ${fx.quote}${fx.stale ? " (last known rate — provider unreachable)" : ""}\nAs of ${asOf}`}
+      title={
+        `1 ${fx.base} = ${formatted} ${fx.quote}${fx.stale ? " (last known rate — provider unreachable)" : ""}` +
+        `\n${movementLine}\nAs of ${asOf}`
+      }
     >
       <span className="topbar-fx-pair">
         {fx.base}/{fx.quote}
       </span>{" "}
       <span className="topbar-fx-value">{formatted}</span>
+      {moved && (
+        <span className="topbar-fx-move" aria-label={movementLine}>
+          {" "}
+          {arrow} {deltaAbs}
+        </span>
+      )}
       {fx.stale && <span className="topbar-fx-stale"> ·</span>}
     </div>
   );
