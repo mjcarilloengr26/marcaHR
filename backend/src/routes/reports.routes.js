@@ -357,9 +357,11 @@ router.get(
         `SELECT er.id, er.title, er.expense_type, er.cost_center, er.cash_advance_amount, er.status,
                 er.created_at, er.submitted_at,
                 (e.first_name || ' ' || e.last_name) AS employee_name,
+                ca.reference AS advance_reference, ca.amount AS advance_amount,
                 COALESCE((SELECT SUM(ei.amount) FROM expense_items ei WHERE ei.report_id = er.id), 0) AS total_expenses
          FROM expense_reports er
          JOIN employees e ON e.id = er.employee_id
+         LEFT JOIN cash_advances ca ON ca.id = er.cash_advance_id
          WHERE er.created_at::date BETWEEN ? AND ?
          ORDER BY er.created_at DESC`
       )
@@ -397,7 +399,14 @@ router.get(
     const withBalance = rows.map((r) => ({
       ...r,
       expense_type: r.expense_type || "Unspecified",
-      balance: Number((r.cash_advance_amount - r.total_expenses).toFixed(2)),
+      advance_reference: r.advance_reference || "—",
+      // A report that draws on a released advance carries no advance of its
+      // own, so balancing against its own zero would report the whole spend
+      // as owed back to the employee. The advance it draws on is the figure
+      // that matters — and it is shown, so the sheet says where it came from.
+      balance: r.advance_reference
+        ? Number((r.advance_amount - r.total_expenses).toFixed(2))
+        : Number((r.cash_advance_amount - r.total_expenses).toFixed(2)),
       first_expense_date: span.get(r.id)?.first || "",
       last_expense_date: span.get(r.id)?.last || "",
     }));
@@ -422,6 +431,7 @@ router.get(
         { header: "Expenses Type", key: "expense_type", width: 18 },
         { header: "Cost Center", key: "cost_center", width: 18 },
         { header: "Cash Advance", key: "cash_advance_amount", width: 14 },
+        { header: "Drawn On Advance", key: "advance_reference", width: 16 },
         { header: "Total Expenses", key: "total_expenses", width: 15 },
         { header: "Balance", key: "balance", width: 14 },
         { header: "Status", key: "status", width: 12 },
@@ -490,6 +500,91 @@ router.get(
         { header: "Total Expenses", key: "total", width: 16 },
       ],
       sumBy((r) => r.title)
+    );
+
+    // By category, from the line items rather than the report title — the same
+    // distinction the dashboard draws. A report titled "Allowance per diem"
+    // holds meals and transport, and summing by title alone reported Meals at
+    // a fraction of what was actually spent on it.
+    //
+    // Folded case-insensitively and labelled with the spelling used most
+    // often, matching the dashboard exactly so the two cannot disagree.
+    const categoryTotals = new Map();
+    const categorySpellings = new Map();
+    for (const it of items) {
+      const label = String(it.category || "").trim() || "Uncategorised";
+      const key = label.toLowerCase();
+      categoryTotals.set(key, (categoryTotals.get(key) || 0) + Number(it.amount || 0));
+      const seen = categorySpellings.get(key) || new Map();
+      seen.set(label, (seen.get(label) || 0) + 1);
+      categorySpellings.set(key, seen);
+    }
+    const byCategory = [...categoryTotals.entries()]
+      .map(([key, total]) => ({
+        label: [...categorySpellings.get(key).entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0],
+        total: Number(total.toFixed(2)),
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    addSheet(
+      "By Category",
+      [
+        { header: "Category", key: "label", width: 24 },
+        { header: "Total Expenses", key: "total", width: 16 },
+      ],
+      byCategory
+    );
+
+    // Cash advances released in the period, whether or not anything has been
+    // liquidated against them yet. Without this an advance sitting entirely
+    // unspent appears nowhere in the export, which is exactly the money most
+    // worth chasing.
+    const advances = await db
+      .prepare(
+        `SELECT ca.reference, ca.date_released, ca.amount, ca.returned_amount, ca.status,
+                ca.purpose, ca.cost_center,
+                (e.first_name || ' ' || e.last_name) AS employee_name,
+                COALESCE((
+                  SELECT SUM(i.amount) FROM expense_reports r
+                  JOIN expense_items i ON i.report_id = r.id
+                  WHERE r.cash_advance_id = ca.id AND r.status <> 'rejected'
+                ), 0) AS liquidated
+         FROM cash_advances ca
+         JOIN employees e ON e.id = ca.employee_id
+         WHERE ca.date_released BETWEEN ? AND ?
+         ORDER BY ca.date_released, ca.reference`
+      )
+      .all(start, end);
+
+    addSheet(
+      "Cash Advances",
+      [
+        { header: "Reference", key: "reference", width: 16 },
+        { header: "Employee", key: "employee_name", width: 24 },
+        { header: "Released", key: "date_released", width: 14 },
+        { header: "Purpose", key: "purpose", width: 26 },
+        { header: "Cost Center", key: "cost_center", width: 18 },
+        { header: "Amount", key: "amount", width: 14 },
+        { header: "Liquidated", key: "liquidated", width: 14 },
+        { header: "Cash Returned", key: "returned_amount", width: 14 },
+        { header: "Due To Company", key: "due_to_company", width: 16 },
+        { header: "Due To Employee", key: "due_to_employee", width: 16 },
+        { header: "Status", key: "status", width: 12 },
+      ],
+      advances.map((a) => {
+        const outstanding = Number((a.amount - a.returned_amount - a.liquidated).toFixed(2));
+        return {
+          ...a,
+          purpose: a.purpose || "—",
+          cost_center: a.cost_center || "—",
+          liquidated: Number(Number(a.liquidated).toFixed(2)),
+          // Split across two columns rather than one signed figure: a
+          // spreadsheet gets summed, and a column mixing what is owed each way
+          // sums to something that means nothing.
+          due_to_company: outstanding > 0 ? outstanding : 0,
+          due_to_employee: outstanding < 0 ? Math.abs(outstanding) : 0,
+        };
+      })
     );
 
     await logRequestEvent(req, "export_excel", {
