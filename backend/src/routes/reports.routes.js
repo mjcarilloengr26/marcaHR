@@ -475,9 +475,16 @@ router.get(
     // Two independent breakdowns of the same rows, one per "type" grouping the
     // Reports page dropdowns support: the broad Operating/Project classification,
     // and the specific per-title purpose (Fuel, Parking, Meals, ...).
+    // Rejected reports stay on the Detail and Expense Items sheets, because
+    // those are the record and the Status column says what happened. They are
+    // left out of every summary below: a refused claim is not spend, and a
+    // total that includes it cannot be reconciled against the dashboard.
+    const counted = withBalance.filter((r) => r.status !== "rejected");
+    const countedItems = items.filter((it) => it.status !== "rejected");
+
     const sumBy = (keyFn) => {
       const totals = new Map();
-      for (const r of withBalance) {
+      for (const r of counted) {
         const key = keyFn(r);
         totals.set(key, (totals.get(key) || 0) + r.total_expenses);
       }
@@ -511,7 +518,7 @@ router.get(
     // often, matching the dashboard exactly so the two cannot disagree.
     const categoryTotals = new Map();
     const categorySpellings = new Map();
-    for (const it of items) {
+    for (const it of countedItems) {
       const label = String(it.category || "").trim() || "Uncategorised";
       const key = label.toLowerCase();
       categoryTotals.set(key, (categoryTotals.get(key) || 0) + Number(it.amount || 0));

@@ -229,7 +229,9 @@ async function fetchExpenseRows(start, end) {
       `SELECT er.expense_type, er.title, er.cash_advance_amount,
               COALESCE((SELECT SUM(amount) FROM expense_items WHERE report_id = er.id), 0) AS total_expenses
        FROM expense_reports er
-       WHERE er.created_at::date BETWEEN ? AND ?`
+       -- A rejected report is spend the company refused. Counting it inflates
+       -- every figure on this card and reports money that was never accepted.
+       WHERE er.created_at::date BETWEEN ? AND ? AND er.status <> 'rejected'`
     )
     .all(start, end);
 }
@@ -246,7 +248,7 @@ async function fetchExpenseItemRows(start, end) {
       `SELECT i.category, i.amount, r.expense_type
        FROM expense_items i
        JOIN expense_reports r ON r.id = i.report_id
-       WHERE r.created_at::date BETWEEN ? AND ?`
+       WHERE r.created_at::date BETWEEN ? AND ? AND r.status <> 'rejected'`
     )
     .all(start, end);
 }

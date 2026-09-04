@@ -21,8 +21,11 @@ async function getExpenseSummary() {
   const expenseSummaryByEmployee = {};
   const expenseItemRows = await db
     .prepare(
+      // Rejected reports are excluded here as everywhere else: refused spend
+      // is not somebody's expense figure.
       `SELECT r.employee_id, i.amount, i.expense_date FROM expense_items i
-       JOIN expense_reports r ON r.id = i.report_id`
+       JOIN expense_reports r ON r.id = i.report_id
+       WHERE r.status <> 'rejected'`
     )
     .all();
   for (const it of expenseItemRows) {

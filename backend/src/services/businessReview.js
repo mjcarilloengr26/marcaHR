@@ -81,12 +81,17 @@ async function metricsFor({ start, end, year, months }) {
     ).get(start, end),
 
     db.prepare(
+      // Rejected reports are left out of both the advance and the spend
+      // figures: refused money is not an advance the company is owed back, and
+      // it is not spend. Counting it made the liquidation rate read wrong in
+      // both directions at once.
       `SELECT COUNT(DISTINCT r.id)::int AS reports,
               COALESCE(SUM(r.cash_advance_amount), 0) AS advances,
               COALESCE((SELECT SUM(ei.amount) FROM expense_items ei
                         JOIN expense_reports er ON er.id = ei.report_id
-                        WHERE ei.expense_date BETWEEN ? AND ?), 0) AS spent
-       FROM expense_reports r WHERE substr(r.created_at, 1, 10) BETWEEN ? AND ?`
+                        WHERE ei.expense_date BETWEEN ? AND ? AND er.status <> 'rejected'), 0) AS spent
+       FROM expense_reports r
+       WHERE substr(r.created_at, 1, 10) BETWEEN ? AND ? AND r.status <> 'rejected'`
     ).get(start, end, start, end),
 
     db.prepare(
