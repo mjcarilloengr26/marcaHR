@@ -6,6 +6,8 @@ const { logRequestEvent } = require("../services/auditLog");
 const { buildFactSheet, PERIOD_TYPES } = require("../services/businessReview");
 const { writeNarrative, configured } = require("../services/reviewNarrative");
 const { scheduleSettings, emailReview } = require("../services/businessReviewSchedule");
+const { buildPrintableReview } = require("../services/reviewEmail");
+const { companyName } = require("../services/branding");
 
 const router = express.Router();
 
@@ -161,6 +163,40 @@ router.post(
     });
 
     res.json({ sent: recipients.map((r) => r.email), period: row.period_label });
+  })
+);
+
+// The printable report: the same document the email carries, sized for A4.
+// Returns HTML rather than a PDF — the browser's own print dialog produces a
+// better PDF than a headless renderer would, and adding one would mean
+// shipping a browser to Render for a page anyone can already print.
+router.get(
+  "/print",
+  ...adminOnly,
+  asyncHandler(async (req, res) => {
+    const { periodType, year, index } = parse(req.query);
+    const stored = await db
+      .prepare(`${SELECT} WHERE r.period_type = ? AND r.period_year = ? AND r.period_index = ?`)
+      .get(periodType, year, index);
+
+    const company = await companyName();
+    const args = stored
+      ? {
+          factSheet: JSON.parse(stored.fact_sheet),
+          narrative: stored.narrative,
+          narrativeError: stored.narrative_error,
+          company,
+        }
+      : {
+          // Nothing written yet: the figures still print, with the reason the
+          // commentary is missing in place of it.
+          factSheet: await buildFactSheet({ periodType, year, index }),
+          narrative: null,
+          narrativeError: "No review has been written for this period yet.",
+          company,
+        };
+
+    res.type("html").send(buildPrintableReview(args));
   })
 );
 

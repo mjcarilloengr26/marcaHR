@@ -9,7 +9,7 @@ let warnedMissingConfig = false;
 // instead, which uses port 443 like every other outbound request this app makes.
 const RESEND_API_URL = "https://api.resend.com/emails";
 
-async function sendOne(recipient, subject, text) {
+async function sendOne(recipient, subject, text, html) {
   const { RESEND_API_KEY, RESEND_FROM } = process.env;
   try {
     const res = await fetch(RESEND_API_URL, {
@@ -22,7 +22,10 @@ async function sendOne(recipient, subject, text) {
         from: RESEND_FROM || "onboarding@resend.dev",
         to: [recipient],
         subject,
+        // Both parts when there is an HTML body: the client picks, and a
+        // text-only reader is never left with nothing.
         text,
+        ...(html ? { html } : {}),
       }),
     });
 
@@ -44,7 +47,7 @@ async function sendOne(recipient, subject, text) {
 // user) must not let one bad/blocklisted address (Resend rejects reserved domains like
 // example.com) sink delivery to everyone else, and it keeps recipients from seeing each other's
 // addresses in a shared To: header.
-async function sendMail({ to, subject, text }) {
+async function sendMail({ to, subject, text, html }) {
   const recipients = Array.isArray(to) ? to.filter(Boolean) : [to].filter(Boolean);
   if (recipients.length === 0) return;
 
@@ -59,7 +62,7 @@ async function sendMail({ to, subject, text }) {
     return;
   }
 
-  await Promise.all(recipients.map((r) => sendOne(r, subject, text)));
+  await Promise.all(recipients.map((r) => sendOne(r, subject, text, html)));
 }
 
 module.exports = { sendMail };

@@ -4,6 +4,7 @@ const { writeNarrative, configured } = require("./reviewNarrative");
 const { appTimezone } = require("./timezone");
 const { companyName } = require("./branding");
 const { sendMail } = require("../mailer");
+const { buildReviewEmail } = require("./reviewEmail");
 
 // Defaults for a database that predates the settings screen. REVIEW_HOUR is
 // still read so an existing deployment's environment variable keeps working,
@@ -170,44 +171,17 @@ async function generateAndStore({ periodType, year, index }) {
   return { factSheet, narrative, narrativeError };
 }
 
-// The review is written as markdown for the page. A plain-text email should not
-// show its scaffolding, so headings become underlined lines and bold markers go.
-function toPlainText(markdown) {
-  const out = [];
-  for (const raw of markdown.split("\n")) {
-    const line = raw.replace(/\*\*(.+?)\*\*/g, "$1").trimEnd();
-    if (line.startsWith("## ")) {
-      const heading = line.slice(3);
-      if (out.length) out.push("");
-      out.push(heading.toUpperCase(), "-".repeat(heading.length));
-    } else {
-      out.push(line);
-    }
-  }
-  return out.join("\n").trim();
-}
-
 async function emailReview({ factSheet, narrative, narrativeError }) {
   const to = await adminEmails();
   if (to.length === 0) return;
   const company = await companyName();
-  const p = factSheet.period;
 
-  const footer =
-    `\n\n---\nFigures cover ${p.start} to ${p.end}. ` +
-    `Open ${company} and go to Business Review to read this alongside the numbers behind it.`;
+  // Figures, the one chart, the summary and what needs attention, in both an
+  // HTML and a plain-text form. Built in one place so the email, the printed
+  // report and the page cannot drift apart.
+  const { subject, text, html } = buildReviewEmail({ factSheet, narrative, narrativeError, company });
 
-  const body = narrative
-    ? toPlainText(narrative) + footer
-    : `The figures for ${p.label} are ready, but the written review could not be generated:\n\n` +
-      `  ${narrativeError}\n\nThe numbers are in ${company} under Business Review.` +
-      `\n\n---\nFigures cover ${p.start} to ${p.end}.`;
-
-  sendMail({
-    to,
-    subject: `Business review — ${p.label}`,
-    text: body,
-  });
+  sendMail({ to, subject, text, html });
 }
 
 async function runDueReviews({ force = null } = {}) {

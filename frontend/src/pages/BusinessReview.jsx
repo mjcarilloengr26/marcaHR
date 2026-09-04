@@ -105,6 +105,7 @@ export default function BusinessReview() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [printing, setPrinting] = useState(false);
   const [error, setError] = useState("");
 
   const load = () => {
@@ -153,6 +154,37 @@ export default function BusinessReview() {
     }
   };
 
+  // The printable report is a protected endpoint, so it cannot simply be
+  // opened as a URL — a new tab carries no Authorization header. Fetch it with
+  // the session's token and hand the markup to the new window instead.
+  //
+  // The window is opened first, synchronously, inside the click. Opening it
+  // after the await would make it a popup rather than a user action, and every
+  // browser blocks that.
+  const openPrintable = async () => {
+    const win = window.open("", "_blank");
+    if (!win) {
+      setError("Your browser blocked the report window. Allow pop-ups for this site and try again.");
+      return;
+    }
+    win.document.write("<p style='font:14px system-ui;padding:24px;color:#6b7280'>Preparing the report…</p>");
+    setPrinting(true);
+    setError("");
+    try {
+      const html = await api.get(
+        `/business-review/print?period_type=${periodType}&year=${year}&index=${index}`
+      );
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+    } catch (err) {
+      win.close();
+      setError(err.message);
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   const openFromHistory = (h) => {
     setPeriodType(h.period_type);
     setYear(h.period_year);
@@ -173,9 +205,14 @@ export default function BusinessReview() {
             The company's own figures for a period, and what they say
           </p>
         </div>
-        <button className="btn" onClick={generate} disabled={generating || loading}>
-          {generating ? "Writing… (about a minute)" : review?.narrative ? "Regenerate" : "Generate review"}
-        </button>
+        <div className="col-actions">
+          <button className="btn btn-secondary" onClick={openPrintable} disabled={loading || printing}>
+            {printing ? "Preparing…" : "Print report"}
+          </button>
+          <button className="btn" onClick={generate} disabled={generating || loading}>
+            {generating ? "Writing… (about a minute)" : review?.narrative ? "Regenerate" : "Generate review"}
+          </button>
+        </div>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
