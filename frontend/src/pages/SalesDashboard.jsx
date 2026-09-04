@@ -619,22 +619,35 @@ export default function SalesDashboard() {
                 // within each pie would give Meals one colour under Operating
                 // and another under Project, which is precisely what makes two
                 // pies impossible to read against each other.
-                const paletteFor = (rows, neutralLabel) => {
-                  const order = [...rows].sort((a, b) => b.current + b.previous - (a.current + a.previous));
+                // One colour map across every pie, keyed on the label and
+                // shared by both dimensions. Utilities as a purpose and
+                // Utilities as a category are the same money, so showing it in
+                // two colours side by side undoes the comparison the split
+                // exists to make. Assigned biggest-first so the slices that
+                // matter get distinct hues before the rotation wraps.
+                // Keyed case-insensitively: the purpose "SOP" and the category
+                // "sop" are the same PHP 145,000, and giving them two colours
+                // hides the one correspondence these charts exist to show.
+                const labelTotals = new Map();
+                for (const r of [...(expensesReport.byTitle || []), ...(expensesReport.byCategory || [])]) {
+                  const key = String(r.label).toLowerCase();
+                  labelTotals.set(key, Math.max(labelTotals.get(key) || 0, r.current + r.previous));
+                }
+                const sharedColor = (() => {
                   const map = new Map();
                   let i = 0;
-                  for (const r of order) {
-                    if (r.label === neutralLabel) {
-                      map.set(r.label, "#6b7280");
+                  for (const [key] of [...labelTotals.entries()].sort((a, b) => b[1] - a[1])) {
+                    if (key === "unspecified" || key === "uncategorised") {
+                      map.set(key, "#6b7280");
                       continue;
                     }
-                    map.set(r.label, TITLE_PALETTE[i % TITLE_PALETTE.length]);
+                    map.set(key, TITLE_PALETTE[i % TITLE_PALETTE.length]);
                     i += 1;
                   }
-                  return (label) => map.get(label) || "#6b7280";
-                };
-                const purposeColor = paletteFor(expensesReport.byTitle || [], "Unspecified");
-                const catColor = paletteFor(expensesReport.byCategory || [], "Uncategorised");
+                  return (label) => map.get(String(label).toLowerCase()) || "#6b7280";
+                })();
+                const purposeColor = sharedColor;
+                const catColor = sharedColor;
                 const currentYearLabel = `${expensesReport.period.year}`;
                 const previousYearLabel = `${expensesReport.previousPeriod.year}`;
                 return (
