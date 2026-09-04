@@ -8,34 +8,9 @@ import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
 
-const EXPENSE_TYPE_OPTIONS = ["Operating Expenses", "Project Expenses"];
-const EXPENSE_TITLE_OPTIONS = [
-  "Fuel", "Parking", "Toll Fees", "Meals", "Maintenance", "Car Maintenance",
-  "Utilities", "Allowance", "Supplies", "Materials", "Labor", "Airfare",
-  "Hotel", "Foods", "Equipment Rental", "Vehicle Rental", "Office Rental",
-  "SOP", "Marketing", "Government Fees",
-  // "Others" stays last — picking it reveals the free-text box, and a reader
-  // scanning the list should hit the escape hatch after the real choices.
-  "Others",
-];
-// Line-item categories. A fixed list rather than free text, because free text
-// produced the same thing under several names: "Car Maintenance" and "Eco
-// sport mechanic repair" are one category, and "sop" and "SOP" are one
-// category typed twice. Every duplicate splits a slice on the expense
-// breakdown and makes the chart less useful the more it is used.
-//
-// Consolidations worth knowing: Vehicle Maintenance covers repairs of any
-// kind, and Bank & Transfer Fees covers withdrawal and remittance charges.
-// "Others" stays last and reveals a free-text box for the genuinely unusual.
-const EXPENSE_CATEGORY_OPTIONS = [
-  "Meals", "Transport", "Fuel", "Parking", "Toll Fees", "Airfare",
-  "Hotel / Accommodation", "Vehicle Maintenance", "Spare Parts",
-  "Supplies", "Materials", "Labor", "Equipment Rental", "Vehicle Rental",
-  "Utilities", "Communication / Load", "Laundry", "Bank & Transfer Fees",
-  "Government Fees", "SOP", "Marketing",
-  "Others",
-];
-
+// The vocabularies come from the server (GET /expenses/options), which is also
+// what enforces them on write. Holding a second copy here is how the list on
+// screen drifts from the list that is actually accepted, so there isn't one.
 const EMPTY_FORM = { title: "", title_other: "", expense_type: "", cash_advance_amount: "", cost_center: "", notes: "", cash_advance_id: "" };
 const EMPTY_ITEM_FORM = {
   expense_date: "",
@@ -61,6 +36,11 @@ export default function Expenses() {
   const [saving, setSaving] = useState(false);
   const [openId, setOpenId] = useState(null);
   const [search, setSearch] = useState("");
+
+  const [options, setOptions] = useState({ types: [], titles: [], categories: [] });
+  useEffect(() => {
+    api.get("/expenses/options").then(setOptions).catch(() => {});
+  }, []);
 
   const load = () => api.get("/expenses").then(setReports).catch((err) => setError(err.message));
 
@@ -192,16 +172,12 @@ export default function Expenses() {
 
   const handleCreate = async (e) => {
     e.preventDefault();
-    const resolvedTitle = form.title === "Others" ? form.title_other.trim() : form.title;
-    if (!resolvedTitle) {
-      setError("Please specify a title / purpose");
-      return;
-    }
     setSaving(true);
     setError("");
     try {
       const report = await api.post("/expenses", {
-        title: resolvedTitle,
+        title: form.title,
+        title_other: form.title_other,
         expense_type: form.expense_type,
         cash_advance_amount: form.cash_advance_amount ? Number(form.cash_advance_amount) : 0,
         cost_center: form.cost_center,
@@ -393,7 +369,7 @@ export default function Expenses() {
                 autoFocus
               >
                 <option value="" disabled>Select type</option>
-                {EXPENSE_TYPE_OPTIONS.map((opt) => (
+                {options.types.map((opt) => (
                   <option key={opt} value={opt}>{opt}</option>
                 ))}
               </select>
@@ -406,7 +382,7 @@ export default function Expenses() {
                 required
               >
                 <option value="" disabled>Select purpose</option>
-                {EXPENSE_TITLE_OPTIONS.map((opt) => (
+                {options.titles.map((opt) => (
                   <option key={opt} value={opt}>{opt}</option>
                 ))}
               </select>
@@ -612,10 +588,8 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
       // "Others" is a prompt for the real name, not a category to store — a
       // column full of "Others" would be the free-text problem again wearing
       // a different label. category_other never reaches the server.
-      const { category_other, ...rest } = itemForm;
       await api.post(`/expenses/${id}/items`, {
-        ...rest,
-        category: itemForm.category === "Others" ? category_other.trim() : itemForm.category,
+        ...itemForm,
         amount: Number(itemForm.amount),
         receipt_name: receipt?.name,
         receipt_type: receipt?.type,
@@ -788,9 +762,10 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                         category_other: e.target.value === "Others" ? itemForm.category_other : "",
                       })
                     }
+                    required
                   >
-                    <option value="">Select category…</option>
-                    {EXPENSE_CATEGORY_OPTIONS.map((opt) => (
+                    <option value="" disabled>Select category…</option>
+                    {options.categories.map((opt) => (
                       <option key={opt} value={opt}>{opt}</option>
                     ))}
                   </select>

@@ -6,7 +6,7 @@ const asyncHandler = require("../middleware/asyncHandler");
 
 const router = express.Router();
 
-const EXPENSE_TYPES = ["Operating Expenses", "Project Expenses"];
+const { EXPENSE_TYPES, TITLES, CATEGORIES, resolveChoice } = require("../services/expenseOptions");
 
 // Accepts a base64 data URL (image, PDF, etc.) or null. Caps the stored size
 // defensively even though express.json()'s limit already bounds the whole
@@ -133,6 +133,17 @@ router.get(
   })
 );
 
+// The vocabularies the form must offer. Served rather than duplicated in the
+// page so the list on screen cannot drift from the list the server enforces.
+// Declared before "/:id" or Express would read "options" as a report id.
+router.get(
+  "/options",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    res.json({ types: EXPENSE_TYPES, titles: TITLES, categories: CATEGORIES });
+  })
+);
+
 router.get(
   "/:id",
   requireAuth,
@@ -183,11 +194,19 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = req.body || {};
     const employee_id = req.user.role === "employee" ? req.user.employee_id : body.employee_id || req.user.employee_id;
-    const { title, expense_type, cash_advance_amount, cost_center, notes, cash_advance_id } = body;
-    if (!employee_id || !title) return res.status(400).json({ error: "title is required" });
+    const { expense_type, cash_advance_amount, cost_center, notes, cash_advance_id } = body;
+    if (!employee_id) return res.status(400).json({ error: "employee is required" });
     if (expense_type && !EXPENSE_TYPES.includes(expense_type)) {
       return res.status(400).json({ error: `expense_type must be one of: ${EXPENSE_TYPES.join(", ")}` });
     }
+    const titleChoice = resolveChoice({
+      choice: body.title,
+      other: body.title_other,
+      allowed: TITLES,
+      label: "Title / purpose",
+    });
+    if (titleChoice.error) return res.status(400).json({ error: titleChoice.error });
+    const title = titleChoice.value;
 
     // A report can liquidate a released advance instead of carrying its own.
     // The money then lives on the advance, so the report's own
@@ -279,7 +298,15 @@ router.post(
   asyncHandler(loadEditableReport),
   asyncHandler(async (req, res) => {
     const body = req.body || {};
-    const { expense_date, category, description, amount, receipt_ref, supplier_name, supplier_address, supplier_tin } = body;
+    const { expense_date, description, amount, receipt_ref, supplier_name, supplier_address, supplier_tin } = body;
+    const categoryChoice = resolveChoice({
+      choice: body.category,
+      other: body.category_other,
+      allowed: CATEGORIES,
+      label: "Category",
+    });
+    if (categoryChoice.error) return res.status(400).json({ error: categoryChoice.error });
+    const category = categoryChoice.value;
     if (!expense_date || amount === undefined) {
       return res.status(400).json({ error: "expense_date and amount are required" });
     }
