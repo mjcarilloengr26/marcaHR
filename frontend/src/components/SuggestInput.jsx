@@ -17,7 +17,11 @@ function loadField(field) {
 
   const promise = api
     .get(`/suggestions?field=${encodeURIComponent(field)}`)
-    .then((d) => d.values || [])
+    // Array.isArray, not `d.values || []`: if the response is ever an array
+    // rather than { values }, `d.values` is Array.prototype.values — a
+    // function, which React then treats as a state updater and calls, blanking
+    // the page with "Cannot convert undefined or null to object".
+    .then((d) => (Array.isArray(d?.values) ? d.values : []))
     // Suggestions are a convenience. A failed lookup must never stop somebody
     // typing the value themselves, so fall back to an empty list.
     .catch(() => []);

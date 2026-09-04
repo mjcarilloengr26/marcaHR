@@ -243,7 +243,7 @@ async function fetchExpenseRows(start, end) {
 async function fetchExpenseItemRows(start, end) {
   return db
     .prepare(
-      `SELECT i.category, i.amount
+      `SELECT i.category, i.amount, r.expense_type
        FROM expense_items i
        JOIN expense_reports r ON r.id = i.report_id
        WHERE r.created_at::date BETWEEN ? AND ?`
@@ -350,6 +350,28 @@ router.get(
     const prevGrouped = groupExpenseRows(prevRows);
     const byCategory = groupExpenseItemsByCategory(itemRows, prevItemRows);
 
+    // The same two breakdowns again, but split by expense type. Reading "meals
+    // under Project Expenses" off the combined charts was impossible: the two
+    // types were added together, so a category could not be attributed to
+    // either. Types come from the reports actually present rather than a fixed
+    // list, so an unexpected one still appears instead of vanishing.
+    const typesPresent = [...new Set([...rows, ...prevRows].map((r) => r.expense_type || "Unspecified"))].sort();
+    const ofType = (list, type) => list.filter((r) => (r.expense_type || "Unspecified") === type);
+    const breakdownsByType = typesPresent.map((type) => {
+      const cur = ofType(rows, type);
+      const prev = ofType(prevRows, type);
+      const curItems = ofType(itemRows, type);
+      const prevItems = ofType(prevItemRows, type);
+      const cats = groupExpenseItemsByCategory(curItems, prevItems);
+      return {
+        type,
+        total: cur.reduce((n, r) => n + r.total_expenses, 0),
+        previousTotal: prev.reduce((n, r) => n + r.total_expenses, 0),
+        byTitle: mergeByLabel(groupExpenseRows(cur).byTitle, groupExpenseRows(prev).byTitle),
+        byCategory: mergeByLabel(cats.current, cats.previous),
+      };
+    });
+
     res.json({
       period: { type: period_type, year: period_year, index: period_index, label: periodLabel(period_type, period_year, period_index) },
       previousPeriod: { type: period_type, year: period_year - 1, index: period_index, label: periodLabel(period_type, period_year - 1, period_index) },
@@ -357,6 +379,7 @@ router.get(
       byType: mergeByLabel(grouped.byType, prevGrouped.byType),
       byTitle: mergeByLabel(grouped.byTitle, prevGrouped.byTitle),
       byCategory: mergeByLabel(byCategory.current, byCategory.previous),
+      breakdownsByType,
     });
   })
 );

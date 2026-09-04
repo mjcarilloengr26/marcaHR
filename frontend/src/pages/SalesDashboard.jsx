@@ -614,11 +614,27 @@ export default function SalesDashboard() {
                   value: t.current,
                   color: titleColor(t.label, i),
                 }));
-                const byCategoryPieData = (expensesReport.byCategory || []).map((t, i) => ({
-                  label: t.label,
-                  value: t.current,
-                  color: categoryColor(t.label, i),
-                }));
+                // Colour is assigned once per label from the combined
+                // totals, then reused in every section. Colouring by position
+                // within each pie would give Meals one colour under Operating
+                // and another under Project, which is precisely what makes two
+                // pies impossible to read against each other.
+                const paletteFor = (rows, neutralLabel) => {
+                  const order = [...rows].sort((a, b) => b.current + b.previous - (a.current + a.previous));
+                  const map = new Map();
+                  let i = 0;
+                  for (const r of order) {
+                    if (r.label === neutralLabel) {
+                      map.set(r.label, "#6b7280");
+                      continue;
+                    }
+                    map.set(r.label, TITLE_PALETTE[i % TITLE_PALETTE.length]);
+                    i += 1;
+                  }
+                  return (label) => map.get(label) || "#6b7280";
+                };
+                const purposeColor = paletteFor(expensesReport.byTitle || [], "Unspecified");
+                const catColor = paletteFor(expensesReport.byCategory || [], "Uncategorised");
                 const currentYearLabel = `${expensesReport.period.year}`;
                 const previousYearLabel = `${expensesReport.previousPeriod.year}`;
                 return (
@@ -649,57 +665,37 @@ export default function SalesDashboard() {
                         </div>
                       </div>
                     </div>
-                    <div>
-                      {/* Renamed from "By Title / Purpose", which read as a
-                          breakdown of what was bought. It is the report's own
-                          purpose — the reason an advance was raised — and the
-                          category chart below is what the money went on. */}
-                      <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>By report purpose</h3>
-                      <p className="subtitle" style={{ margin: "0 0 12px", fontSize: 12 }}>
-                        What each cash advance was raised for. A report titled "Allowance" may hold
-                        meals, transport and laundry — see the category breakdown below for what was
-                        actually spent.
-                      </p>
-                      <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-                        <div style={{ flex: "0 1 460px", minWidth: 0 }}>
-                          <PieChart data={byTitlePieData} />
-                        </div>
-                        <div style={{ flex: "1 1 300px", minWidth: 0 }}>
-                          <BarChart
-                            data={expensesReport.byTitle}
-                            currentLabel={currentYearLabel}
-                            previousLabel={previousYearLabel}
-                            currentColor="#7c3aed"
-                            previousColor="#cbb6fa"
-                          />
-                        </div>
+                    {(expensesReport.breakdownsByType || []).map((section) => (
+                      <div key={section.type}>
+                        <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>
+                          {section.type} — {moneyWhole(section.total)}
+                          {expensesReport.totals.totalExpenses > 0 && (
+                            <span className="subtitle" style={{ fontSize: 12, fontWeight: 400, marginLeft: 8 }}>
+                              {Math.round((section.total / expensesReport.totals.totalExpenses) * 100)}% of all spend
+                            </span>
+                          )}
+                        </h3>
+                        <p className="subtitle" style={{ margin: "0 0 12px", fontSize: 12 }}>
+                          Left: what each advance was raised for. Right: what the money actually bought.
+                          A purpose holds several categories, so the two describe the same total
+                          different ways.
+                        </p>
+                        {section.total === 0 ? (
+                          <div className="empty-state">Nothing spent under {section.type} this period.</div>
+                        ) : (
+                          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+                            <div style={{ flex: "1 1 380px", minWidth: 0 }}>
+                              <div className="subtitle" style={{ fontSize: 12, marginBottom: 6 }}>By report purpose</div>
+                              <PieChart data={section.byTitle.map((t) => ({ label: t.label, value: t.current, color: purposeColor(t.label) }))} />
+                            </div>
+                            <div style={{ flex: "1 1 380px", minWidth: 0 }}>
+                              <div className="subtitle" style={{ fontSize: 12, marginBottom: 6 }}>By category</div>
+                              <PieChart data={section.byCategory.map((c) => ({ label: c.label, value: c.current, color: catColor(c.label) }))} />
+                            </div>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                    <div>
-                      <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>By category</h3>
-                      <p className="subtitle" style={{ margin: "0 0 12px", fontSize: 12 }}>
-                        What the money actually bought, taken from the individual expense lines.
-                        Spellings that differ only by case are counted as one category.
-                      </p>
-                      {byCategoryPieData.length === 0 ? (
-                        <div className="empty-state">No expense lines in this period.</div>
-                      ) : (
-                        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-                          <div style={{ flex: "0 1 460px", minWidth: 0 }}>
-                            <PieChart data={byCategoryPieData} />
-                          </div>
-                          <div style={{ flex: "1 1 300px", minWidth: 0 }}>
-                            <BarChart
-                              data={expensesReport.byCategory || []}
-                              currentLabel={currentYearLabel}
-                              previousLabel={previousYearLabel}
-                              currentColor="#0891b2"
-                              previousColor="#a5e4ef"
-                            />
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    ))}
                   </div>
                 );
               })()}

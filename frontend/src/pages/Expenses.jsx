@@ -458,6 +458,9 @@ export default function Expenses() {
         <ReportDetail
           id={openId}
           isHr={isHr}
+          // Passed down rather than fetched again: the item form needs the
+          // same category list the report form uses, and it lives here.
+          options={options}
           onClose={() => setOpenId(null)}
           onChanged={load}
         />
@@ -466,7 +469,10 @@ export default function Expenses() {
   );
 }
 
-function ReportDetail({ id, isHr, onClose, onChanged }) {
+// options defaults rather than being assumed present: this component renders
+// in a modal off a parent's state, and reading a list off undefined took the
+// whole page blank once already.
+function ReportDetail({ id, isHr, options = { types: [], titles: [], categories: [] }, onClose, onChanged }) {
   // Its own hook call — this is a separate component from Expenses above, so
   // it can't see that one's formatter.
   const { moneyPrecise: money } = useAppSettings();
