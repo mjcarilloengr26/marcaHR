@@ -18,7 +18,36 @@ const EXPENSE_TITLE_OPTIONS = [
   // scanning the list should hit the escape hatch after the real choices.
   "Others",
 ];
+// Line-item categories. A fixed list rather than free text, because free text
+// produced the same thing under several names: "Car Maintenance" and "Eco
+// sport mechanic repair" are one category, and "sop" and "SOP" are one
+// category typed twice. Every duplicate splits a slice on the expense
+// breakdown and makes the chart less useful the more it is used.
+//
+// Consolidations worth knowing: Vehicle Maintenance covers repairs of any
+// kind, and Bank & Transfer Fees covers withdrawal and remittance charges.
+// "Others" stays last and reveals a free-text box for the genuinely unusual.
+const EXPENSE_CATEGORY_OPTIONS = [
+  "Meals", "Transport", "Fuel", "Parking", "Toll Fees", "Airfare",
+  "Hotel / Accommodation", "Vehicle Maintenance", "Spare Parts",
+  "Supplies", "Materials", "Labor", "Equipment Rental", "Vehicle Rental",
+  "Utilities", "Communication / Load", "Laundry", "Bank & Transfer Fees",
+  "Government Fees", "SOP", "Marketing",
+  "Others",
+];
+
 const EMPTY_FORM = { title: "", title_other: "", expense_type: "", cash_advance_amount: "", cost_center: "", notes: "" };
+const EMPTY_ITEM_FORM = {
+  expense_date: "",
+  category: "",
+  category_other: "",
+  description: "",
+  amount: "",
+  receipt_ref: "",
+  supplier_name: "",
+  supplier_address: "",
+  supplier_tin: "",
+};
 
 export default function Expenses() {
   const { user } = useAuth();
@@ -400,16 +429,7 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
   const [report, setReport] = useState(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [itemForm, setItemForm] = useState({
-    expense_date: "",
-    category: "",
-    description: "",
-    amount: "",
-    receipt_ref: "",
-    supplier_name: "",
-    supplier_address: "",
-    supplier_tin: "",
-  });
+  const [itemForm, setItemForm] = useState(EMPTY_ITEM_FORM);
   // Suppliers already used, each with the address and TIN last recorded for
   // it. Picking a name fills the rest of the row in, which is the whole point:
   // the live data already holds one company under two spellings with the TIN
@@ -521,14 +541,19 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
     setSaving(true);
     setError("");
     try {
+      // "Others" is a prompt for the real name, not a category to store — a
+      // column full of "Others" would be the free-text problem again wearing
+      // a different label. category_other never reaches the server.
+      const { category_other, ...rest } = itemForm;
       await api.post(`/expenses/${id}/items`, {
-        ...itemForm,
+        ...rest,
+        category: itemForm.category === "Others" ? category_other.trim() : itemForm.category,
         amount: Number(itemForm.amount),
         receipt_name: receipt?.name,
         receipt_type: receipt?.type,
         receipt_data: receipt?.data,
       });
-      setItemForm({ expense_date: "", category: "", description: "", amount: "", receipt_ref: "", supplier_name: "", supplier_address: "", supplier_tin: "" });
+      setItemForm(EMPTY_ITEM_FORM);
       autoFilled.current = { address: "", tin: "" };
       setReceipt(null);
       await load();
@@ -684,8 +709,35 @@ function ReportDetail({ id, isHr, onClose, onChanged }) {
                 </div>
                 <div className="form-row">
                   <label>Category</label>
-                  <SuggestInput field="category" value={itemForm.category} onChange={(e) => setItemForm({ ...itemForm, category: e.target.value })} placeholder="Meals, transport…" />
+                  <select
+                    value={itemForm.category}
+                    onChange={(e) =>
+                      setItemForm({
+                        ...itemForm,
+                        category: e.target.value,
+                        // Drop a typed-in value the moment the choice moves
+                        // off "Others", so a stale one cannot be submitted.
+                        category_other: e.target.value === "Others" ? itemForm.category_other : "",
+                      })
+                    }
+                  >
+                    <option value="">Select category…</option>
+                    {EXPENSE_CATEGORY_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
                 </div>
+                {itemForm.category === "Others" && (
+                  <div className="form-row">
+                    <label>Which category?</label>
+                    <input
+                      value={itemForm.category_other}
+                      onChange={(e) => setItemForm({ ...itemForm, category_other: e.target.value })}
+                      placeholder="Only if none of the above fits"
+                      required
+                    />
+                  </div>
+                )}
                 <div className="form-row" style={{ flex: 1 }}>
                   <label>Description</label>
                   <SuggestInput
