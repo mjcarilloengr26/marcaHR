@@ -61,11 +61,42 @@ async function withTotalsBatch(reports) {
     .prepare(`SELECT report_id, COALESCE(SUM(amount), 0) AS total FROM expense_items WHERE report_id IN (${placeholders}) GROUP BY report_id`)
     .all(...reports.map((r) => r.id));
   const totalByReportId = new Map(sums.map((s) => [s.report_id, s.total]));
+
+  // What each report was actually spent on, so the list can show the split
+  // without opening every row. One query for the whole page, same as the
+  // totals above — a per-report query here would reintroduce the N+1 that
+  // withTotalsBatch exists to avoid.
+  //
+  // Grouped case-insensitively and labelled with the spelling used most often
+  // in that report: "sop" and "SOP" are one category typed twice and must not
+  // appear as two lines. mode() picks the spelling rather than an arbitrary
+  // MIN, which would silently prefer whichever sorts first.
+  const catRows = await db
+    .prepare(
+      `SELECT report_id,
+              COALESCE(NULLIF(TRIM(mode() WITHIN GROUP (ORDER BY category)), ''), 'Uncategorised') AS category,
+              COALESCE(SUM(amount), 0) AS total,
+              COUNT(*)::int AS items
+       FROM expense_items
+       WHERE report_id IN (${placeholders})
+       GROUP BY report_id, LOWER(TRIM(COALESCE(category, '')))
+       ORDER BY report_id, 3 DESC`
+    )
+    .all(...reports.map((r) => r.id));
+
+  const catsByReportId = new Map();
+  for (const c of catRows) {
+    const list = catsByReportId.get(c.report_id) || [];
+    list.push({ category: c.category, total: c.total, items: c.items });
+    catsByReportId.set(c.report_id, list);
+  }
+
   return reports.map((report) => {
     const total_expenses = totalByReportId.get(report.id) || 0;
     return {
       ...report,
       total_expenses,
+      categories: catsByReportId.get(report.id) || [],
       balance: Number((report.cash_advance_amount - total_expenses).toFixed(2)),
     };
   });

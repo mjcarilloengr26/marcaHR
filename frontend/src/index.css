@@ -566,6 +566,25 @@ tbody tr:last-child td { border-bottom: none; }
    Applies to the header too, so a two-word heading does not stack. */
 .col-nowrap { white-space: nowrap; }
 
+/* The per-report category split in the expenses list. Name and amount are
+   pushed apart so the figures form a readable column rather than trailing
+   whatever length the category name happens to be. Kept in small type: it is
+   detail under the row, not a competing headline. */
+.cat-breakdown { display: flex; flex-direction: column; gap: 2px; min-width: 150px; }
+.cat-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.cat-breakdown-name { color: var(--text); }
+.cat-breakdown-amount {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .col-sku { white-space: nowrap; }
 .col-sku span {
   display: inline-block;

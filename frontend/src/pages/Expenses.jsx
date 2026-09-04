@@ -159,7 +159,11 @@ export default function Expenses() {
   const filteredReports = reports.filter((r) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
-    return [r.employee_name, r.title, r.expense_type, r.cost_center, r.status].some((v) => (v || "").toLowerCase().includes(q));
+    // Category is searchable too, so "transport" finds the reports containing
+    // transport lines rather than only ones titled that.
+    const categories = (r.categories || []).map((c) => c.category).join(" ");
+    return [r.employee_name, r.title, r.expense_type, r.cost_center, r.status, categories]
+      .some((v) => (v || "").toLowerCase().includes(q));
   });
   const { sorted, toggleSort, arrow } = useSort(filteredReports, "created_at", "desc");
 
@@ -271,8 +275,11 @@ export default function Expenses() {
                 </th>
               )}
               {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
-              <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Type" sortKey="expense_type" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} />
+              {/* Not sortable: a report has several categories, so there is no
+                  single value to sort a row by. */}
+              <th>Category</th>
               <th>Cost center</th>
               <SortTh label="Cash advance" sortKey="cash_advance_amount" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Expenses" sortKey="total_expenses" toggleSort={toggleSort} arrow={arrow} />
@@ -296,8 +303,27 @@ export default function Expenses() {
                   </td>
                 )}
                 {isHr && <td>{r.employee_name}</td>}
-                <td>{r.title}</td>
                 <td>{r.expense_type || "—"}</td>
+                <td>{r.title}</td>
+                {/* What the report was actually spent on, biggest first. A
+                    report is 1.7 categories on average and four at most in the
+                    live data, so the whole split fits without truncation. */}
+                <td>
+                  {(r.categories || []).length === 0 ? (
+                    <span className="subtitle">—</span>
+                  ) : (
+                    <div className="cat-breakdown">
+                      {r.categories.map((c) => (
+                        <div key={c.category} className="cat-breakdown-row">
+                          <span className="cat-breakdown-name" title={`${c.items} item${c.items === 1 ? "" : "s"}`}>
+                            {c.category}
+                          </span>
+                          <span className="cat-breakdown-amount">{money(c.total)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </td>
                 <td>{r.cost_center || "—"}</td>
                 <td>{money(r.cash_advance_amount)}</td>
                 <td>{money(r.total_expenses)}</td>
