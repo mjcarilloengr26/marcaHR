@@ -44,6 +44,22 @@ function requireRole(...roles) {
   };
 }
 
+// Role check with no page-access fallback: the named roles, and nobody else,
+// however the grants are configured.
+//
+// For decisions that are not "can this person use this screen" but "whose
+// judgement is this" — accepting a returned asset is the case it was written
+// for. A temporary grant is meant to keep a page working while someone is
+// away; it should not hand over a sign-off that an item came back and what
+// condition it was in.
+function requireStrictRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: "Not authenticated" });
+    if (roles.includes(req.user.role)) return next();
+    return res.status(403).json({ error: "Only admin or HR can do that" });
+  };
+}
+
 // Allows HR/admin to act on anyone; employees only on their own employee_id.
 function requireSelfOrRole(getEmployeeId, ...roles) {
   return (req, res, next) => {
@@ -55,4 +71,4 @@ function requireSelfOrRole(getEmployeeId, ...roles) {
   };
 }
 
-module.exports = { signToken, requireAuth, requireRole, requireSelfOrRole, JWT_SECRET };
+module.exports = { signToken, requireAuth, requireRole, requireStrictRole, requireSelfOrRole, JWT_SECRET };

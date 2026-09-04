@@ -1,6 +1,6 @@
 const express = require("express");
 const db = require("../db");
-const { requireAuth, requireRole } = require("../middleware/auth");
+const { requireAuth, requireRole, requireStrictRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
 const { notifyAssetReturnFiled, notifyAssetReturnDecision } = require("../notifications");
@@ -13,13 +13,15 @@ const router = express.Router();
 // has_photo drives that link; GET /:id/photo serves the bytes on demand.
 const SELECT = `
   SELECT r.id, r.asset_id, r.employee_id, r.return_date, r.employee_note,
-         r.status, r.asset_condition, r.review_note, r.reviewed_at, r.created_at,
+         r.quantity, r.status, r.asset_condition, r.review_note, r.reviewed_at, r.created_at,
          (r.photo_data IS NOT NULL) AS has_photo, r.photo_name,
          (e.first_name || ' ' || e.last_name) AS employee_name,
          d.name AS department_name,
          (rv.first_name || ' ' || rv.last_name) AS reviewed_by_name,
          a.asset_type, a.brand, a.model, a.serial_number, a.asset_tag,
-         a.date_issued, a.status AS asset_status
+         a.date_issued, a.status AS asset_status,
+         a.quantity AS asset_quantity, a.returned_quantity AS asset_returned_quantity,
+         (a.quantity - a.returned_quantity) AS asset_outstanding_quantity
   FROM asset_returns r
   JOIN employees e ON e.id = r.employee_id
   LEFT JOIN departments d ON d.id = e.department_id
@@ -106,6 +108,7 @@ router.post(
 
     const asset = await db.prepare("SELECT * FROM employee_assets WHERE id = ?").get(asset_id);
     if (!asset) return res.status(404).json({ error: "Asset not found" });
+    const outstanding = asset.quantity - asset.returned_quantity;
 
     // An employee can only hand back what is actually charged to them.
     if (!isHr(req) && asset.employee_id !== req.user.employee_id) {
@@ -128,16 +131,31 @@ router.post(
       .get(asset_id);
     if (open) return res.status(409).json({ error: "A return for that asset is already awaiting a decision" });
 
+    // How many are coming back. Defaults to everything still outstanding,
+    // which is the whole story for a laptop and the common case for kit.
+    const quantity = body.quantity === undefined || body.quantity === null || body.quantity === ""
+      ? outstanding
+      : Number(body.quantity);
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      return res.status(400).json({ error: "Return at least one item" });
+    }
+    if (quantity > outstanding) {
+      return res.status(400).json({
+        error: `Only ${outstanding} of that asset ${outstanding === 1 ? "is" : "are"} still out — you cannot return ${quantity}`,
+      });
+    }
+
     const photo = parsePhoto(body);
     const info = await db
       .prepare(
-        `INSERT INTO asset_returns (asset_id, employee_id, return_date, employee_note, photo_data, photo_name, photo_type)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO asset_returns (asset_id, employee_id, return_date, quantity, employee_note, photo_data, photo_name, photo_type)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         asset_id,
         asset.employee_id,
         return_date,
+        quantity,
         employee_note?.trim() || null,
         photo.data,
         photo.name,
@@ -147,7 +165,7 @@ router.post(
     await logRequestEvent(req, "file_asset_return", {
       entityType: "asset_return",
       entityId: info.lastInsertRowid,
-      details: { asset_id, employee_id: asset.employee_id, return_date, has_photo: Boolean(photo.data) },
+      details: { asset_id, employee_id: asset.employee_id, return_date, quantity, has_photo: Boolean(photo.data) },
     });
 
     const created = await db.prepare(`${SELECT} WHERE r.id = ?`).get(info.lastInsertRowid);
@@ -158,10 +176,15 @@ router.post(
 
 // Accept or reject. Accepting is what actually returns the asset — nothing
 // before this point changes employee_assets.
+//
+// requireStrictRole, not requireRole: this deliberately ignores Page Access
+// grants. A grant keeps the Company Assets page usable while someone is away,
+// but accepting a return is a sign-off that an item came back and in what
+// condition, and that stays with admin or HR.
 router.put(
   "/:id",
   requireAuth,
-  requireRole("admin", "hr"),
+  requireStrictRole("admin", "hr"),
   asyncHandler(async (req, res) => {
     const { status, asset_condition, review_note } = req.body || {};
     if (!["accepted", "rejected"].includes(status)) {
@@ -206,12 +229,38 @@ router.put(
       const note = [asset_condition && `Returned in ${asset_condition} condition`, review_note?.trim()]
         .filter(Boolean)
         .join(" — ");
+
+      const asset = await db.prepare("SELECT quantity, returned_quantity FROM employee_assets WHERE id = ?").get(existing.asset_id);
+      const returnedNow = (asset.returned_quantity || 0) + (existing.quantity || 1);
+      const closed = returnedNow >= asset.quantity;
+
+      // A partial return deducts from what is still out and leaves the record
+      // active; the row only closes once nothing is outstanding. The condition
+      // note is appended rather than replaced, because two partial returns of
+      // the same kit can come back in different states.
       await db
         .prepare(
-          `UPDATE employee_assets SET status = 'returned', date_returned = ?, condition_note = ?
-           WHERE id = ? AND status = 'active'`
+          `UPDATE employee_assets
+              SET returned_quantity = ?,
+                  status = CASE WHEN ? THEN 'returned' ELSE status END,
+                  date_returned = CASE WHEN ? THEN ? ELSE date_returned END,
+                  condition_note = CASE
+                    WHEN ?::text IS NULL THEN condition_note
+                    WHEN condition_note IS NULL OR condition_note = '' THEN ?
+                    ELSE condition_note || ' · ' || ?
+                  END
+            WHERE id = ?`
         )
-        .run(existing.return_date, note || null, existing.asset_id);
+        .run(
+          returnedNow,
+          closed,
+          closed,
+          existing.return_date,
+          note || null,
+          note || null,
+          note || null,
+          existing.asset_id
+        );
     }
 
     await logRequestEvent(req, "review_asset_return", {

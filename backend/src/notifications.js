@@ -163,7 +163,11 @@ const notifyAssetReturnFiled = guarded(async (ret) => {
 
   const item = [ret.brand, ret.model, ret.asset_type].filter(Boolean).join(" ");
   const lines = [
-    `${ret.employee_name} is returning ${item}${ret.serial_number ? ` (serial ${ret.serial_number})` : ""}.`,
+    `${ret.employee_name} is returning ${ret.quantity} × ${item}` +
+      `${ret.serial_number ? ` (serial ${ret.serial_number})` : ""}.`,
+    ret.asset_outstanding_quantity > ret.quantity
+      ? `${ret.asset_outstanding_quantity - ret.quantity} would remain on their record afterwards.`
+      : "That is everything still out on this record.",
     `Return date: ${ret.return_date}`,
     ret.employee_note ? `Their note: ${ret.employee_note}` : null,
     ret.has_photo ? "A photo of the item is attached to the return." : "No photo was attached.",
@@ -181,9 +185,11 @@ const notifyAssetReturnDecision = guarded(async (ret) => {
   const item = [ret.brand, ret.model, ret.asset_type].filter(Boolean).join(" ");
   const body =
     ret.status === "accepted"
-      ? `Your return of ${item} was accepted, recorded in ${ret.asset_condition} condition. ` +
-        `It is no longer on your record.`
-      : `Your return of ${item} was not accepted, so the item is still on your record.`;
+      ? `Your return of ${ret.quantity} × ${item} was accepted, recorded in ${ret.asset_condition} condition.` +
+        (ret.asset_outstanding_quantity > 0
+          ? ` ${ret.asset_outstanding_quantity} still on your record.`
+          : " Nothing further is on your record for this item.")
+      : `Your return of ${ret.quantity} × ${item} was not accepted, so the ${ret.quantity === 1 ? "item is" : "items are"} still on your record.`;
 
   sendMail({
     to: emp.email,

@@ -10,7 +10,10 @@ const STATUSES = ["active", "returned", "replaced"];
 
 const SELECT_WITH_EMPLOYEE = `
   SELECT a.*, (e.first_name || ' ' || e.last_name) AS employee_name, e.status AS employee_status,
-         d.name AS department_name
+         d.name AS department_name,
+         -- What the employee still holds. Computed rather than stored so it
+         -- cannot drift from the two columns it is derived from.
+         (a.quantity - a.returned_quantity) AS outstanding_quantity
   FROM employee_assets a
   JOIN employees e ON e.id = a.employee_id
   LEFT JOIN departments d ON d.id = e.department_id`;
@@ -162,6 +165,18 @@ router.put(
     const merged = { ...existing, ...readBody({ ...existing, ...req.body }) };
     const problem = validate(merged);
     if (problem) return res.status(400).json({ error: problem });
+
+    // Marking an asset returned here is the same decision as accepting a filed
+    // return, and it must not be an easier route to it. Accepting is admin/HR
+    // only and ignores Page Access grants, so this transition does too —
+    // otherwise a grantee could set the status directly and skip the sign-off
+    // entirely. Every other edit on this route stays grantable.
+    const endsTheIssue = merged.status !== "active" && existing.status === "active";
+    if (endsTheIssue && !["admin", "hr"].includes(req.user.role)) {
+      return res.status(403).json({
+        error: "Only admin or HR can mark an asset returned or replaced. File a return for them to accept.",
+      });
+    }
 
     await db
       .prepare(

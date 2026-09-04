@@ -79,6 +79,12 @@ export default function Assets() {
   const hasAssetGrant = (user.page_grants || []).includes("assets");
   const isHr = user.role === "admin" || user.role === "hr" || hasAssetGrant;
 
+  // Accepting a return is a sign-off that an item came back and in what
+  // condition, so it stays with admin and HR and is not covered by a grant.
+  // The server enforces this with requireStrictRole; the buttons follow, so a
+  // grantee is not offered a control that would be refused.
+  const canDecideReturns = user.role === "admin" || user.role === "hr";
+
   const [assets, setAssets] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [error, setError] = useState("");
@@ -409,10 +415,13 @@ export default function Assets() {
 
   const openFiling = (asset) => {
     setError("");
+    const outstanding = asset.outstanding_quantity ?? asset.quantity ?? 1;
     setFiling({
       asset,
+      outstanding,
       form: {
         return_date: new Date().toISOString().slice(0, 10),
+        quantity: outstanding,
         employee_note: "",
         photo_name: "",
         photo_type: "",
@@ -542,7 +551,12 @@ export default function Assets() {
     }
   };
 
-  const stillOut = assets.filter((a) => a.status === "active").length;
+  // Counted in items, not rows: one row can be five pairs of gloves, and two
+  // of them coming back should move this number.
+  const stillOut = assets
+    .filter((a) => a.status === "active")
+    .reduce((n, a) => n + (a.outstanding_quantity ?? a.quantity ?? 1), 0);
+  const totalIssued = assets.reduce((n, a) => n + (a.quantity ?? 1), 0);
   const openRequests = requests.filter((r) => r.status === "pending").length;
   const openReturns = returns.filter((r) => r.status === "pending").length;
 
@@ -553,7 +567,7 @@ export default function Assets() {
           <h1>Company Assets</h1>
           <p className="subtitle">
             {isHr
-              ? `Equipment issued to staff — ${stillOut} still out of ${assets.length} on record`
+              ? `Equipment issued to staff — ${stillOut} item${stillOut === 1 ? "" : "s"} still out of ${totalIssued} issued across ${assets.length} record${assets.length === 1 ? "" : "s"}`
               : "Company equipment currently issued to you"}
           </p>
         </div>
@@ -734,9 +748,11 @@ export default function Assets() {
             )}
           </h2>
           <p className="subtitle" style={{ margin: "0 0 10px" }}>
-            {isHr
+            {canDecideReturns
               ? "An item stays on the employee's record until the return is accepted. Accepting is also where its condition is recorded."
-              : "Your item stays on your record until someone accepts the return."}
+              : isHr
+                ? "An item stays on the employee's record until admin or HR accepts the return."
+                : "Your item stays on your record until someone accepts the return."}
           </p>
           <div className="table-scroll">
             <table className="sticky-head">
@@ -744,6 +760,7 @@ export default function Assets() {
                 <tr>
                   {isHr && <th>Employee</th>}
                   <th>Asset</th>
+                  <th>Qty</th>
                   <th>Serial number</th>
                   <th>Return date</th>
                   <th>Their note</th>
@@ -773,6 +790,14 @@ export default function Assets() {
                         </div>
                       )}
                     </td>
+                    <td style={{ fontVariantNumeric: "tabular-nums" }}>
+                      {r.quantity}
+                      {r.status === "pending" && r.asset_outstanding_quantity > r.quantity && (
+                        <span className="subtitle" style={{ fontSize: 11, marginLeft: 4 }}>
+                          of {r.asset_outstanding_quantity}
+                        </span>
+                      )}
+                    </td>
                     <td style={{ fontVariantNumeric: "tabular-nums" }}>{r.serial_number || "—"}</td>
                     <td style={{ whiteSpace: "nowrap" }}>{r.return_date}</td>
                     <td>{r.employee_note || "—"}</td>
@@ -797,7 +822,7 @@ export default function Assets() {
                     </td>
                     <td>
                       <div className="col-actions">
-                        {isHr && r.status === "pending" && (
+                        {canDecideReturns && r.status === "pending" && (
                           <>
                             <button
                               className="btn btn-sm"
@@ -814,6 +839,9 @@ export default function Assets() {
                               Reject
                             </button>
                           </>
+                        )}
+                        {isHr && !canDecideReturns && r.status === "pending" && (
+                          <span className="subtitle">admin/HR to accept</span>
                         )}
                         {!isHr && r.status === "pending" && (
                           <button
@@ -936,7 +964,17 @@ export default function Assets() {
                 <td>{a.model || "—"}</td>
                 <td style={{ fontVariantNumeric: "tabular-nums" }}>{a.serial_number || "—"}</td>
                 <td>{a.asset_tag || "—"}</td>
-                <td style={{ fontVariantNumeric: "tabular-nums" }}>{a.quantity ?? 1}</td>
+                <td style={{ fontVariantNumeric: "tabular-nums" }}>
+                  {/* What they still hold. The issued count only appears once
+                      some of it has come back, so the ordinary case stays a
+                      single number. */}
+                  {a.outstanding_quantity ?? a.quantity ?? 1}
+                  {a.returned_quantity > 0 && (
+                    <span className="subtitle" style={{ fontSize: 11, marginLeft: 4 }}>
+                      of {a.quantity}
+                    </span>
+                  )}
+                </td>
                 <td style={{ whiteSpace: "nowrap" }}>{a.date_issued}</td>
                 <td style={{ whiteSpace: "nowrap" }}>{a.date_returned || "—"}</td>
                 <td>
@@ -955,15 +993,19 @@ export default function Assets() {
                     {a.status === "active" &&
                       (pendingReturnFor(a.id) ? (
                         <span className="badge badge-pending">return pending</span>
-                      ) : isHr ? (
+                      ) : canDecideReturns ? (
+                        // Admin/HR record a handover that already happened.
                         <button className="btn btn-sm" onClick={() => openReturn(a)}>
                           Return
                         </button>
-                      ) : (
+                      ) : a.employee_id === user.employee_id ? (
+                        // Anyone else files a return for their own kit, which
+                        // admin or HR then accepts. A Page Access grantee sees
+                        // this on their own items and nothing on other people's.
                         <button className="btn btn-sm" onClick={() => openFiling(a)}>
                           Return
                         </button>
-                      ))}
+                      ) : null)}
                     {isHr && (
                       <>
                         <button className="btn btn-sm btn-secondary" onClick={() => openEdit(a)}>
@@ -1184,6 +1226,23 @@ export default function Assets() {
                 />
               </div>
               <div className="form-row">
+                <label>How many are you returning?</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  max={filing.outstanding}
+                  value={filing.form.quantity}
+                  onChange={(e) => setFiling({ ...filing, form: { ...filing.form, quantity: e.target.value } })}
+                  required
+                />
+                <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
+                  {filing.outstanding === 1
+                    ? "You have one of these."
+                    : `You have ${filing.outstanding}. Return fewer and the rest stays on your record.`}
+                </div>
+              </div>
+              <div className="form-row">
                 <label>Anything they should know? (optional)</label>
                 <textarea
                   rows={3}
@@ -1234,9 +1293,13 @@ export default function Assets() {
               {accepting.ret.asset_type}
               {accepting.ret.brand ? ` — ${accepting.ret.brand}` : ""}
               {accepting.ret.model ? ` ${accepting.ret.model}` : ""}
-              {accepting.ret.serial_number ? ` (${accepting.ret.serial_number})` : ""}, returned by{" "}
-              {accepting.ret.employee_name} on {accepting.ret.return_date}. Accepting takes it off their
-              record and marks the asset returned.
+              {accepting.ret.serial_number ? ` (${accepting.ret.serial_number})` : ""} — {accepting.ret.quantity}{" "}
+              returned by {accepting.ret.employee_name} on {accepting.ret.return_date}.{" "}
+              {accepting.ret.asset_outstanding_quantity > accepting.ret.quantity
+                ? `Accepting deducts ${accepting.ret.quantity}, leaving ${
+                    accepting.ret.asset_outstanding_quantity - accepting.ret.quantity
+                  } on their record.`
+                : "That is everything still out, so accepting closes the record."}
             </p>
             {accepting.ret.employee_note && (
               <p className="subtitle" style={{ margin: "0 0 12px" }}>

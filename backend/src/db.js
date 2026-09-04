@@ -601,6 +601,11 @@ CREATE TABLE IF NOT EXISTS employee_assets (
   -- was becoming one row that said "gloves", and the count was lost at the
   -- point of issue with nothing on the employee's page to show it.
   quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity >= 1),
+  -- How many of that quantity have come back and been accepted. Kept separate
+  -- from quantity rather than decrementing it, so the record still says how
+  -- many were issued in the first place. Outstanding is quantity minus this,
+  -- and the row closes as 'returned' when nothing is outstanding.
+  returned_quantity INTEGER NOT NULL DEFAULT 0 CHECK (returned_quantity >= 0),
   date_issued TEXT NOT NULL,
   date_returned TEXT,
   -- 'replaced' is kept distinct from 'returned' on purpose: both mean the item
@@ -657,6 +662,9 @@ CREATE TABLE IF NOT EXISTS asset_returns (
   asset_id INTEGER NOT NULL REFERENCES employee_assets(id) ON DELETE CASCADE,
   employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
   return_date TEXT NOT NULL,
+  -- How many are being handed back. A partial return is the normal case for
+  -- consumable kit: five pairs of gloves go out, two come back.
+  quantity INTEGER NOT NULL DEFAULT 1 CHECK (quantity >= 1),
   employee_note TEXT,
   photo_data TEXT,
   photo_name TEXT,
@@ -809,6 +817,13 @@ async function ensureDealAging() {
 // recorded as a single item, which is what the default says.
 async function ensureAssetQuantity() {
   await pool.query("ALTER TABLE employee_assets ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1");
+  await pool.query("ALTER TABLE employee_assets ADD COLUMN IF NOT EXISTS returned_quantity INTEGER NOT NULL DEFAULT 0");
+  await pool.query("ALTER TABLE asset_returns ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1");
+  // Anything already closed came back in full, by definition of how the
+  // register worked before partial returns existed.
+  await pool.query(
+    "UPDATE employee_assets SET returned_quantity = quantity WHERE status IN ('returned','replaced') AND returned_quantity = 0"
+  );
 }
 
 async function ensureReviewSchedule() {
