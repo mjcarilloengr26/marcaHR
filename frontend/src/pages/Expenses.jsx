@@ -13,6 +13,9 @@ const EXPENSE_TITLE_OPTIONS = [
   "Fuel", "Parking", "Toll Fees", "Meals", "Maintenance", "Car Maintenance",
   "Utilities", "Allowance", "Supplies", "Materials", "Labor", "Airfare",
   "Hotel", "Foods", "Equipment Rental", "Vehicle Rental", "Office Rental",
+  "SOP", "Marketing",
+  // "Others" stays last — picking it reveals the free-text box, and a reader
+  // scanning the list should hit the escape hatch after the real choices.
   "Others",
 ];
 const EMPTY_FORM = { title: "", title_other: "", expense_type: "", cash_advance_amount: "", cost_center: "", notes: "" };
