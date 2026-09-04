@@ -108,4 +108,50 @@ router.delete(
   })
 );
 
+// Remove the record entirely. This is a different action from revoking, not a
+// harder version of it: revoking ends the access and keeps the row as evidence
+// of who could reach what and when, which is the whole point of the soft
+// revoke above. Deleting throws that evidence away.
+//
+// So the grant is written to the audit log in full before it goes — user,
+// page, the label it was given, when it was granted, when it expired and
+// whether it had been revoked. Events keeps the history that this table no
+// longer will.
+//
+// Deleting a still-active grant also ends the access, since the "active grant"
+// query stops matching. The page says so before it lets you do it.
+router.delete(
+  "/:id/permanent",
+  requireAuth,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const grant = await db
+      .prepare(
+        `SELECT g.*, u.email AS user_email,
+                (g.revoked_at IS NULL AND g.expires_at > to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')) AS is_active
+         FROM page_access_grants g JOIN users u ON u.id = g.user_id WHERE g.id = ?`
+      )
+      .get(req.params.id);
+    if (!grant) return res.status(404).json({ error: "Grant not found" });
+
+    await logRequestEvent(req, "delete_page_access_grant", {
+      entityType: "page_access_grant",
+      entityId: Number(req.params.id),
+      details: {
+        user_id: grant.user_id,
+        user_email: grant.user_email,
+        page_key: grant.page_key,
+        role_label: grant.role_label,
+        granted_at: grant.created_at,
+        expires_at: grant.expires_at,
+        revoked_at: grant.revoked_at,
+        was_active_when_deleted: Boolean(grant.is_active),
+      },
+    });
+
+    await db.prepare("DELETE FROM page_access_grants WHERE id = ?").run(req.params.id);
+    res.status(204).end();
+  })
+);
+
 module.exports = router;

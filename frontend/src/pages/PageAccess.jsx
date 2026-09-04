@@ -27,6 +27,18 @@ export default function PageAccess() {
 
   const [form, setForm] = useState({ user_id: "", page_key: "", role_label: "", mode: "days", days: 5, expires_at: "" });
 
+  // Ids ticked for removal. Any grant can be deleted, including an active one
+  // — the confirmation says what that means.
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
+  const toggleOne = (id) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
   const loadGrants = () =>
     api.get("/page-access").then(setGrants).catch((err) => setError(err.message));
 
@@ -39,6 +51,17 @@ export default function PageAccess() {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
+
+  // A grant deleted here or elsewhere must not linger as a phantom tick
+  // inflating the selected count.
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(grants.map((g) => g.id));
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [grants]);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -79,6 +102,73 @@ export default function PageAccess() {
 
   const pageLabel = (key) => pages.find((p) => p.key === key)?.label || key;
   const userLabel = (g) => g.employee_name || g.user_email;
+
+  // Deleting a grant removes the record of it, which is the one thing revoking
+  // preserves. Spelling that out is the difference between an admin choosing
+  // to clear old rows and an admin destroying an access trail by accident.
+  const confirmDelete = (targets) => {
+    const active = targets.filter((g) => g.is_active);
+    const lines = [
+      `Delete ${targets.length} grant${targets.length === 1 ? "" : "s"} permanently?`,
+      "",
+      "This removes the record of who had access and when. Revoking keeps that record; deleting does not.",
+    ];
+    if (active.length) {
+      lines.push(
+        "",
+        `${active.length} of them ${active.length === 1 ? "is" : "are"} still active, so ${
+          active.length === 1 ? "that user loses" : "those users lose"
+        } access immediately:`,
+        ...active.map((g) => `  • ${userLabel(g)} — ${pageLabel(g.page_key)}`)
+      );
+    }
+    lines.push("", "The deletion itself is recorded under Events. This cannot be undone.");
+    return confirm(lines.join("\n"));
+  };
+
+  const removeOne = async (g) => {
+    if (!confirmDelete([g])) return;
+    setError("");
+    setSaved("");
+    try {
+      await api.del(`/page-access/${g.id}/permanent`);
+      setSaved("Grant deleted.");
+      await loadGrants();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const deleteSelected = async () => {
+    const targets = grants.filter((g) => selected.has(g.id));
+    if (targets.length === 0 || !confirmDelete(targets)) return;
+
+    setBulkDeleting(true);
+    setError("");
+    setSaved("");
+    // One at a time, matching the other bulk deletes in the app: a partial
+    // failure then leaves a clear picture of exactly what went.
+    const failed = [];
+    for (const g of targets) {
+      try {
+        await api.del(`/page-access/${g.id}/permanent`);
+      } catch (err) {
+        failed.push(`${userLabel(g)} / ${pageLabel(g.page_key)}: ${err.message}`);
+      }
+    }
+    setBulkDeleting(false);
+    setSelected(new Set());
+    if (failed.length) {
+      setError(`${failed.length} of ${targets.length} could not be deleted — ${failed.join("; ")}`);
+    } else {
+      setSaved(`Deleted ${targets.length} grant${targets.length === 1 ? "" : "s"}.`);
+    }
+    await loadGrants();
+  };
+
+  const allSelected = grants.length > 0 && selected.size === grants.length;
+  const toggleAll = () =>
+    setSelected((prev) => (prev.size === grants.length ? new Set() : new Set(grants.map((g) => g.id))));
 
   return (
     <div>
@@ -171,6 +261,24 @@ export default function PageAccess() {
         </form>
       </div>
 
+      {/* Only appears once something is ticked, so a destructive control isn't
+          sitting armed on the page during ordinary browsing. */}
+      {selected.size > 0 && (
+        <div
+          className="card"
+          style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}
+        >
+          <strong>{selected.size} selected</strong>
+          <button type="button" className="link-btn" disabled={bulkDeleting} onClick={() => setSelected(new Set())}>
+            Clear selection
+          </button>
+          <span style={{ flex: 1 }} />
+          <button type="button" className="btn btn-sm btn-danger" onClick={deleteSelected} disabled={bulkDeleting}>
+            {bulkDeleting ? "Deleting…" : `Delete ${selected.size} selected`}
+          </button>
+        </div>
+      )}
+
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Existing grants</h2>
         {loading ? (
@@ -181,6 +289,19 @@ export default function PageAccess() {
           <table className="sticky-head">
             <thead>
               <tr>
+                <th style={{ width: 32 }}>
+                  <input
+                    type="checkbox"
+                    aria-label="Select all grants"
+                    checked={allSelected}
+                    ref={(el) => {
+                      // Part-selected reads as a dash, so "select all" is never
+                      // mistaken for "everything is already ticked".
+                      if (el) el.indeterminate = selected.size > 0 && !allSelected;
+                    }}
+                    onChange={toggleAll}
+                  />
+                </th>
                 <th>User</th>
                 <th>Page</th>
                 <th>Role name</th>
@@ -191,7 +312,15 @@ export default function PageAccess() {
             </thead>
             <tbody>
               {grants.map((g) => (
-                <tr key={g.id}>
+                <tr key={g.id} className={selected.has(g.id) ? "row-selected" : undefined}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${userLabel(g)} — ${pageLabel(g.page_key)}`}
+                      checked={selected.has(g.id)}
+                      onChange={() => toggleOne(g.id)}
+                    />
+                  </td>
                   <td>{userLabel(g)}</td>
                   <td>{pageLabel(g.page_key)}</td>
                   <td>{g.role_label || "—"}</td>
@@ -211,11 +340,19 @@ export default function PageAccess() {
                     )}
                   </td>
                   <td>
-                    {g.is_active && (
-                      <button className="btn btn-sm btn-secondary" onClick={() => revoke(g.id)}>
-                        Revoke
+                    {/* The flex lives on an inner div, not the cell: a display:flex
+                        <td> drops out of the table's column sizing and collapses
+                        its header. */}
+                    <div className="col-actions">
+                      {g.is_active && (
+                        <button className="btn btn-sm btn-secondary" onClick={() => revoke(g.id)}>
+                          Revoke
+                        </button>
+                      )}
+                      <button className="btn btn-sm btn-danger" onClick={() => removeOne(g)}>
+                        Delete
                       </button>
-                    )}
+                    </div>
                   </td>
                 </tr>
               ))}
