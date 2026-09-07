@@ -4,6 +4,7 @@ const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
+const { resolveCostCenter } = require("../services/costCenterName");
 
 const router = express.Router();
 
@@ -147,6 +148,10 @@ router.post(
     const employee = await db.prepare("SELECT id FROM employees WHERE id = ?").get(v.employee_id);
     if (!employee) return res.status(400).json({ error: "That employee does not exist" });
 
+    const cc = await resolveCostCenter(v.cost_center);
+    if (cc.error) return res.status(400).json({ error: cc.error });
+    v.cost_center = cc.name;
+
     // HR raising one is the handover actually happening, so it is open from
     // the start. An employee's goes to pending and waits for a decision.
     const status = isHr(req) ? "open" : "pending";
@@ -253,6 +258,13 @@ router.put(
       return res.status(400).json({ error: "Reports have already drawn on this advance, so it cannot be cancelled" });
     }
 
+    let costCenter = current.cost_center;
+    if (b.cost_center !== undefined) {
+      const cc = await resolveCostCenter(b.cost_center);
+      if (cc.error) return res.status(400).json({ error: cc.error });
+      costCenter = cc.name;
+    }
+
     const text = (v, fallback) => (v === undefined ? fallback : (String(v).trim() || null));
     await db
       .prepare(
@@ -265,7 +277,7 @@ router.put(
         money(returned),
         status,
         text(b.purpose, current.purpose),
-        text(b.cost_center, current.cost_center),
+        costCenter,
         text(b.notes, current.notes),
         b.date_released === undefined ? current.date_released : b.date_released,
         req.params.id

@@ -773,12 +773,12 @@ export default function SalesDashboard() {
                           { label: "Net Profit", value: pnl.totals.netProfit, color: PNL_COLORS.netProfit },
                           { label: "Payroll", value: pnl.costs.payroll, color: PNL_COLORS.payroll },
                           { label: "Procurement", value: pnl.costs.procurement, color: PNL_COLORS.procurement },
-                          { label: "Operating Expenses", value: pnl.costs.operatingExpenses, color: PNL_COLORS.operatingExpenses },
+                          { label: "Expenses", value: pnl.costs.operatingExpenses, color: PNL_COLORS.operatingExpenses },
                         ]
                       : [
                           { label: "Payroll", value: pnl.costs.payroll, color: PNL_COLORS.payroll },
                           { label: "Procurement", value: pnl.costs.procurement, color: PNL_COLORS.procurement },
-                          { label: "Operating Expenses", value: pnl.costs.operatingExpenses, color: PNL_COLORS.operatingExpenses },
+                          { label: "Expenses", value: pnl.costs.operatingExpenses, color: PNL_COLORS.operatingExpenses },
                         ]
                   }
                 />

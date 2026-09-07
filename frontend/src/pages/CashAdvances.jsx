@@ -17,6 +17,7 @@ export default function CashAdvances() {
 
   const [advances, setAdvances] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [costCenters, setCostCenters] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -41,6 +42,9 @@ export default function CashAdvances() {
   useEffect(() => {
     load();
     if (isHr) api.get("/employees").then(setEmployees).catch(() => {});
+    // Everyone needs these: an employee requesting an advance picks a cost
+    // centre from the same list HR does when releasing one.
+    api.get("/cost-centers/options").then(setCostCenters).catch(() => {});
   }, [isHr]);
 
   const openNew = () => {
@@ -433,11 +437,26 @@ ${a.employee_name} will see this.`)
                 </div>
                 <div className="form-row">
                   <label>Cost center</label>
-                  <input
+                  {/* The admin-managed list, not free text. An advance is where
+                      the money is committed, so a typo here detaches the spend
+                      from its allocation before a claim is even filed. */}
+                  <select
                     value={form.cost_center}
                     onChange={(e) => setForm({ ...form, cost_center: e.target.value })}
-                    placeholder="e.g. Engineering"
-                  />
+                    required
+                  >
+                    <option value="" disabled>Select cost center…</option>
+                    {costCenters.map((c) => (
+                      <option key={c.id} value={c.name}>
+                        {c.name}{c.code ? ` · ${c.code}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
+                    {costCenters.length === 0
+                      ? "No cost centers set up yet — an admin adds them under Administration."
+                      : "Required. Set up by an admin — the reports drawn against this advance each carry their own, so this is the advance's own centre."}
+                  </div>
                 </div>
               </div>
               <div className="form-row">

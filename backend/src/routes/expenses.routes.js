@@ -4,6 +4,8 @@ const { requireAuth, requireRole, requireSelfOrRole } = require("../middleware/a
 const { notifyExpenseSubmitted, notifyExpenseStatusChanged } = require("../notifications");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
+const { advancePositions } = require("../services/advancePosition");
+const { resolveCostCenter } = require("../services/costCenterName");
 
 const router = express.Router();
 
@@ -38,16 +40,28 @@ const ITEM_COLUMNS = `id, report_id, expense_date, category, description, amount
   receipt_name, receipt_type, supplier_name, supplier_address, supplier_tin,
   (receipt_data IS NOT NULL) AS has_receipt`;
 
+// `balance` is kept for out-of-pocket claims, where a debt really is created
+// by the report and really is owed to the employee. On a funded report it is
+// zero: the cash left the company when the advance was released, and this
+// report only accounts for where it went.
+function shapeTotals(report, total_expenses, extra = {}) {
+  const position = report.cash_advance_id ? extra.position : null;
+  return {
+    ...report,
+    total_expenses,
+    ...(extra.categories ? { categories: extra.categories } : {}),
+    ...(position || {}),
+    balance: position ? 0 : Number((report.cash_advance_amount - total_expenses).toFixed(2)),
+  };
+}
+
 async function withTotals(report) {
   const totals = await db
     .prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM expense_items WHERE report_id = ?")
     .get(report.id);
   const total_expenses = totals.total;
-  return {
-    ...report,
-    total_expenses,
-    balance: Number((report.cash_advance_amount - total_expenses).toFixed(2)),
-  };
+  const positions = await advancePositions([report.cash_advance_id]);
+  return shapeTotals(report, total_expenses, { position: positions.get(report.cash_advance_id) });
 }
 
 // Same shape as withTotals, but for a whole list at once: one GROUP BY query
@@ -92,15 +106,14 @@ async function withTotalsBatch(reports) {
     catsByReportId.set(c.report_id, list);
   }
 
-  return reports.map((report) => {
-    const total_expenses = totalByReportId.get(report.id) || 0;
-    return {
-      ...report,
-      total_expenses,
+  const positions = await advancePositions(reports.map((r) => r.cash_advance_id));
+
+  return reports.map((report) =>
+    shapeTotals(report, totalByReportId.get(report.id) || 0, {
       categories: catsByReportId.get(report.id) || [],
-      balance: Number((report.cash_advance_amount - total_expenses).toFixed(2)),
-    };
-  });
+      position: positions.get(report.cash_advance_id),
+    })
+  );
 }
 
 router.get(
@@ -197,25 +210,19 @@ router.post(
     const employee_id = req.user.role === "employee" ? req.user.employee_id : body.employee_id || req.user.employee_id;
     const { expense_type, cash_advance_amount, cost_center, notes, cash_advance_id } = body;
     if (!employee_id) return res.status(400).json({ error: "employee is required" });
-    if (expense_type && !EXPENSE_TYPES.includes(expense_type)) {
+    // Type, cost centre and category are all mandatory now. Every breakdown on
+    // the dashboard groups by one of them, and a blank turns into an
+    // "Unspecified" slice that means nothing and cannot be acted on — the
+    // report has to say which pot the money came out of.
+    if (!expense_type) {
+      return res.status(400).json({ error: "Expenses type is required" });
+    }
+    if (!EXPENSE_TYPES.includes(expense_type)) {
       return res.status(400).json({ error: `expense_type must be one of: ${EXPENSE_TYPES.join(", ")}` });
     }
-    // Cost centre must be one an admin has defined. It used to be free text,
-    // which is how "Engineering" and "engineering" became two cost centres as
-    // far as any budget was concerned. Blank is still allowed — not every
-    // claim belongs to one.
-    const costCenter = String(body.cost_center || "").trim();
-    if (costCenter) {
-      const known = await db
-        .prepare("SELECT name FROM cost_centers WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND active")
-        .get(costCenter);
-      if (!known) {
-        return res.status(400).json({ error: "Choose a cost center from the list — new ones are added by an admin" });
-      }
-      // Stored under the spelling the admin defined, so spend always folds
-      // back onto the right budget however it was picked.
-      body.cost_center = known.name;
-    }
+    const cc = await resolveCostCenter(body.cost_center, { required: true });
+    if (cc.error) return res.status(400).json({ error: cc.error });
+    body.cost_center = cc.name;
 
     const titleChoice = resolveChoice({
       choice: body.title,
@@ -294,8 +301,19 @@ router.put(
   asyncHandler(loadEditableReport),
   asyncHandler(async (req, res) => {
     const { title, expense_type, cash_advance_amount, cost_center, notes } = req.body || {};
-    if (expense_type && !EXPENSE_TYPES.includes(expense_type)) {
-      return res.status(400).json({ error: `expense_type must be one of: ${EXPENSE_TYPES.join(", ")}` });
+    // Held to the same rule as creating one, or a report could be filed
+    // correctly and then edited back to blank.
+    if (expense_type !== undefined) {
+      if (!expense_type) return res.status(400).json({ error: "Expenses type is required" });
+      if (!EXPENSE_TYPES.includes(expense_type)) {
+        return res.status(400).json({ error: `expense_type must be one of: ${EXPENSE_TYPES.join(", ")}` });
+      }
+    }
+    let costCenterName = cost_center;
+    if (cost_center !== undefined) {
+      const cc = await resolveCostCenter(cost_center, { required: true });
+      if (cc.error) return res.status(400).json({ error: cc.error });
+      costCenterName = cc.name;
     }
     const report = req.expenseReport;
     await db
@@ -304,7 +322,7 @@ router.put(
         title ?? report.title,
         expense_type !== undefined ? expense_type || null : report.expense_type,
         cash_advance_amount ?? report.cash_advance_amount,
-        cost_center !== undefined ? cost_center : report.cost_center,
+        cost_center !== undefined ? costCenterName : report.cost_center,
         notes !== undefined ? notes : report.notes,
         report.id
       );

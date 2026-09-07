@@ -78,24 +78,49 @@ router.put(
       .get(name, req.params.id);
     if (clash) return res.status(409).json({ error: `"${clash.name}" already exists` });
 
-    await db
-      .prepare("UPDATE cost_centers SET name = ?, code = ?, notes = ?, active = ? WHERE id = ?")
-      .run(
-        name,
-        req.body?.code === undefined ? existing.code : String(req.body.code).trim() || null,
-        req.body?.notes === undefined ? existing.notes : String(req.body.notes).trim() || null,
-        req.body?.active === undefined ? existing.active : Boolean(req.body.active),
-        req.params.id
-      );
+    // A rename has to carry the spend with it. Reports and advances store the
+    // cost centre as text and are matched back to the list by folded name, so
+    // renaming the list entry on its own silently orphaned every record still
+    // filed under the old spelling: the budget kept its allocation but lost
+    // the spend, and the report kept a name that was no longer on any list.
+    //
+    // In one transaction, because a half-applied rename is worse than either
+    // outcome — the list would say one thing and the reports another, with no
+    // way to tell which was intended.
+    const renamedFrom = existing.name;
+    const isRename = renamedFrom.trim().toLowerCase() !== name.trim().toLowerCase() || renamedFrom !== name;
+    let moved = { reports: 0, advances: 0 };
+
+    await db.transaction(async () => {
+      await db
+        .prepare("UPDATE cost_centers SET name = ?, code = ?, notes = ?, active = ? WHERE id = ?")
+        .run(
+          name,
+          req.body?.code === undefined ? existing.code : String(req.body.code).trim() || null,
+          req.body?.notes === undefined ? existing.notes : String(req.body.notes).trim() || null,
+          req.body?.active === undefined ? existing.active : Boolean(req.body.active),
+          req.params.id
+        );
+
+      if (isRename) {
+        const reports = await db
+          .prepare("UPDATE expense_reports SET cost_center = ? WHERE LOWER(TRIM(cost_center)) = LOWER(TRIM(?))")
+          .run(name, renamedFrom);
+        const advances = await db
+          .prepare("UPDATE cash_advances SET cost_center = ? WHERE LOWER(TRIM(cost_center)) = LOWER(TRIM(?))")
+          .run(name, renamedFrom);
+        moved = { reports: reports.changes || 0, advances: advances.changes || 0 };
+      }
+    })();
 
     await logRequestEvent(req, "update_cost_center", {
       entityType: "cost_center",
       entityId: Number(req.params.id),
       // A rename is worth recording in full: spend is matched by name, so
       // renaming one detaches every report still carrying the old spelling.
-      details: { from: existing.name, to: name, active: req.body?.active },
+      details: { from: existing.name, to: name, active: req.body?.active, moved },
     });
-    res.json(await db.prepare("SELECT * FROM cost_centers WHERE id = ?").get(req.params.id));
+    res.json({ ...(await db.prepare("SELECT * FROM cost_centers WHERE id = ?").get(req.params.id)), moved });
   })
 );
 

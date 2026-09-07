@@ -1,6 +1,7 @@
 const express = require("express");
 const ExcelJS = require("exceljs");
 const db = require("../db");
+const { advancePositions } = require("../services/advancePosition");
 const { requireAuth } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { getSalesTargetsReport, parsePeriod, periodDateRange } = require("../services/salesTargets");
@@ -354,7 +355,7 @@ router.get(
 
     const rows = await db
       .prepare(
-        `SELECT er.id, er.title, er.expense_type, er.cost_center, er.cash_advance_amount, er.status,
+        `SELECT er.id, er.title, er.expense_type, er.cost_center, er.cash_advance_amount, er.status, er.cash_advance_id,
                 er.created_at, er.submitted_at,
                 (e.first_name || ' ' || e.last_name) AS employee_name,
                 ca.reference AS advance_reference, ca.amount AS advance_amount,
@@ -366,6 +367,8 @@ router.get(
          ORDER BY er.created_at DESC`
       )
       .all(start, end);
+
+    const positions = await advancePositions(rows.map((r) => r.cash_advance_id));
 
     // Every individual expense behind those reports, with the date it was
     // actually incurred. The report's own created_at says when the claim was
@@ -400,13 +403,16 @@ router.get(
       ...r,
       expense_type: r.expense_type || "Unspecified",
       advance_reference: r.advance_reference || "—",
-      // A report that draws on a released advance carries no advance of its
-      // own, so balancing against its own zero would report the whole spend
-      // as owed back to the employee. The advance it draws on is the figure
-      // that matters — and it is shown, so the sheet says where it came from.
-      balance: r.advance_reference
-        ? Number((r.advance_amount - r.total_expenses).toFixed(2))
-        : Number((r.cash_advance_amount - r.total_expenses).toFixed(2)),
+      // A funded report settles nothing on its own: the cash left the company
+      // when the advance was released. An earlier attempt at this balanced
+      // each report against the whole advance, which counted one release once
+      // per report — three of Laiza's claims against a single 2,000 advance
+      // came out as 4,102 owed. The position belongs to the advance and gets
+      // its own column, identical for every report drawing on it.
+      balance: r.cash_advance_id ? 0 : Number((r.cash_advance_amount - r.total_expenses).toFixed(2)),
+      advance_outstanding: r.cash_advance_id
+        ? (positions.get(r.cash_advance_id)?.advance_outstanding ?? "")
+        : "",
       first_expense_date: span.get(r.id)?.first || "",
       last_expense_date: span.get(r.id)?.last || "",
     }));
@@ -434,6 +440,7 @@ router.get(
         { header: "Drawn On Advance", key: "advance_reference", width: 16 },
         { header: "Total Expenses", key: "total_expenses", width: 15 },
         { header: "Balance", key: "balance", width: 14 },
+        { header: "Unspent On Advance", key: "advance_outstanding", width: 18 },
         { header: "Status", key: "status", width: 12 },
         { header: "First Expense", key: "first_expense_date", width: 14 },
         { header: "Last Expense", key: "last_expense_date", width: 14 },

@@ -138,7 +138,7 @@ function moneyBar(pl) {
   const parts = [
     { key: "procurement", label: "Procurement", value: Number(pl.costs.procurement || 0), colour: COST_COLOURS.procurement },
     { key: "payroll", label: "Payroll", value: Number(pl.costs.payroll || 0), colour: COST_COLOURS.payroll },
-    { key: "operatingExpenses", label: "Operating expenses", value: Number(pl.costs.operatingExpenses || 0), colour: COST_COLOURS.operatingExpenses },
+    { key: "operatingExpenses", label: "Expenses", value: Number(pl.costs.operatingExpenses || 0), colour: COST_COLOURS.operatingExpenses },
     { key: "retained", label: "Retained as profit", value: Number(pl.totals.netProfit || 0), colour: RETAINED },
   ].filter((p) => p.value > 0);
 
@@ -410,7 +410,7 @@ function buildText({ factSheet, narrative, narrativeError, company }) {
     const rows = [
       ["Procurement", pl.costs.procurement],
       ["Payroll", pl.costs.payroll],
-      ["Operating expenses", pl.costs.operatingExpenses],
+      ["Expenses", pl.costs.operatingExpenses],
       ["Retained as profit", pl.totals.netProfit],
     ].filter(([, v]) => Number(v) > 0);
     const total = rows.reduce((a, [, v]) => a + Number(v), 0);

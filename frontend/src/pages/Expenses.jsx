@@ -11,6 +11,27 @@ import DecimalInput from "../components/DecimalInput";
 // The vocabularies come from the server (GET /expenses/options), which is also
 // what enforces them on write. Holding a second copy here is how the list on
 // screen drifts from the list that is actually accepted, so there isn't one.
+// What the Balance column says, which depends on how the claim was funded.
+//
+// Out of pocket: the report itself creates the debt and the company owes it.
+//
+// Funded by an advance: the cash left the company when the advance was
+// released, so this report settles nothing on its own — the position is on the
+// advance, and it is the same figure for every report drawing on it. Showing
+// "advance minus this report" instead made three of Laiza's claims against one
+// 2,000 advance read as 4,102 owed.
+function balanceLabel(report, money) {
+  if (!report.advance_reference) {
+    if (report.balance > 0) return `${money(report.balance)} due to company`;
+    if (report.balance < 0) return `${money(-report.balance)} due to employee`;
+    return money(0);
+  }
+  const left = Number(report.advance_outstanding) || 0;
+  if (left > 0) return `${money(left)} unspent on ${report.advance_reference}`;
+  if (left < 0) return `${money(-left)} over ${report.advance_reference} — due to employee`;
+  return `${report.advance_reference} fully liquidated`;
+}
+
 const EMPTY_FORM = { title: "", title_other: "", expense_type: "", cash_advance_amount: "", cost_center: "", notes: "", cash_advance_id: "" };
 const EMPTY_ITEM_FORM = {
   expense_date: "",
@@ -330,7 +351,7 @@ export default function Expenses() {
                 </td>
                 <td>{money(r.total_expenses)}</td>
                 <td>
-                  {r.balance > 0 ? `${money(r.balance)} due to company` : r.balance < 0 ? `${money(-r.balance)} due to employee` : money(0)}
+                  {balanceLabel(r, money)}
                 </td>
                 <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
                 {/* Stored as UTC "YYYY-MM-DD HH:MM:SS"; only the day is useful
@@ -437,8 +458,17 @@ export default function Expenses() {
               </div>
               <div className="form-row">
                 <label>Cost center</label>
-                <select value={form.cost_center} onChange={(e) => setForm({ ...form, cost_center: e.target.value })}>
-                  <option value="">None</option>
+                {/* Mandatory: every cost breakdown on the dashboard groups by
+                    cost centre, and a blank becomes an "Unspecified" slice
+                    that nobody can act on. Disabled placeholder rather than a
+                    "None" option, so the form cannot be submitted without a
+                    choice but also never silently picks the first one. */}
+                <select
+                  value={form.cost_center}
+                  onChange={(e) => setForm({ ...form, cost_center: e.target.value })}
+                  required
+                >
+                  <option value="" disabled>Select cost center…</option>
                   {costCenters.map((c) => (
                     <option key={c.id} value={c.name}>
                       {c.name}{c.code ? ` · ${c.code}` : ""}
@@ -448,7 +478,7 @@ export default function Expenses() {
                 <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
                   {costCenters.length === 0
                     ? "No cost centers set up yet — an admin adds them under Administration."
-                    : "Set up by an admin. Ask for a new one rather than filing under the nearest match."}
+                    : "Required. Set up by an admin — ask for a new one rather than filing under the nearest match."}
                 </div>
               </div>
             </div>
@@ -750,11 +780,7 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
               <div>
                 <strong>Balance</strong>
                 <div>
-                  {report.balance > 0
-                    ? `${money(report.balance)} due to company`
-                    : report.balance < 0
-                    ? `${money(-report.balance)} due to employee`
-                    : money(0)}
+                  {balanceLabel(report, money)}
                 </div>
               </div>
               {report.notes && <div><strong>Notes</strong><div>{report.notes}</div></div>}

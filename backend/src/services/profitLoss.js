@@ -1,4 +1,5 @@
 const db = require("./../db");
+const { COUNTED_SQL } = require("./expenseScope");
 
 // Extracted from the Sales Dashboard's /profit-loss route so the business
 // review can quote the same figures. Two implementations of the same P&L would
@@ -19,11 +20,17 @@ async function getProfitLoss({ start, end, periodYear, startMonth, endMonth }) {
         "SELECT COALESCE(SUM(net_pay), 0) AS v FROM payroll_records WHERE status IN ('finalized', 'paid') AND period_year = ? AND period_month BETWEEN ? AND ?"
       )
       .get(periodYear, startMonth, endMonth),
+    // Uses the shared scope rather than its own status list. This query had
+    // drifted to ('approved', 'reimbursed') and so left out every *submitted*
+    // claim — money the company has been asked for and has not refused. The
+    // effect was a P&L that understated cost and therefore overstated profit,
+    // while the Expenses Report beside it counted submitted claims and showed
+    // a different, larger figure for the same period.
     db
       .prepare(
         `SELECT COALESCE(SUM(ei.amount), 0) AS v FROM expense_items ei
          JOIN expense_reports er ON er.id = ei.report_id
-         WHERE er.status IN ('approved', 'reimbursed') AND ei.expense_date BETWEEN ? AND ?`
+         WHERE er.status IN ${COUNTED_SQL} AND ei.expense_date BETWEEN ? AND ?`
       )
       .get(start, end),
   ]);

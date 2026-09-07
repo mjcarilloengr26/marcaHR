@@ -300,7 +300,7 @@ export default function Snapshot() {
           rows={[
             { label: "Procurement", value: money(data.moneyOut.procurement) },
             { label: "Payroll", value: money(data.moneyOut.payroll) },
-            { label: "Operating expenses", value: money(data.moneyOut.operatingExpenses) },
+            { label: "Expenses", value: money(data.moneyOut.operatingExpenses) },
             { label: "Total", value: money(data.moneyOut.total) },
           ]}
         />
