@@ -196,6 +196,94 @@ router.get(
   })
 );
 
+// Cash advanced in the period, from the advance register — and from the
+// reports that predate it.
+//
+// The card used to total expense_reports.cash_advance_amount, which is the
+// field a report carried before advances became records of their own. Five
+// old reports still hold a figure there, adding to 106,422.40, and the card
+// reported that as the period's cash advances while the three advances
+// actually in the register — 42,000 — were nowhere in it. It then subtracted
+// *all* expenses from those five reports' advances, so "due to company" was a
+// difference between two unrelated populations.
+//
+// Both eras are real money, so both are counted, but only while they are
+// still outstanding. A reimbursed report is settled: the employee has been
+// paid and the company is owed nothing, so it contributes to what was
+// released and nothing to what is due back.
+const ADVANCE_SQL = `
+  SELECT a.amount,
+         a.returned_amount,
+         a.status,
+         COALESCE((SELECT SUM(i.amount)
+                   FROM expense_reports r
+                   JOIN expense_items i ON i.report_id = r.id
+                   WHERE r.cash_advance_id = a.id AND r.status IN ${COUNTED_SQL}), 0) AS liquidated
+  FROM cash_advances a
+  WHERE a.status <> 'rejected' AND a.status <> 'cancelled'
+    AND a.date_released BETWEEN ? AND ?`;
+
+// The pre-register advances: a report's own figure, which only counts as
+// outstanding while the report has not been reimbursed.
+const LEGACY_ADVANCE_SQL = `
+  SELECT COALESCE(er.cash_advance_amount, 0) AS amount,
+         er.status,
+         COALESCE((SELECT SUM(amount) FROM expense_items WHERE report_id = er.id), 0) AS liquidated
+  FROM expense_reports er
+  WHERE er.cash_advance_id IS NULL
+    AND COALESCE(er.cash_advance_amount, 0) <> 0
+    AND er.created_at::date BETWEEN ? AND ?
+    AND er.status IN ${COUNTED_SQL}`;
+
+async function fetchAdvancePosition(start, end) {
+  const [registered, legacy] = await Promise.all([
+    db.prepare(ADVANCE_SQL).all(start, end),
+    db.prepare(LEGACY_ADVANCE_SQL).all(start, end),
+  ]);
+
+  const round = (n) => Math.round((Number(n) || 0) * 100) / 100;
+  let released = 0;
+  let liquidated = 0;
+  // Kept apart rather than netted. One employee holding 5,000 of unspent
+  // advance and another owed 5,000 for overspending theirs is two debts in
+  // opposite directions, not zero — netting them hides both.
+  let dueToCompany = 0;
+  let dueToEmployees = 0;
+
+  const settle = (amount, returned, spent) => {
+    const left = amount - returned - spent;
+    if (left > 0) dueToCompany += left;
+    else if (left < 0) dueToEmployees += -left;
+  };
+
+  for (const a of registered) {
+    released += Number(a.amount) || 0;
+    liquidated += Number(a.liquidated) || 0;
+    // Settled means the reckoning is done, whatever the arithmetic says.
+    if (a.status !== "settled") {
+      settle(Number(a.amount) || 0, Number(a.returned_amount) || 0, Number(a.liquidated) || 0);
+    }
+  }
+  for (const l of legacy) {
+    released += Number(l.amount) || 0;
+    liquidated += Number(l.liquidated) || 0;
+    if (l.status !== "reimbursed") settle(Number(l.amount) || 0, 0, Number(l.liquidated) || 0);
+  }
+
+  return {
+    released: round(released),
+    liquidated: round(liquidated),
+    // Split so the headline is never a mystery. The register is what anybody
+    // can go and look at; the legacy figure lives on reports raised before
+    // advances were separate records and cannot be found anywhere else.
+    fromRegister: round(registered.reduce((n, a) => n + (Number(a.amount) || 0), 0)),
+    fromOlderReports: round(legacy.reduce((n, l) => n + (Number(l.amount) || 0), 0)),
+    dueToCompany: round(dueToCompany),
+    dueToEmployees: round(dueToEmployees),
+    advances: registered.length + legacy.length,
+  };
+}
+
 async function fetchExpenseRows(start, end) {
   return db
     .prepare(
@@ -307,19 +395,25 @@ router.get(
     const { start, end } = periodDateRange(period_type, period_year, period_index);
     const { start: prevStart, end: prevEnd } = periodDateRange(period_type, period_year - 1, period_index);
 
-    const [rows, prevRows, itemRows, prevItemRows] = await Promise.all([
+    const [rows, prevRows, itemRows, prevItemRows, advancePosition] = await Promise.all([
       fetchExpenseRows(start, end),
       fetchExpenseRows(prevStart, prevEnd),
       // Same date window as the report-level rows, so the three breakdowns
       // reconcile to the same total rather than quietly disagreeing.
       fetchExpenseItemRows(start, end),
       fetchExpenseItemRows(prevStart, prevEnd),
+      fetchAdvancePosition(start, end),
     ]);
 
-    const totalCashAdvance = rows.reduce((sum, r) => sum + r.cash_advance_amount, 0);
     const totalExpenses = rows.reduce((sum, r) => sum + r.total_expenses, 0);
-    const balance = totalCashAdvance - totalExpenses;
-    const liquidationRatePercent = totalCashAdvance > 0 ? (totalExpenses / totalCashAdvance) * 100 : null;
+    const totalCashAdvance = advancePosition.released;
+    // Against the advances, not against every expense on the page. Most
+    // expenses are reimbursements with no advance behind them, so subtracting
+    // the whole spend from the advances compared two different populations and
+    // produced a "due to company" that meant nothing.
+    const balance = advancePosition.dueToCompany;
+    const liquidationRatePercent =
+      totalCashAdvance > 0 ? (advancePosition.liquidated / totalCashAdvance) * 100 : null;
 
     const grouped = groupExpenseRows(rows);
     const prevGrouped = groupExpenseRows(prevRows);
@@ -350,7 +444,19 @@ router.get(
     res.json({
       period: { type: period_type, year: period_year, index: period_index, label: periodLabel(period_type, period_year, period_index) },
       previousPeriod: { type: period_type, year: period_year - 1, index: period_index, label: periodLabel(period_type, period_year - 1, period_index) },
-      totals: { totalCashAdvance, totalExpenses, balance, liquidationRatePercent },
+      totals: {
+        totalCashAdvance,
+        totalExpenses,
+        balance,
+        liquidationRatePercent,
+        // Cumulative for the period, and split by where it came from: the
+        // register anybody can go and inspect, versus reports raised before
+        // advances were separate records, whose figures live nowhere else.
+        advanceFromRegister: advancePosition.fromRegister,
+        advanceFromOlderReports: advancePosition.fromOlderReports,
+        advanceLiquidated: advancePosition.liquidated,
+        dueToEmployees: advancePosition.dueToEmployees,
+      },
       byType: mergeByLabel(grouped.byType, prevGrouped.byType),
       byTitle: mergeByLabel(grouped.byTitle, prevGrouped.byTitle),
       byCategory: mergeByLabel(byCategory.current, byCategory.previous),

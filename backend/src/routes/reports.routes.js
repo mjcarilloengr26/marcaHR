@@ -2,6 +2,7 @@ const express = require("express");
 const ExcelJS = require("exceljs");
 const db = require("../db");
 const { advancePositions } = require("../services/advancePosition");
+const { COUNTED_SQL } = require("../services/expenseScope");
 const { requireAuth } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { getSalesTargetsReport, parsePeriod, periodDateRange } = require("../services/salesTargets");
@@ -515,14 +516,13 @@ router.get(
       sumBy((r) => r.expense_type)
     );
 
-    addSheet(
-      "By Title-Purpose",
-      [
-        { header: "Title / Purpose", key: "label", width: 20 },
-        { header: "Total Expenses", key: "total", width: 16 },
-      ],
-      sumBy((r) => r.title)
-    );
+    // There was a "By Title-Purpose" sheet here. It is gone for the same reason
+    // its pie and bar left the dashboard: it was not a second view of the same
+    // money, it was the same view. The six figures matched By Category exactly
+    // and only two labels differed, because one report was titled "Maintenance"
+    // while its items were categorised "Car Maintenance". The title is derived
+    // from the categories now, so summing by it can only ever restate them —
+    // and it restates them wrongly whenever a report spans more than one.
 
     // By category, from the line items rather than the report title — the same
     // distinction the dashboard draws. A report titled "Allowance per diem"
@@ -569,7 +569,13 @@ router.get(
                 COALESCE((
                   SELECT SUM(i.amount) FROM expense_reports r
                   JOIN expense_items i ON i.report_id = r.id
-                  WHERE r.cash_advance_id = ca.id AND r.status <> 'rejected'
+                  -- The shared scope, not "anything but rejected". That older
+                  -- wording counted drafts, so a half-typed report would have
+                  -- shown as liquidated here while the dashboard, the Snapshot
+                  -- and the advance's own balance all left it out. No advance
+                  -- happens to have a draft against it today, which is exactly
+                  -- how a difference like this survives unnoticed.
+                  WHERE r.cash_advance_id = ca.id AND r.status IN ${COUNTED_SQL}
                 ), 0) AS liquidated
          FROM cash_advances ca
          JOIN employees e ON e.id = ca.employee_id

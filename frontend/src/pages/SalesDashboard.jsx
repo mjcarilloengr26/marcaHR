@@ -792,7 +792,7 @@ export default function SalesDashboard() {
             <div>
               <h2>Expenses Report</h2>
               <p className="subtitle" style={{ margin: 0 }}>
-                Liquidation &amp; expense report cash advances vs. actual spend for {periodLabel(expPeriodType, expYear, expPeriodIndex)}
+                Cash advanced and liquidated for {periodLabel(expPeriodType, expYear, expPeriodIndex)}
               </p>
             </div>
             <div className="form-inline">
@@ -838,7 +838,19 @@ export default function SalesDashboard() {
               <div className="grid grid-4" style={{ marginBottom: 20 }}>
                 <div className="stat-card">
                   <div className="stat-value">{moneyWhole(expensesReport.totals.totalCashAdvance)}</div>
-                  <div className="stat-label">Total cash advance</div>
+                  <div className="stat-label">Cash advanced this period</div>
+                  {/* Where the figure comes from, because it is the one number
+                      on this card people query. It used to total only the
+                      pre-register reports, leaving the live advances out
+                      entirely, and it is cumulative for the period rather than
+                      a picture of what is open right now. */}
+                  {expensesReport.totals.advanceFromOlderReports > 0 && (
+                    <div className="subtitle" style={{ fontSize: 11, margin: "4px 0 0" }}>
+                      {moneyWhole(expensesReport.totals.advanceFromRegister)} from the advance register ·{" "}
+                      {moneyWhole(expensesReport.totals.advanceFromOlderReports)} on reports raised before advances
+                      were separate
+                    </div>
+                  )}
                 </div>
                 <div className="stat-card">
                   <div className="stat-value">{moneyWhole(expensesReport.totals.totalExpenses)}</div>
@@ -848,7 +860,10 @@ export default function SalesDashboard() {
                   <div className="stat-value" style={{ color: expensesReport.totals.balance >= 0 ? "var(--success)" : "var(--danger)" }}>
                     {moneyWhole(Math.abs(expensesReport.totals.balance))}
                   </div>
-                  <div className="stat-label">{expensesReport.totals.balance >= 0 ? "Due to company" : "Due to employees"}</div>
+                  <div className="stat-label">Still due to company</div>
+                  <div className="subtitle" style={{ fontSize: 11, margin: "4px 0 0" }}>
+                    Unspent on advances that are still open. A reimbursed report is settled and counts nothing here.
+                  </div>
                 </div>
                 <div className="stat-card">
                   <div className="stat-value">
