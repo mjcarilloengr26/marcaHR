@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import SuggestInput from "../components/SuggestInput";
 import { useAuth } from "../context/AuthContext";
@@ -47,6 +47,14 @@ const blankLine = () => ({
   description: "",
   amount: "",
   receipt: null,
+  // Receipt metadata: who was paid, where, and their TIN. Optional, but it has
+  // to be enterable — a printed receipt is the only evidence behind the claim,
+  // and its supplier details are what makes the claim auditable.
+  receipt_ref: "",
+  supplier_name: "",
+  supplier_address: "",
+  supplier_tin: "",
+  showDetails: false,
 });
 
 const EMPTY_FORM = { expense_type: "", cash_advance_amount: "", cost_center: "", notes: "", cash_advance_id: "" };
@@ -76,6 +84,46 @@ export default function Expenses() {
   // Never removes the last one: a report with no lines is the empty draft this
   // dialog exists to stop creating.
   const dropLine = (key) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.key !== key) : ls));
+  // Suppliers already used, with the address and TIN last recorded for each.
+  // Picking a known name fills the rest of the line in, which is the point: the
+  // live data already held one company under two spellings with its TIN retyped
+  // by hand each time.
+  const [suppliers, setSuppliers] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    api
+      .get("/suggestions/suppliers")
+      .then((rows) => { if (alive) setSuppliers(rows || []); })
+      // The form works perfectly without them; a failed lookup must never stop
+      // somebody entering a receipt by hand.
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  // Fills address and TIN from a known supplier, but only where the field is
+  // empty or still holds what a previous auto-fill put there — silently
+  // overwriting an address someone had corrected would be worse than not
+  // filling it at all.
+  const setLineSupplier = (key, name) => {
+    const match = suppliers.find((sup) => (sup.name || "").trim().toLowerCase() === name.trim().toLowerCase());
+    setLines((ls) =>
+      ls.map((l) => {
+        if (l.key !== key) return l;
+        const next = { ...l, supplier_name: name };
+        if (!match) return next;
+        if (!l.supplier_address.trim() || l.supplier_address === l._filledAddress) {
+          next.supplier_address = match.address || "";
+        }
+        if (!l.supplier_tin.trim() || l.supplier_tin === l._filledTin) {
+          next.supplier_tin = match.tin || "";
+        }
+        next._filledAddress = next.supplier_address;
+        next._filledTin = next.supplier_tin;
+        return next;
+      })
+    );
+  };
+
   const attachToLine = async (key, file) => {
     if (!file) return;
     try {
@@ -265,6 +313,10 @@ export default function Expenses() {
           receipt_name: l.receipt?.name,
           receipt_type: l.receipt?.type,
           receipt_data: l.receipt?.data,
+          receipt_ref: l.receipt_ref,
+          supplier_name: l.supplier_name,
+          supplier_address: l.supplier_address,
+          supplier_tin: l.supplier_tin,
         })),
       });
       setShowForm(false);
@@ -533,7 +585,8 @@ export default function Expenses() {
                 </thead>
                 <tbody>
                   {lines.map((l, i) => (
-                    <tr key={l.key}>
+                    <Fragment key={l.key}>
+                    <tr>
                       <td>
                         <input
                           type="date"
@@ -592,14 +645,26 @@ export default function Expenses() {
                           id={`line-receipt-${l.key}`}
                           onChange={(e) => attachToLine(l.key, e.target.files?.[0])}
                         />
-                        <label
-                          htmlFor={`line-receipt-${l.key}`}
-                          className={`btn btn-sm ${l.receipt ? "" : "btn-secondary"}`}
-                          style={{ cursor: "pointer", display: "inline-block" }}
-                          title={l.receipt?.name || "Attach a photo or PDF"}
-                        >
-                          {l.receipt ? "Attached" : "Attach"}
-                        </label>
+                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <label
+                            htmlFor={`line-receipt-${l.key}`}
+                            className={`btn btn-sm ${l.receipt ? "" : "btn-secondary"}`}
+                            style={{ cursor: "pointer", display: "inline-block" }}
+                            title={l.receipt?.name || "Attach a photo or PDF"}
+                          >
+                            {l.receipt ? "Attached" : "Attach"}
+                          </label>
+                          {/* Marked when anything is filled in, so a collapsed
+                              row still says whether it carries receipt details. */}
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-secondary"
+                            onClick={() => setLine(l.key, { showDetails: !l.showDetails })}
+                            title="Receipt number, supplier, address and TIN"
+                          >
+                            {l.supplier_name || l.supplier_tin || l.receipt_ref ? "Details ✓" : "Details"}
+                          </button>
+                        </div>
                       </td>
                       <td>
                         <button
@@ -613,6 +678,56 @@ export default function Expenses() {
                         </button>
                       </td>
                     </tr>
+                    {l.showDetails && (
+                      <tr key={`${l.key}-details`}>
+                        {/* Receipt metadata lives under its own line rather than
+                            in four more columns: the table already carries six
+                            and a receipt's supplier is not something you scan
+                            across rows, it is something you fill in once for
+                            the line you are looking at. Optional — a great many
+                            legitimate expenses have no official receipt. */}
+                        <td colSpan={6} style={{ paddingTop: 0 }}>
+                          <div className="grid grid-2" style={{ gap: 10, padding: "2px 0 10px" }}>
+                            <div className="form-row">
+                              <label>Receipt #</label>
+                              <input
+                                value={l.receipt_ref}
+                                onChange={(e) => setLine(l.key, { receipt_ref: e.target.value })}
+                                placeholder="As printed on the receipt"
+                              />
+                            </div>
+                            <div className="form-row">
+                              <label>Supplier / company</label>
+                              <SuggestInput
+                                field="supplier_name"
+                                options={suppliers.map((sup) => sup.name)}
+                                value={l.supplier_name}
+                                onChange={(e) => setLineSupplier(l.key, e.target.value)}
+                                placeholder="Who was paid"
+                              />
+                            </div>
+                            <div className="form-row">
+                              <label>Supplier address</label>
+                              <SuggestInput
+                                field="supplier_address"
+                                value={l.supplier_address}
+                                onChange={(e) => setLine(l.key, { supplier_address: e.target.value })}
+                              />
+                            </div>
+                            <div className="form-row">
+                              <label>Supplier TIN</label>
+                              <SuggestInput
+                                field="supplier_tin"
+                                value={l.supplier_tin}
+                                onChange={(e) => setLine(l.key, { supplier_tin: e.target.value })}
+                                placeholder="000-000-000-000"
+                              />
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
