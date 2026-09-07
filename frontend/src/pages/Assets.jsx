@@ -41,6 +41,9 @@ const STATUS_BADGE = { active: "active", returned: "approved", replaced: "draft"
 // Requests waiting on somebody get the attention-seeking badge; settled ones
 // read as done.
 const REQUEST_BADGE = { pending: "pending", approved: "approved", rejected: "rejected", issued: "active" };
+// Derived from the badge map rather than listed again, so a new status cannot
+// appear in one and be missing from the other.
+const REQUEST_STATUSES = Object.keys(REQUEST_BADGE);
 
 // A filed return is pending until someone accepts it; accepted means the item
 // is genuinely back, rejected means it never left the employee's record.
@@ -89,6 +92,8 @@ export default function Assets() {
   const [employees, setEmployees] = useState([]);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [requestSearch, setRequestSearch] = useState("");
+  const [requestStatusFilter, setRequestStatusFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY);
@@ -163,6 +168,25 @@ export default function Assets() {
       .some((v) => (v || "").toLowerCase().includes(q));
   });
   const { sorted, toggleSort, arrow } = useSort(filtered, "date_issued", "desc");
+
+  // The requests table gets its own search and sort rather than sharing the
+  // one above it: the two tables hold different things, and a query typed for
+  // an issued asset filtering the request list underneath it would look like a
+  // bug. Newest request first, which is the order somebody deciding on them
+  // wants — the oldest waiting request is the one at risk of being forgotten,
+  // and it is one click away.
+  const filteredRequests = requests.filter((r) => {
+    if (requestStatusFilter && r.status !== requestStatusFilter) return false;
+    const q = requestSearch.trim().toLowerCase();
+    if (!q) return true;
+    return [r.employee_name, r.department_name, r.asset_type, r.reason, r.review_note, r.status]
+      .some((v) => (v || "").toLowerCase().includes(q));
+  });
+  const {
+    sorted: sortedRequests,
+    toggleSort: toggleRequestSort,
+    arrow: requestArrow,
+  } = useSort(filteredRequests, "created_at", "desc");
 
   const openNew = () => {
     setForm({ ...EMPTY, date_issued: new Date().toISOString().slice(0, 10) });
@@ -600,10 +624,41 @@ export default function Assets() {
               </span>
             )}
           </h2>
+          {requests.length > 0 && (
+            <div className="form-inline" style={{ marginBottom: 12 }}>
+              <div className="form-row" style={{ flex: 2, minWidth: 220 }}>
+                <label>Search requests</label>
+                <input
+                  placeholder={isHr ? "Employee, asset, reason…" : "Asset, reason…"}
+                  value={requestSearch}
+                  onChange={(e) => setRequestSearch(e.target.value)}
+                />
+              </div>
+              <div className="form-row" style={{ minWidth: 150 }}>
+                <label>Status</label>
+                <select value={requestStatusFilter} onChange={(e) => setRequestStatusFilter(e.target.value)}>
+                  <option value="">All statuses</option>
+                  {REQUEST_STATUSES.map((st) => (
+                    <option key={st} value={st}>{st}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-row" style={{ flex: 1 }}>
+                <label>&nbsp;</label>
+                <div className="subtitle" style={{ margin: 0 }}>
+                  {sortedRequests.length === requests.length
+                    ? `${requests.length} request${requests.length === 1 ? "" : "s"}`
+                    : `${sortedRequests.length} of ${requests.length} shown`}
+                </div>
+              </div>
+            </div>
+          )}
           {requests.length === 0 ? (
             <div className="empty-state">
               Nothing requested yet — use "Request an asset" for PPE, a hard hat, a vest or any other kit you need.
             </div>
+          ) : sortedRequests.length === 0 ? (
+            <div className="empty-state">No request matches that search or status.</div>
           ) : (
             <div className="table-scroll">
               <table>
@@ -614,32 +669,43 @@ export default function Assets() {
                         <input
                           type="checkbox"
                           aria-label="Select all requests shown"
-                          disabled={requests.length === 0}
-                          checked={requests.length > 0 && selectedRequests.size === requests.length}
+                          /* "Shown" means shown: with a search active this
+                             must tick the filtered rows, not every request
+                             behind them, or a delete would take rows the user
+                             cannot see. */
+                          disabled={sortedRequests.length === 0}
+                          checked={sortedRequests.length > 0 && sortedRequests.every((r) => selectedRequests.has(r.id))}
                           ref={(el) => {
-                            if (el) el.indeterminate = selectedRequests.size > 0 && selectedRequests.size < requests.length;
+                            if (el) {
+                              const picked = sortedRequests.filter((r) => selectedRequests.has(r.id)).length;
+                              el.indeterminate = picked > 0 && picked < sortedRequests.length;
+                            }
                           }}
                           onChange={() =>
                             setSelectedRequests((prev) =>
-                              prev.size === requests.length ? new Set() : new Set(requests.map((r) => r.id))
+                              sortedRequests.every((r) => prev.has(r.id))
+                                ? new Set()
+                                : new Set(sortedRequests.map((r) => r.id))
                             )
                           }
                         />
                       </th>
                     )}
-                    {isHr && <th>Employee</th>}
-                    <th>Asset</th>
-                    <th>Qty</th>
-                    <th>Reason</th>
-                    <th>Needed by</th>
-                    <th>Requested</th>
-                    <th>Status</th>
-                    <th>Decision note</th>
+                    {isHr && (
+                      <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleRequestSort} arrow={requestArrow} style={{ minWidth: 150 }} />
+                    )}
+                    <SortTh label="Asset" sortKey="asset_type" toggleSort={toggleRequestSort} arrow={requestArrow} style={{ minWidth: 160 }} />
+                    <SortTh label="Qty" sortKey="quantity" toggleSort={toggleRequestSort} arrow={requestArrow} />
+                    <th className="th-plain">Reason</th>
+                    <SortTh label="Needed by" sortKey="needed_by" toggleSort={toggleRequestSort} arrow={requestArrow} style={{ minWidth: 110 }} />
+                    <SortTh label="Requested" sortKey="created_at" toggleSort={toggleRequestSort} arrow={requestArrow} style={{ minWidth: 110 }} />
+                    <SortTh label="Status" sortKey="status" toggleSort={toggleRequestSort} arrow={requestArrow} />
+                    <th className="th-plain">Decision note</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {requests.map((r) => (
+                  {sortedRequests.map((r) => (
                     <tr key={r.id} className={selectedRequests.has(r.id) ? "row-selected" : undefined}>
                       {isHr && (
                         <td>
