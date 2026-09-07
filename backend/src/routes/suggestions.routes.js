@@ -79,28 +79,49 @@ router.get(
   "/suppliers",
   requireAuth,
   asyncHandler(async (req, res) => {
+    // Every address and TIN recorded against each supplier, not just the most
+    // recent one.
+    //
+    // Taking the newest silently was wrong for any supplier trading from more
+    // than one place, and this data has one: "Karinderya" is the ordinary word
+    // for a small eatery, and there are two of them — Batangas and Taytay
+    // Rizal. Typing the name filled Taytay in whatever the receipt said, so a
+    // meal bought in Batangas got stamped with the wrong address unless
+    // somebody noticed and retyped it.
+    //
+    // The folding ignores punctuation too, so "Toyota Shaw Inc" and "Toyota
+    // Shaw Inc." are one supplier rather than two profiles auto-filling
+    // slightly different versions of the same address.
     const rows = await db
       .prepare(
-        `SELECT (array_agg(btrim(supplier_name) ORDER BY id DESC))[1] AS name,
-                (array_agg(btrim(supplier_address) ORDER BY id DESC)
-                   FILTER (WHERE btrim(COALESCE(supplier_address, '')) <> ''))[1] AS address,
-                (array_agg(btrim(supplier_tin) ORDER BY id DESC)
-                   FILTER (WHERE btrim(COALESCE(supplier_tin, '')) <> ''))[1] AS tin,
-                COUNT(*)::int AS uses
-         FROM expense_items
-         WHERE btrim(COALESCE(supplier_name, '')) <> ''
-         -- Folded case, so "NA" and "Na" are one supplier rather than two
-         -- competing profiles. The most recently used spelling is the one
-         -- offered, and the newest non-blank address and TIN win independently:
-         -- a receipt entered without a TIN must not blank out a known one.
-         GROUP BY lower(btrim(supplier_name))
-         ORDER BY COUNT(*) DESC, 1 ASC
+        `SELECT (array_agg(supplier_name ORDER BY uses DESC, last_id DESC))[1] AS name,
+                SUM(uses)::int AS uses,
+                json_agg(json_build_object('address', address, 'tin', tin, 'uses', uses)
+                         ORDER BY uses DESC, last_id DESC) AS profiles
+         FROM (
+           SELECT btrim(supplier_name) AS supplier_name,
+                  btrim(COALESCE(supplier_address, '')) AS address,
+                  btrim(COALESCE(supplier_tin, '')) AS tin,
+                  COUNT(*)::int AS uses,
+                  MAX(id) AS last_id
+           FROM expense_items
+           WHERE btrim(COALESCE(supplier_name, '')) <> ''
+           GROUP BY 1, 2, 3
+         ) profile
+         GROUP BY regexp_replace(lower(supplier_name), '[^a-z0-9]', '', 'g')
+         ORDER BY SUM(uses) DESC, 1 ASC
          LIMIT 300`
       )
       .all();
 
     res.json(
-      rows.map((r) => ({ name: r.name, address: r.address || "", tin: r.tin || "", uses: r.uses }))
+      rows.map((r) => {
+        const profiles = (r.profiles || []).filter((pf) => pf.address || pf.tin);
+        // address and tin stay on the response as the most-used profile: they
+        // are what the form auto-fills, and what the previous build reads.
+        const top = profiles[0] || { address: "", tin: "" };
+        return { name: r.name, address: top.address || "", tin: top.tin || "", uses: r.uses, profiles };
+      })
     );
   })
 );

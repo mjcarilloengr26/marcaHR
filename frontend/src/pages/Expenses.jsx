@@ -105,13 +105,22 @@ export default function Expenses() {
   // empty or still holds what a previous auto-fill put there — silently
   // overwriting an address someone had corrected would be worse than not
   // filling it at all.
+  // Matched on letters and digits only, so a trailing full stop or a stray
+  // space still finds the supplier — "Toyota Shaw Inc" and "Toyota Shaw Inc."
+  // were two profiles filling in slightly different versions of one address.
+  const foldName = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const knownSupplier = (name) => suppliers.find((sup) => foldName(sup.name) === foldName(name));
+
   const setLineSupplier = (key, name) => {
-    const match = suppliers.find((sup) => (sup.name || "").trim().toLowerCase() === name.trim().toLowerCase());
+    const match = knownSupplier(name);
     setLines((ls) =>
       ls.map((l) => {
         if (l.key !== key) return l;
         const next = { ...l, supplier_name: name };
         if (!match) return next;
+        // The most-used address and TIN, filled only where the field is empty
+        // or still holds what a previous auto-fill wrote — an address someone
+        // corrected by hand is left exactly as it was.
         if (!l.supplier_address.trim() || l.supplier_address === l._filledAddress) {
           next.supplier_address = match.address || "";
         }
@@ -120,6 +129,27 @@ export default function Expenses() {
         }
         next._filledAddress = next.supplier_address;
         next._filledTin = next.supplier_tin;
+        return next;
+      })
+    );
+  };
+
+  // Choosing one of a supplier's other addresses brings its own TIN with it.
+  // A supplier can genuinely trade from several places — this data has two
+  // eateries both called "Karinderya", in Batangas and in Taytay Rizal — so
+  // the addresses are offered rather than one being picked silently.
+  const setLineAddress = (key, address) => {
+    setLines((ls) =>
+      ls.map((l) => {
+        if (l.key !== key) return l;
+        const next = { ...l, supplier_address: address, _filledAddress: address };
+        const profile = knownSupplier(l.supplier_name)?.profiles?.find(
+          (pf) => (pf.address || "").trim().toLowerCase() === address.trim().toLowerCase()
+        );
+        if (profile && (!l.supplier_tin.trim() || l.supplier_tin === l._filledTin)) {
+          next.supplier_tin = profile.tin || "";
+          next._filledTin = next.supplier_tin;
+        }
         return next;
       })
     );
@@ -698,8 +728,11 @@ export default function Expenses() {
                     <label>Supplier address</label>
                     <SuggestInput
                       field="supplier_address"
+                      options={
+                        knownSupplier(l.supplier_name)?.profiles?.map((pf) => pf.address).filter(Boolean)
+                      }
                       value={l.supplier_address}
-                      onChange={(e) => setLine(l.key, { supplier_address: e.target.value })}
+                      onChange={(e) => setLineAddress(l.key, e.target.value)}
                       required
                       disabled={l.no_receipt}
                     />
