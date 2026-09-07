@@ -51,10 +51,10 @@ const blankLine = () => ({
   // to be enterable — a printed receipt is the only evidence behind the claim,
   // and its supplier details are what makes the claim auditable.
   receipt_ref: "",
+  no_receipt: false,
   supplier_name: "",
   supplier_address: "",
   supplier_tin: "",
-  showDetails: false,
 });
 
 const EMPTY_FORM = { expense_type: "", cash_advance_amount: "", cost_center: "", notes: "", cash_advance_id: "" };
@@ -124,6 +124,27 @@ export default function Expenses() {
       })
     );
   };
+
+  // "No receipt" writes an explicit N/A into the three supplier fields rather
+  // than leaving them blank. Blank cannot be told apart from "nobody bothered";
+  // N/A says a receipt does not exist for this line, which is a real and common
+  // answer — a jeepney fare has no official receipt.
+  const setNoReceipt = (key, on) =>
+    setLines((ls) =>
+      ls.map((l) =>
+        l.key !== key
+          ? l
+          : {
+              ...l,
+              no_receipt: on,
+              supplier_name: on ? "N/A" : l.supplier_name === "N/A" ? "" : l.supplier_name,
+              supplier_address: on ? "N/A" : l.supplier_address === "N/A" ? "" : l.supplier_address,
+              supplier_tin: on ? "N/A" : l.supplier_tin === "N/A" ? "" : l.supplier_tin,
+              receipt_ref: on ? "" : l.receipt_ref,
+              receipt: on ? null : l.receipt,
+            }
+      )
+    );
 
   const attachToLine = async (key, file) => {
     if (!file) return;
@@ -583,181 +604,171 @@ export default function Expenses() {
             <p className="subtitle" style={{ margin: "0 0 10px" }}>
               At least one line. The report's title comes from these categories, so it is never asked for twice.
             </p>
-            <div className="table-scroll">
-              <table>
-                <thead>
-                  <tr>
-                    <th className="th-plain" style={{ minWidth: 140 }}>Date</th>
-                    <th className="th-plain" style={{ minWidth: 170 }}>Category</th>
-                    <th className="th-plain" style={{ minWidth: 160 }}>Description</th>
-                    <th className="th-plain" style={{ minWidth: 120 }}>Amount</th>
-                    <th className="th-plain" style={{ minWidth: 130 }}>Receipt</th>
-                    <th style={{ width: 44 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((l, i) => (
-                    <Fragment key={l.key}>
-                    <tr>
-                      <td>
-                        <input
-                          type="date"
-                          value={l.expense_date}
-                          onChange={(e) => setLine(l.key, { expense_date: e.target.value })}
-                          required
-                        />
-                      </td>
-                      <td>
-                        <select
-                          value={l.category}
-                          onChange={(e) =>
-                            setLine(l.key, {
-                              category: e.target.value,
-                              category_other: e.target.value === "Others" ? l.category_other : "",
-                            })
-                          }
-                          required
-                          autoFocus={i === 0}
-                        >
-                          <option value="" disabled>Select category…</option>
-                          {options.categories.map((opt) => (
-                            <option key={opt} value={opt}>{opt}</option>
-                          ))}
-                        </select>
-                        {l.category === "Others" && (
-                          <input
-                            value={l.category_other}
-                            onChange={(e) => setLine(l.key, { category_other: e.target.value })}
-                            placeholder="Say what it was"
-                            required
-                            style={{ marginTop: 6 }}
-                          />
-                        )}
-                      </td>
-                      <td>
-                        <input
-                          value={l.description}
-                          onChange={(e) => setLine(l.key, { description: e.target.value })}
-                          placeholder="What it was for"
-                        />
-                      </td>
-                      <td>
-                        <DecimalInput
-                          value={l.amount}
-                          onChange={(e) => setLine(l.key, { amount: e.target.value })}
-                          placeholder="0.00"
-                          required
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="file"
-                          accept="image/*,application/pdf"
-                          style={{ display: "none" }}
-                          id={`line-receipt-${l.key}`}
-                          onChange={(e) => attachToLine(l.key, e.target.files?.[0])}
-                        />
-                        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <label
-                            htmlFor={`line-receipt-${l.key}`}
-                            className={`btn btn-sm ${l.receipt ? "" : "btn-secondary"}`}
-                            style={{ cursor: "pointer", display: "inline-block" }}
-                            title={l.receipt?.name || "Attach a photo or PDF"}
-                          >
-                            {l.receipt ? "Attached" : "Attach"}
-                          </label>
-                          {/* Marked when anything is filled in, so a collapsed
-                              row still says whether it carries receipt details. */}
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-secondary"
-                            onClick={() => setLine(l.key, { showDetails: !l.showDetails })}
-                            title="Receipt number, supplier, address and TIN"
-                          >
-                            {l.supplier_name || l.supplier_tin || l.receipt_ref ? "Details ✓" : "Details"}
-                          </button>
-                        </div>
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="btn btn-sm btn-danger"
-                          onClick={() => dropLine(l.key)}
-                          disabled={lines.length === 1}
-                          title={lines.length === 1 ? "A report needs at least one line" : "Remove this line"}
-                        >
-                          ×
-                        </button>
-                      </td>
-                    </tr>
-                    {l.showDetails && (
-                      <tr key={`${l.key}-details`}>
-                        {/* Receipt metadata lives under its own line rather than
-                            in four more columns: the table already carries six
-                            and a receipt's supplier is not something you scan
-                            across rows, it is something you fill in once for
-                            the line you are looking at. Optional — a great many
-                            legitimate expenses have no official receipt. */}
-                        <td colSpan={6} style={{ paddingTop: 0 }}>
-                          <div className="grid grid-2" style={{ gap: 10, padding: "2px 0 10px" }}>
-                            <div className="form-row">
-                              <label>Receipt #</label>
-                              <input
-                                value={l.receipt_ref}
-                                onChange={(e) => setLine(l.key, { receipt_ref: e.target.value })}
-                                placeholder="As printed on the receipt"
-                              />
-                            </div>
-                            <div className="form-row">
-                              <label>Supplier / company</label>
-                              <SuggestInput
-                                field="supplier_name"
-                                options={suppliers.map((sup) => sup.name)}
-                                value={l.supplier_name}
-                                onChange={(e) => setLineSupplier(l.key, e.target.value)}
-                                placeholder="Who was paid"
-                              />
-                            </div>
-                            <div className="form-row">
-                              <label>Supplier address</label>
-                              <SuggestInput
-                                field="supplier_address"
-                                value={l.supplier_address}
-                                onChange={(e) => setLine(l.key, { supplier_address: e.target.value })}
-                              />
-                            </div>
-                            <div className="form-row">
-                              <label>Supplier TIN</label>
-                              <SuggestInput
-                                field="supplier_tin"
-                                value={l.supplier_tin}
-                                onChange={(e) => setLine(l.key, { supplier_tin: e.target.value })}
-                                placeholder="000-000-000-000"
-                              />
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
+
+            {lines.map((l, i) => (
+              <div key={l.key} className="card" style={{ marginBottom: 10, padding: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <strong style={{ fontSize: 13 }}>Line {i + 1}</strong>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-danger"
+                    onClick={() => dropLine(l.key)}
+                    disabled={lines.length === 1}
+                    title={lines.length === 1 ? "A report needs at least one line" : "Remove this line"}
+                  >
+                    Remove
+                  </button>
+                </div>
+
+                <div className="grid grid-4">
+                  <div className="form-row">
+                    <label>Date</label>
+                    <input
+                      type="date"
+                      value={l.expense_date}
+                      onChange={(e) => setLine(l.key, { expense_date: e.target.value })}
+                      required
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Category</label>
+                    <select
+                      value={l.category}
+                      onChange={(e) =>
+                        setLine(l.key, {
+                          category: e.target.value,
+                          category_other: e.target.value === "Others" ? l.category_other : "",
+                        })
+                      }
+                      required
+                      autoFocus={i === 0}
+                    >
+                      <option value="" disabled>Select category…</option>
+                      {options.categories.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                    {l.category === "Others" && (
+                      <input
+                        value={l.category_other}
+                        onChange={(e) => setLine(l.key, { category_other: e.target.value })}
+                        placeholder="Say what it was"
+                        required
+                        style={{ marginTop: 6 }}
+                      />
                     )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+                  </div>
+                  <div className="form-row">
+                    <label>Description</label>
+                    <input
+                      value={l.description}
+                      onChange={(e) => setLine(l.key, { description: e.target.value })}
+                      placeholder="What it was for"
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Amount</label>
+                    <DecimalInput
+                      value={l.amount}
+                      onChange={(e) => setLine(l.key, { amount: e.target.value })}
+                      placeholder="0.00"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Receipt details sit on the line, in the open. They used to be
+                    behind a toggle and were simply never filled in, so the
+                    export printed "—" and the admin retyped supplier details
+                    off the receipt photos by hand. */}
+                <div className="grid grid-4" style={{ marginTop: 4 }}>
+                  <div className="form-row">
+                    <label>Supplier / company</label>
+                    <SuggestInput
+                      field="supplier_name"
+                      options={suppliers.map((sup) => sup.name)}
+                      value={l.supplier_name}
+                      onChange={(e) => setLineSupplier(l.key, e.target.value)}
+                      placeholder="Who was paid"
+                      required
+                      disabled={l.no_receipt}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Supplier address</label>
+                    <SuggestInput
+                      field="supplier_address"
+                      value={l.supplier_address}
+                      onChange={(e) => setLine(l.key, { supplier_address: e.target.value })}
+                      required
+                      disabled={l.no_receipt}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Supplier TIN</label>
+                    <SuggestInput
+                      field="supplier_tin"
+                      value={l.supplier_tin}
+                      onChange={(e) => setLine(l.key, { supplier_tin: e.target.value })}
+                      placeholder="000-000-000-000"
+                      required
+                      disabled={l.no_receipt}
+                    />
+                  </div>
+                  <div className="form-row">
+                    <label>Receipt #</label>
+                    <input
+                      value={l.receipt_ref}
+                      onChange={(e) => setLine(l.key, { receipt_ref: e.target.value })}
+                      placeholder="As printed"
+                      disabled={l.no_receipt}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 8, flexWrap: "wrap" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={l.no_receipt}
+                      onChange={(e) => setNoReceipt(l.key, e.target.checked)}
+                      style={{ width: "auto" }}
+                    />
+                    No receipt for this line
+                  </label>
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    style={{ display: "none" }}
+                    id={`line-receipt-${l.key}`}
+                    onChange={(e) => attachToLine(l.key, e.target.files?.[0])}
+                  />
+                  <label
+                    htmlFor={`line-receipt-${l.key}`}
+                    className={`btn btn-sm ${l.receipt ? "" : "btn-secondary"}`}
+                    style={{ cursor: l.no_receipt ? "not-allowed" : "pointer", opacity: l.no_receipt ? 0.5 : 1 }}
+                    title={l.receipt?.name || "Attach a photo or PDF of the receipt"}
+                  >
+                    {l.receipt ? `Attached · ${l.receipt.name}` : "Attach receipt"}
+                  </label>
+                </div>
+              </div>
+            ))}
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
               <button type="button" className="btn btn-secondary btn-sm" onClick={addLine}>
                 + Add line
               </button>
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 20, fontWeight: 700 }}>{money(lineTotal)}</div>
                 {/* The reckoning shown while it is still being typed, which the
-                    two-modal flow could not do: the lines did not exist yet. */}
+                    two-modal flow could not do: the lines did not exist yet.
+                    Measured against what is *left* on the advance, not its
+                    original amount — other reports may already have drawn on
+                    it, and comparing to the gross figure told somebody they
+                    were inside an advance that had nothing left in it. */}
                 <div className="subtitle" style={{ margin: 0, fontSize: 12 }}>
                   {lines.length} line{lines.length === 1 ? "" : "s"}
-                  {/* Measured against what is *left* on the advance, not its
-                      original amount. Other reports may already have drawn on
-                      it, and comparing to the gross figure told somebody they
-                      were inside an advance that had nothing left in it. */}
                   {selectedAdvance
                     ? lineTotal <= advanceLeft
                       ? ` · ${money(advanceLeft - lineTotal)} would remain unspent on ${selectedAdvance.reference}`
@@ -766,6 +777,7 @@ export default function Expenses() {
                 </div>
               </div>
             </div>
+
             <div className="form-row" style={{ marginTop: 14 }}>
               <label>Notes</label>
               <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />

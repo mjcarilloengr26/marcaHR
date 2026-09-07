@@ -379,6 +379,7 @@ router.get(
       .prepare(
         `SELECT ei.expense_date, ei.category, ei.description, ei.amount,
                 ei.supplier_name, ei.supplier_address, ei.supplier_tin, ei.receipt_ref,
+                (ei.receipt_data IS NOT NULL) AS has_receipt,
                 er.id AS report_id, er.title, er.expense_type, er.cost_center, er.status,
                 (e.first_name || ' ' || e.last_name) AS employee_name
          FROM expense_items ei
@@ -454,7 +455,7 @@ router.get(
       [
         { header: "Expense Date", key: "expense_date", width: 14 },
         { header: "Employee", key: "employee_name", width: 24 },
-        { header: "Report Title / Purpose", key: "title", width: 22 },
+        { header: "Report Title", key: "title", width: 22 },
         { header: "Expenses Type", key: "expense_type", width: 18 },
         { header: "Cost Center", key: "cost_center", width: 16 },
         { header: "Category", key: "category", width: 18 },
@@ -463,6 +464,9 @@ router.get(
         { header: "Supplier Address", key: "supplier_address", width: 32 },
         { header: "Supplier TIN", key: "supplier_tin", width: 16 },
         { header: "Receipt #", key: "receipt_ref", width: 14 },
+        // Whether a photo or PDF is actually attached, which the receipt
+        // number alone does not say — a number can be typed from memory.
+        { header: "Proof Attached", key: "has_receipt", width: 15 },
         { header: "Amount", key: "amount", width: 14 },
         { header: "Report Status", key: "status", width: 13 },
       ],
@@ -472,10 +476,14 @@ router.get(
         cost_center: it.cost_center || "—",
         category: it.category || "—",
         description: it.description || "—",
+        // Blank only survives on rows filed before supplier details were
+        // required; anything entered since says either the supplier or an
+        // explicit N/A.
         supplier_name: it.supplier_name || "—",
         supplier_address: it.supplier_address || "—",
         supplier_tin: it.supplier_tin || "—",
         receipt_ref: it.receipt_ref || "—",
+        has_receipt: it.has_receipt ? "Yes" : "No",
       }))
     );
 

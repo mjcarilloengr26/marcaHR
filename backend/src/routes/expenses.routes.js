@@ -55,6 +55,35 @@ function shapeTotals(report, total_expenses, extra = {}) {
   };
 }
 
+// Who was paid, where they are, and their TIN. Mandatory on every line, with
+// one deliberate escape.
+//
+// The export already carried these three columns and they came out as "—",
+// because nothing ever made anyone fill them in — so the admin retyped supplier
+// details by hand off the receipt photos when preparing a report. Requiring
+// them at entry is the only place that can be fixed: the person holding the
+// receipt is the only one who can read it.
+//
+// The escape is "N/A", which the form fills in when a line genuinely has no
+// receipt. A great many real expenses have none, and forcing an invention
+// would be worse than an honest blank — but it has to be an explicit N/A
+// rather than an empty box, so a reader can tell "no receipt exists" apart
+// from "nobody bothered".
+const NO_RECEIPT = "N/A";
+
+function resolveSupplier(raw, where) {
+  const out = {};
+  for (const field of ["supplier_name", "supplier_address", "supplier_tin"]) {
+    const v = String(raw?.[field] ?? "").trim();
+    if (!v) {
+      const label = field.replace("supplier_", "").replace("tin", "TIN");
+      return { error: `${where}: give the supplier ${label}, or mark the line as having no receipt` };
+    }
+    out[field] = v;
+  }
+  return out;
+}
+
 // The report's title is derived from what is on it, never typed.
 //
 // It used to be its own dropdown drawn from the same vocabulary as the line
@@ -296,6 +325,8 @@ router.post(
       } catch (err) {
         return res.status(400).json({ error: `${where}: ${err.message}` });
       }
+      const supplier = resolveSupplier(raw, where);
+      if (supplier.error) return res.status(400).json({ error: supplier.error });
       lines.push({
         expense_date,
         category: categoryChoice.value,
@@ -303,9 +334,7 @@ router.post(
         amount,
         receipt_ref: String(raw?.receipt_ref || "").trim() || null,
         receipt,
-        supplier_name: String(raw?.supplier_name || "").trim() || null,
-        supplier_address: String(raw?.supplier_address || "").trim() || null,
-        supplier_tin: String(raw?.supplier_tin || "").trim() || null,
+        ...supplier,
       });
     }
 
