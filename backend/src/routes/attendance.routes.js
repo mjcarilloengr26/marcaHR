@@ -145,6 +145,17 @@ async function checkGeofence(loc, employeeId) {
 // has_clock_out_photo let the UI show a "view photo" affordance that fetches
 // the actual image lazily, only for the one record someone actually opens,
 // via GET /:id/photo below.
+// The same list without the join alias, for the endpoints that return the one
+// record the caller just created or changed. These used SELECT *, so clocking
+// in echoed the 124KB photo straight back to the phone that had just uploaded
+// it, and "today's attendance" carried both photos on every page load. The
+// table is 30MB of base64 across 131 rows; none of it belongs in these
+// responses.
+const ROW_COLUMNS = `id, employee_id, date, status,
+  clock_in, clock_in_lat, clock_in_lng, clock_in_accuracy, clock_in_distance_m,
+  clock_out, clock_out_lat, clock_out_lng, clock_out_accuracy, clock_out_distance_m,
+  note, (clock_in_photo IS NOT NULL) AS has_clock_in_photo, (clock_out_photo IS NOT NULL) AS has_clock_out_photo`;
+
 const LIST_COLUMNS = `a.id, a.employee_id, a.date, a.status,
   a.clock_in, a.clock_in_lat, a.clock_in_lng, a.clock_in_accuracy, a.clock_in_distance_m,
   a.clock_out, a.clock_out_lat, a.clock_out_lng, a.clock_out_accuracy, a.clock_out_distance_m,
@@ -286,7 +297,7 @@ router.post(
        clock_in_photo = excluded.clock_in_photo`
       )
       .run(req.user.employee_id, today, now, loc.lat, loc.lng, loc.accuracy, loc.distance_m, photo);
-    res.json(await db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND date = ?").get(req.user.employee_id, today));
+    res.json(await db.prepare(`SELECT ${ROW_COLUMNS} FROM attendance WHERE employee_id = ? AND date = ?`).get(req.user.employee_id, today));
   })
 );
 
@@ -297,7 +308,9 @@ router.post(
     if (!req.user.employee_id) return res.status(400).json({ error: "No employee profile linked to this user" });
     const today = (await localToday());
     const now = (await localNow());
-    const record = await db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND date = ?").get(req.user.employee_id, today);
+    // Only the id is needed to update the row; the photos are the whole reason
+    // this must not be a SELECT *.
+    const record = await db.prepare("SELECT id FROM attendance WHERE employee_id = ? AND date = ?").get(req.user.employee_id, today);
     if (!record) return res.status(400).json({ error: "You have not clocked in today" });
     const loc = await parseLocation(req.body, req.user.employee_id);
     const geofenceError = await checkGeofence(loc, req.user.employee_id);
@@ -309,7 +322,7 @@ router.post(
      clock_out_accuracy = ?, clock_out_distance_m = ?, clock_out_photo = ? WHERE id = ?`
       )
       .run(now, loc.lat, loc.lng, loc.accuracy, loc.distance_m, photo, record.id);
-    res.json(await db.prepare("SELECT * FROM attendance WHERE id = ?").get(record.id));
+    res.json(await db.prepare(`SELECT ${ROW_COLUMNS} FROM attendance WHERE id = ?`).get(record.id));
   })
 );
 
@@ -330,7 +343,7 @@ router.post(
        clock_out = excluded.clock_out, note = excluded.note`
       )
       .run(employee_id, date, status || "present", clock_in || null, clock_out || null, note || null);
-    res.status(201).json(await db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND date = ?").get(employee_id, date));
+    res.status(201).json(await db.prepare(`SELECT ${ROW_COLUMNS} FROM attendance WHERE employee_id = ? AND date = ?`).get(employee_id, date));
   })
 );
 

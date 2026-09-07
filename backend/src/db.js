@@ -952,6 +952,13 @@ async function ensureCashAdvanceLink() {
     "ALTER TABLE expense_reports ADD COLUMN IF NOT EXISTS cash_advance_id INTEGER REFERENCES cash_advances(id) ON DELETE SET NULL"
   );
   await pool.query("CREATE INDEX IF NOT EXISTS idx_expense_reports_advance ON expense_reports(cash_advance_id)");
+  // Postgres does not index a foreign key just because it is one, and every
+  // expense figure in the app joins or groups expense_items by report_id: the
+  // list totals, the category split, the advance position, the export, the
+  // business review. At 25 items the sequential scan costs nothing measurable
+  // — this is not why anything is slow today — but it is the one table here
+  // that grows with every receipt anybody files.
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_expense_items_report ON expense_items(report_id)");
 }
 
 async function ensureAssetQuantity() {
