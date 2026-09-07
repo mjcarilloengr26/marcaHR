@@ -37,6 +37,7 @@ const { router: appSettingsRoutes } = require("./routes/appsettings.routes");
 const exchangeRateRoutes = require("./routes/exchangerate.routes");
 
 const app = express();
+const STARTED_AT = new Date().toISOString();
 // Restricted to the front ends that are meant to call this API. Left open
 // when CORS_ORIGIN is unset so a fresh clone still runs locally without
 // configuration — but a deployed install should always set it, and says so
@@ -116,7 +117,18 @@ app.use("/api/nav-order", navOrderRoutes);
 app.use("/api/app-settings", appSettingsRoutes);
 app.use("/api/exchange-rate", exchangeRateRoutes);
 
-app.get("/api/health", (req, res) => res.json({ ok: true }));
+// Reports which build is actually answering. Unauthenticated on purpose: it
+// carries no data, only the commit, and without it there is no way from
+// outside to tell whether a push has been deployed — which cost real time
+// today, twice, guessing whether Render had picked up a commit.
+// RENDER_GIT_COMMIT is set by Render itself; locally it is simply absent.
+app.get("/api/health", (req, res) =>
+  res.json({
+    ok: true,
+    commit: (process.env.RENDER_GIT_COMMIT || "local").slice(0, 7),
+    startedAt: STARTED_AT,
+  })
+);
 
 app.use((err, req, res, next) => {
   console.error(err);
