@@ -20,16 +20,29 @@ import DecimalInput from "../components/DecimalInput";
 // advance, and it is the same figure for every report drawing on it. Showing
 // "advance minus this report" instead made three of Laiza's claims against one
 // 2,000 advance read as 4,102 owed.
-function balanceLabel(report, money) {
+// Split into the figure and a note beneath it, the same shape as the Cash
+// advance cell alongside — the whole sentence on one line wrapped mid-reference
+// and made two columns that carry the same kind of information look unrelated.
+function balanceParts(report, money) {
   if (!report.advance_reference) {
-    if (report.balance > 0) return `${money(report.balance)} due to company`;
-    if (report.balance < 0) return `${money(-report.balance)} due to employee`;
-    return money(0);
+    if (report.balance > 0) return { amount: money(report.balance), note: "due to company" };
+    if (report.balance < 0) return { amount: money(-report.balance), note: "due to employee" };
+    return { amount: money(0), note: "settled" };
   }
   const left = Number(report.advance_outstanding) || 0;
-  if (left > 0) return `${money(left)} unspent on ${report.advance_reference}`;
-  if (left < 0) return `${money(-left)} over ${report.advance_reference} — due to employee`;
-  return `${report.advance_reference} fully liquidated`;
+  if (left > 0) return { amount: money(left), note: `unspent on ${report.advance_reference}` };
+  if (left < 0) return { amount: money(-left), note: `over ${report.advance_reference} — due to employee` };
+  return { amount: money(0), note: `${report.advance_reference} fully liquidated` };
+}
+
+function BalanceCell({ report, money }) {
+  const { amount, note } = balanceParts(report, money);
+  return (
+    <>
+      <span className="col-nowrap">{amount}</span>
+      <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>{note}</div>
+    </>
+  );
 }
 
 // One dialog creates the report and its lines together.
@@ -461,18 +474,18 @@ export default function Expenses() {
                 </th>
               )}
               {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
-              <SortTh label="Type" sortKey="expense_type" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Type" sortKey="expense_type" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 110 }} />
+              <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 150 }} />
               {/* Not sortable: a report has several categories, so there is no
                   single value to sort a row by. th-plain keeps it the same
                   colour as the sortable headings either way. */}
               <th className="th-plain">Category</th>
-              <th className="th-plain">Cost center</th>
-              <SortTh label="Cash advance" sortKey="cash_advance_amount" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Expenses" sortKey="total_expenses" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Balance" sortKey="balance" toggleSort={toggleSort} arrow={arrow} />
+              <th className="th-plain" style={{ minWidth: 130 }}>Cost center</th>
+              <SortTh label="Cash advance" sortKey="cash_advance_amount" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 130 }} />
+              <SortTh label="Expenses" sortKey="total_expenses" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 100 }} />
+              <SortTh label="Balance" sortKey="balance" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 175 }} />
               <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Date created" sortKey="created_at" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Date created" sortKey="created_at" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 110 }} />
               <th></th>
             </tr>
           </thead>
@@ -516,7 +529,7 @@ export default function Expenses() {
                   {r.advance_reference ? (
                     <>
                       {money(r.advance_amount)}
-                      <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>from {r.advance_reference}</div>
+                      <div className="subtitle col-nowrap" style={{ fontSize: 11, margin: 0 }}>from {r.advance_reference}</div>
                     </>
                   ) : (
                     money(r.cash_advance_amount)
@@ -524,7 +537,7 @@ export default function Expenses() {
                 </td>
                 <td>{money(r.total_expenses)}</td>
                 <td>
-                  {balanceLabel(r, money)}
+                  <BalanceCell report={r} money={money} />
                 </td>
                 <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
                 {/* Stored as UTC "YYYY-MM-DD HH:MM:SS"; only the day is useful
@@ -1117,7 +1130,7 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
               <div>
                 <strong>Balance</strong>
                 <div>
-                  {balanceLabel(report, money)}
+                  <BalanceCell report={report} money={money} />
                 </div>
               </div>
               {report.notes && <div><strong>Notes</strong><div>{report.notes}</div></div>}
