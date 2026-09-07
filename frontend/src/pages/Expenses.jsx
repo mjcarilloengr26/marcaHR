@@ -475,7 +475,13 @@ export default function Expenses() {
               )}
               {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
               <SortTh label="Type" sortKey="expense_type" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 110 }} />
-              <SortTh label="Title" sortKey="title" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 150 }} />
+              {/* The Title column is gone. The title is derived from the line
+                  categories now, so it could only ever restate the Category
+                  column beside it — which shows the same words and the amounts
+                  with them, and shows all of them where a report spans several
+                  rather than "Meals + 2 more". The field itself stays: it
+                  names the report in notifications, in the search and as the
+                  heading when a row is opened. */}
               {/* Not sortable: a report has several categories, so there is no
                   single value to sort a row by. th-plain keeps it the same
                   colour as the sortable headings either way. */}
@@ -504,7 +510,6 @@ export default function Expenses() {
                 )}
                 {isHr && <td>{r.employee_name}</td>}
                 <td>{r.expense_type || "—"}</td>
-                <td>{r.title}</td>
                 {/* What the report was actually spent on, biggest first. A
                     report is 1.7 categories on average and four at most in the
                     live data, so the whole split fits without truncation. */}

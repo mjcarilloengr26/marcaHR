@@ -434,8 +434,15 @@ router.get(
     addSheet(
       "Detail",
       [
+        // The report id, not its title. Title is derived from the line
+        // categories now, so it only restated the Category column — and it was
+        // the one thing identifying a report on these sheets while not
+        // actually identifying one: three of Admin_Derson2's reports are all
+        // "Utilities", which on this sheet were three rows nobody could tell
+        // apart. An id also lets the line items below be grouped back to the
+        // report they belong to.
+        { header: "Report #", key: "id", width: 10 },
         { header: "Employee", key: "employee_name", width: 24 },
-        { header: "Title / Purpose", key: "title", width: 20 },
         { header: "Expenses Type", key: "expense_type", width: 18 },
         { header: "Cost Center", key: "cost_center", width: 18 },
         { header: "Cash Advance", key: "cash_advance_amount", width: 14 },
@@ -455,8 +462,8 @@ router.get(
       "Expense Items",
       [
         { header: "Expense Date", key: "expense_date", width: 14 },
+        { header: "Report #", key: "report_id", width: 10 },
         { header: "Employee", key: "employee_name", width: 24 },
-        { header: "Report Title", key: "title", width: 22 },
         { header: "Expenses Type", key: "expense_type", width: 18 },
         { header: "Cost Center", key: "cost_center", width: 16 },
         { header: "Category", key: "category", width: 18 },
