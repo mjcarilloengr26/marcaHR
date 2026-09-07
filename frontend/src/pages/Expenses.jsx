@@ -77,6 +77,7 @@ export default function Expenses() {
   const isHr = user.role === "admin" || user.role === "hr";
   const [reports, setReports] = useState([]);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [lines, setLines] = useState([blankLine()]);
   const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -287,10 +288,15 @@ export default function Expenses() {
     setForm(EMPTY_FORM);
     setLines([blankLine()]);
     setError("");
+    setNotice("");
     setShowForm(true);
   };
 
-  const handleCreate = async (e) => {
+  // `submit` decides whether the report is filed straight away or left as a
+  // draft. Both finish here: reopening the report afterwards was the second
+  // modal coming back through the front door, which is the whole thing this
+  // dialog replaced.
+  const handleCreate = async (e, submit) => {
     e.preventDefault();
     setSaving(true);
     setError("");
@@ -319,11 +325,16 @@ export default function Expenses() {
           supplier_tin: l.supplier_tin,
         })),
       });
+      if (submit) await api.put(`/expenses/${report.id}/submit`);
       setShowForm(false);
       setForm(EMPTY_FORM);
       setLines([blankLine()]);
+      setNotice(
+        submit
+          ? `Report submitted for approval — ${money(lineTotal)} across ${lines.length} line${lines.length === 1 ? "" : "s"}.`
+          : `Draft saved — ${money(lineTotal)} across ${lines.length} line${lines.length === 1 ? "" : "s"}. Open it to submit when ready.`
+      );
       await load();
-      setOpenId(report.id);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -344,6 +355,7 @@ export default function Expenses() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+      {notice && <div className="success-banner">{notice}</div>}
 
       <div className="card" style={{ marginBottom: 16 }}>
         <input
@@ -495,7 +507,7 @@ export default function Expenses() {
 
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>
-          <form className="modal modal-wide" onClick={(e) => e.stopPropagation()} onSubmit={handleCreate}>
+          <form className="modal modal-wide" onClick={(e) => e.stopPropagation()} onSubmit={(e) => handleCreate(e, true)}>
             <h2>New liquidation / expense report</h2>
             <div className="form-row">
               <label>Expenses type</label>
@@ -762,8 +774,16 @@ export default function Expenses() {
               <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>
                 Cancel
               </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={saving}
+                onClick={(e) => handleCreate(e, false)}
+              >
+                {saving ? "Saving…" : "Save as draft"}
+              </button>
               <button type="submit" className="btn" disabled={saving}>
-                {saving ? "Saving…" : `Create report · ${money(lineTotal)}`}
+                {saving ? "Saving…" : `Submit for approval · ${money(lineTotal)}`}
               </button>
             </div>
           </form>
