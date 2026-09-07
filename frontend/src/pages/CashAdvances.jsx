@@ -277,7 +277,7 @@ ${a.employee_name} will see this.`)
                   <SortTh label="Amount" sortKey="amount" toggleSort={toggleSort} arrow={arrow} />
                   <SortTh label="Liquidated" sortKey="liquidated" toggleSort={toggleSort} arrow={arrow} />
                   <th>Returned</th>
-                  <SortTh label="Balance" sortKey="outstanding" toggleSort={toggleSort} arrow={arrow} />
+                  <SortTh label="Balance" sortKey="outstanding" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 130 }} />
                   <th>Status</th>
                   {isHr && <th></th>}
                 </tr>
@@ -312,14 +312,26 @@ ${a.employee_name} will see this.`)
                     <td className="col-nowrap">{money(a.liquidated)}</td>
                     <td className="col-nowrap">{a.returned_amount > 0 ? money(a.returned_amount) : "—"}</td>
                     {/* One signed figure read two ways: cash the employee still
-                        holds, or money the company owes them for overspending. */}
-                    <td className="col-nowrap">
+                        holds, or money the company owes them for overspending.
+                        The figure sits on its own line with the direction as a
+                        note beneath, the same shape the expense list uses — as
+                        one run of text it wrapped in a narrow column and the
+                        amount stopped being the thing you saw first. */}
+                    <td>
                       {a.fullyAccounted ? (
                         <span className="subtitle">fully accounted</span>
-                      ) : a.dueToCompany > 0 ? (
-                        <span style={{ color: "var(--warning)" }}>{money(a.dueToCompany)} due to company</span>
                       ) : (
-                        <span style={{ color: "var(--danger)" }}>{money(a.reimbursementDue)} due to employee</span>
+                        <>
+                          <span
+                            className="col-nowrap"
+                            style={{ color: a.dueToCompany > 0 ? "var(--warning)" : "var(--danger)" }}
+                          >
+                            {money(a.dueToCompany > 0 ? a.dueToCompany : a.reimbursementDue)}
+                          </span>
+                          <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>
+                            {a.dueToCompany > 0 ? "due to company" : "due to employee"}
+                          </div>
+                        </>
                       )}
                     </td>
                     <td>
