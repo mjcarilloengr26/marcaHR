@@ -55,6 +55,49 @@ function shapeTotals(report, total_expenses, extra = {}) {
   };
 }
 
+// The report's title is derived from what is on it, never typed.
+//
+// It used to be its own dropdown drawn from the same vocabulary as the line
+// categories, so the form asked the same question twice and the two answers
+// could disagree: a report titled "Maintenance" holding items categorised
+// "Car Maintenance" produced two dashboard charts with identical amounts and
+// different labels. Worse, a title is one value for a whole report while money
+// is spent per line, so a report covering several categories landed entirely
+// in one bucket — 29,954 of Meals, Transport, Laundry and fees all credited to
+// "Allowance".
+//
+// Categories are per line and therefore true, so the title now follows them.
+function deriveTitle(categories) {
+  const seen = [];
+  for (const c of categories) {
+    const v = typeof c === "string" ? c.trim() : "";
+    if (v && !seen.some((s) => s.toLowerCase() === v.toLowerCase())) seen.push(v);
+  }
+  if (seen.length === 0) return null;
+  if (seen.length === 1) return seen[0];
+  // Names the largest contributor rather than listing all of them, which would
+  // not fit a column: the count says the rest are there.
+  return `${seen[0]} + ${seen.length - 1} more`;
+}
+
+// Recomputed after any change to the lines. Without this the title is right
+// when the report is filed and silently wrong the moment a line is added,
+// edited or removed — which is exactly the drift the derivation exists to end.
+async function refreshDerivedTitle(reportId) {
+  const rows = await db
+    .prepare(
+      `SELECT category, SUM(amount) AS total FROM expense_items
+       WHERE report_id = ? AND COALESCE(TRIM(category), '') <> ''
+       GROUP BY category ORDER BY 2 DESC`
+    )
+    .all(reportId);
+  const title = deriveTitle(rows.map((r) => r.category));
+  // A report stripped back to no lines keeps whatever it last said rather than
+  // becoming blank, so the list never shows a nameless row.
+  if (title) await db.prepare("UPDATE expense_reports SET title = ? WHERE id = ?").run(title, reportId);
+  return title;
+}
+
 async function withTotals(report) {
   const totals = await db
     .prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM expense_items WHERE report_id = ?")
@@ -224,14 +267,68 @@ router.post(
     if (cc.error) return res.status(400).json({ error: cc.error });
     body.cost_center = cc.name;
 
-    const titleChoice = resolveChoice({
-      choice: body.title,
-      other: body.title_other,
-      allowed: TITLES,
-      label: "Title / purpose",
-    });
-    if (titleChoice.error) return res.status(400).json({ error: titleChoice.error });
-    const title = titleChoice.value;
+    // Lines can arrive with the report, so one dialog creates both. They stay
+    // optional: the backend ships before the frontend, and for those few
+    // minutes the old page is still posting a header on its own.
+    const rawItems = Array.isArray(body.items) ? body.items : [];
+    const lines = [];
+    for (const [i, raw] of rawItems.entries()) {
+      const where = `Line ${i + 1}`;
+      const categoryChoice = resolveChoice({
+        choice: raw?.category,
+        other: raw?.category_other,
+        allowed: CATEGORIES,
+        label: `${where} category`,
+      });
+      if (categoryChoice.error) return res.status(400).json({ error: categoryChoice.error });
+
+      const expense_date = String(raw?.expense_date || "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(expense_date)) {
+        return res.status(400).json({ error: `${where}: give the date as YYYY-MM-DD` });
+      }
+      const amount = Number(raw?.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ error: `${where}: amount must be more than zero` });
+      }
+      let receipt;
+      try {
+        receipt = parseReceipt(raw || {});
+      } catch (err) {
+        return res.status(400).json({ error: `${where}: ${err.message}` });
+      }
+      lines.push({
+        expense_date,
+        category: categoryChoice.value,
+        description: String(raw?.description || "").trim() || null,
+        amount,
+        receipt_ref: String(raw?.receipt_ref || "").trim() || null,
+        receipt,
+        supplier_name: String(raw?.supplier_name || "").trim() || null,
+        supplier_address: String(raw?.supplier_address || "").trim() || null,
+        supplier_tin: String(raw?.supplier_tin || "").trim() || null,
+      });
+    }
+
+    // Title comes from the lines when there are lines. The old title field is
+    // still honoured when a caller sends one and no lines, which is what the
+    // previous page does — and what every report already in the database was
+    // created with.
+    let title = null;
+    if (lines.length > 0) {
+      const byCategory = new Map();
+      for (const l of lines) byCategory.set(l.category, (byCategory.get(l.category) || 0) + l.amount);
+      const ordered = [...byCategory.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c);
+      title = deriveTitle(ordered);
+    } else {
+      const titleChoice = resolveChoice({
+        choice: body.title,
+        other: body.title_other,
+        allowed: TITLES,
+        label: "Title / purpose",
+      });
+      if (titleChoice.error) return res.status(400).json({ error: titleChoice.error });
+      title = titleChoice.value;
+    }
 
     // Two kinds of claim, and the difference is whether money was handed over
     // first.
@@ -257,28 +354,54 @@ router.post(
     }
     const advanceId = advance ? advance.id : null;
 
-    const info = await db
-      .prepare(
-        `INSERT INTO expense_reports (employee_id, title, expense_type, cash_advance_amount, cost_center, notes, status, cash_advance_id)
+    // One transaction: a report that exists with none of its lines is the
+    // phantom draft the merged dialog is meant to stop creating.
+    let reportId;
+    await db.transaction(async () => {
+      const info = await db
+        .prepare(
+          `INSERT INTO expense_reports (employee_id, title, expense_type, cash_advance_amount, cost_center, notes, status, cash_advance_id)
        VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)`
-      )
-      .run(
-        employee_id,
-        title,
-        expense_type || null,
-        0,
-        // body.cost_center, not the destructured copy: the check above rewrites
-        // it to the spelling the admin defined, and the copy was taken before
-        // that. Independent of the advance on purpose — one advance can fund
-        // several projects, so inheriting its cost centre would file work
-        // against the wrong one more often than the right one.
-        body.cost_center || null,
-        notes || null,
-        advanceId
-      );
+        )
+        .run(
+          employee_id,
+          title,
+          expense_type || null,
+          0,
+          // body.cost_center, not the destructured copy: the check above rewrites
+          // it to the spelling the admin defined, and the copy was taken before
+          // that. Independent of the advance on purpose — one advance can fund
+          // several projects, so inheriting its cost centre would file work
+          // against the wrong one more often than the right one.
+          body.cost_center || null,
+          notes || null,
+          advanceId
+        );
+      reportId = info.lastInsertRowid;
+
+      for (const l of lines) {
+        await db
+          .prepare(
+            `INSERT INTO expense_items (report_id, expense_date, category, description, amount, receipt_ref, receipt_name, receipt_type, receipt_data, supplier_name, supplier_address, supplier_tin)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(
+            reportId, l.expense_date, l.category, l.description, l.amount, l.receipt_ref,
+            l.receipt.name, l.receipt.type, l.receipt.data,
+            l.supplier_name, l.supplier_address, l.supplier_tin
+          );
+      }
+    })();
+
+    await logRequestEvent(req, "create_expense_report", {
+      entityType: "expense_report",
+      entityId: reportId,
+      details: { title, expense_type, cost_center: body.cost_center, lines: lines.length },
+    });
+
     res
       .status(201)
-      .json(await withTotals(await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(info.lastInsertRowid)));
+      .json(await withTotals(await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(reportId)));
   })
 );
 
@@ -381,6 +504,7 @@ router.post(
     // Without ITEM_COLUMNS this echoes the receipt straight back to the client
     // that just uploaded it, doubling the cost of every attachment for bytes
     // the caller already holds.
+    await refreshDerivedTitle(req.expenseReport.id);
     res
       .status(201)
       .json(await db.prepare(`SELECT ${ITEM_COLUMNS} FROM expense_items WHERE id = ?`).get(info.lastInsertRowid));
@@ -401,6 +525,7 @@ router.delete(
       return res.status(400).json({ error: "Only draft reports can be edited" });
     }
     await db.prepare("DELETE FROM expense_items WHERE id = ?").run(req.params.itemId);
+    await refreshDerivedTitle(item.report_id);
     res.status(204).end();
   })
 );
@@ -489,6 +614,7 @@ router.put(
       },
     });
 
+    await refreshDerivedTitle(item.report_id);
     res.json(await db.prepare(`SELECT ${ITEM_COLUMNS} FROM expense_items WHERE id = ?`).get(req.params.itemId));
   })
 );

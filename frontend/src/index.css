@@ -1015,6 +1015,11 @@ input[type="date"]::-webkit-datetime-edit-year-field {
   padding: 22px;
   box-shadow: 0 20px 50px rgba(15, 18, 25, 0.25);
 }
+/* A form carrying a line table cannot work at the standard 480px. Wide enough
+   for date, category, description, amount and a receipt button side by side,
+   and still capped to the viewport on a laptop. */
+.modal-wide { width: 940px; }
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;

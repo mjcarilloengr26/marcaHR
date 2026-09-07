@@ -33,25 +33,20 @@ const EXPENSE_TYPE_COLORS = {
   Unspecified: "#6b7280",
 };
 
-// Title/Purpose isn't a fixed small taxonomy like Expenses Type — the
-// dropdown offers ~13 presets plus arbitrary free text when "Others" is
-// picked, so slices are colored by position in this rotation (already
-// sorted by amount, largest first) rather than a per-label fixed map.
-// "Unspecified" (reports predating the dropdown) still gets the same
-// neutral gray used elsewhere for "no real category".
-const TITLE_PALETTE = [
+// Category isn't a fixed pair like Expenses Type — the list runs to two dozen
+// presets plus free text when "Others" is picked, so slices take their colour
+// by position in this rotation rather than from a per-label map. The rotation
+// is walked largest-first so the slices that matter get distinct hues before
+// it wraps.
+const CATEGORY_PALETTE = [
   "#2f6fed", "#e0930b", "#1e8e5a", "#d64550", "#8b5cf6",
   "#0891b2", "#c026d3", "#65a30d", "#b45309", "#4338ca",
   "#db2777", "#0d9488",
 ];
-function titleColor(title, index) {
-  return title === "Unspecified" ? "#6b7280" : TITLE_PALETTE[index % TITLE_PALETTE.length];
-}
-
 // Same rotation for line-item categories, with the neutral gray reserved for
 // items nobody categorised — an absence, not an identity.
 function categoryColor(label, index) {
-  return label === "Uncategorised" ? "#6b7280" : TITLE_PALETTE[index % TITLE_PALETTE.length];
+  return label === "Uncategorised" ? "#6b7280" : CATEGORY_PALETTE[index % CATEGORY_PALETTE.length];
 }
 
 // Year-to-date spend against each cost centre's allocation. The bars answer
@@ -697,7 +692,7 @@ export default function SalesDashboard() {
             <div>
               <h2>Profit &amp; Loss</h2>
               <p className="subtitle" style={{ margin: 0 }}>
-                Order revenue minus procurement, payroll, and operating expenses for {periodLabel(pnlPeriodType, pnlYear, pnlPeriodIndex)}
+                Order revenue minus procurement, payroll and expenses for {periodLabel(pnlPeriodType, pnlYear, pnlPeriodIndex)}
               </p>
             </div>
             <div className="form-inline">
@@ -869,27 +864,17 @@ export default function SalesDashboard() {
                   value: t.current,
                   color: EXPENSE_TYPE_COLORS[t.label] || EXPENSE_TYPE_COLORS.Unspecified,
                 }));
-                const byTitlePieData = expensesReport.byTitle.map((t, i) => ({
-                  label: t.label,
-                  value: t.current,
-                  color: titleColor(t.label, i),
-                }));
-                // Colour is assigned once per label from the combined
-                // totals, then reused in every section. Colouring by position
-                // within each pie would give Meals one colour under Operating
-                // and another under Project, which is precisely what makes two
-                // pies impossible to read against each other.
-                // One colour map across every pie, keyed on the label and
-                // shared by both dimensions. Utilities as a purpose and
-                // Utilities as a category are the same money, so showing it in
-                // two colours side by side undoes the comparison the split
-                // exists to make. Assigned biggest-first so the slices that
-                // matter get distinct hues before the rotation wraps.
-                // Keyed case-insensitively: the purpose "SOP" and the category
-                // "sop" are the same PHP 145,000, and giving them two colours
-                // hides the one correspondence these charts exist to show.
+                // One colour per category label, assigned once from the
+                // combined totals and reused in every section. Colouring by
+                // position within each pie would give Meals one colour under
+                // Operating Expenses and another under Project Expenses, which
+                // is exactly what makes two pies impossible to read against
+                // each other. Biggest-first, so the slices that matter get
+                // distinct hues before the rotation wraps, and keyed
+                // case-insensitively because "SOP" and "sop" are one category
+                // typed twice.
                 const labelTotals = new Map();
-                for (const r of [...(expensesReport.byTitle || []), ...(expensesReport.byCategory || [])]) {
+                for (const r of expensesReport.byCategory || []) {
                   const key = String(r.label).toLowerCase();
                   labelTotals.set(key, Math.max(labelTotals.get(key) || 0, r.current + r.previous));
                 }
@@ -901,7 +886,7 @@ export default function SalesDashboard() {
                       map.set(key, "#6b7280");
                       continue;
                     }
-                    map.set(key, TITLE_PALETTE[i % TITLE_PALETTE.length]);
+                    map.set(key, CATEGORY_PALETTE[i % CATEGORY_PALETTE.length]);
                     i += 1;
                   }
                   return (label) => map.get(String(label).toLowerCase()) || "#6b7280";
@@ -974,17 +959,24 @@ export default function SalesDashboard() {
                             )}
                           </h3>
                           <p className="subtitle" style={{ margin: 0, fontSize: 12 }}>
-                            Purpose is what each advance was raised for; category is what the money actually
-                            bought. A purpose holds several categories, so the two describe the same total
-                            different ways.
+                            What the money actually bought, taken from the line items.
                           </p>
+                          {/* There used to be a second pie and bar here, "by
+                              report purpose". It was not another view of the
+                              same money — it was the same view: identical
+                              amounts, identical shares, identical order, and
+                              only the label differing where a report titled
+                              "Maintenance" held items categorised "Car
+                              Maintenance". Purpose was also one value for a
+                              whole report while money is spent per line, so
+                              anything covering several categories landed
+                              entirely in one bucket. The title is now derived
+                              from these categories, so there is one dimension
+                              and one chart. */}
                           {section.total === 0 ? (
                             <div className="empty-state">Nothing spent under {section.type} this period.</div>
                           ) : (
-                            <>
-                              {block(`${section.type} — by report purpose`, section.byTitle, "#7c3aed", "#cbb6fa")}
-                              {block(`${section.type} — by category`, section.byCategory, "#0891b2", "#a5e4ef")}
-                            </>
+                            block(`${section.type} — by category`, section.byCategory, "#0891b2", "#a5e4ef")
                           )}
                         </div>
                       );

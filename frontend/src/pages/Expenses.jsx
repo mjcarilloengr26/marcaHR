@@ -32,7 +32,24 @@ function balanceLabel(report, money) {
   return `${report.advance_reference} fully liquidated`;
 }
 
-const EMPTY_FORM = { title: "", title_other: "", expense_type: "", cash_advance_amount: "", cost_center: "", notes: "", cash_advance_id: "" };
+// One dialog creates the report and its lines together.
+//
+// It used to take two: a first modal made an empty draft, then the report had
+// to be opened and a second modal filled in line by line. That left a report
+// in the database before it had anything on it, which is where the phantom
+// drafts came from — and the running total against the advance could not be
+// shown while filling it in, because the lines were added after the fact.
+const blankLine = () => ({
+  key: Math.random().toString(36).slice(2),
+  expense_date: new Date().toISOString().slice(0, 10),
+  category: "",
+  category_other: "",
+  description: "",
+  amount: "",
+  receipt: null,
+});
+
+const EMPTY_FORM = { expense_type: "", cash_advance_amount: "", cost_center: "", notes: "", cash_advance_id: "" };
 const EMPTY_ITEM_FORM = {
   expense_date: "",
   category: "",
@@ -53,6 +70,21 @@ export default function Expenses() {
   const [reports, setReports] = useState([]);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [lines, setLines] = useState([blankLine()]);
+  const setLine = (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const addLine = () => setLines((ls) => [...ls, blankLine()]);
+  // Never removes the last one: a report with no lines is the empty draft this
+  // dialog exists to stop creating.
+  const dropLine = (key) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.key !== key) : ls));
+  const attachToLine = async (key, file) => {
+    if (!file) return;
+    try {
+      const data = file.type.startsWith("image/") ? await compressImageFile(file, 1400, 0.8) : await readFileAsDataUrl(file);
+      setLine(key, { receipt: { name: file.name, type: file.type, data } });
+    } catch (err) {
+      setError(err.message);
+    }
+  };
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [openId, setOpenId] = useState(null);
@@ -196,22 +228,48 @@ export default function Expenses() {
       return next;
     });
 
+  const lineTotal = lines.reduce((n, l) => n + (Number(l.amount) || 0), 0);
+  const selectedAdvance = openAdvances.find((a) => String(a.id) === String(form.cash_advance_id)) || null;
+  // dueToCompany is what the employee still holds — the advance less everything
+  // already liquidated against it — which is the figure the dropdown shows as
+  // "left" and the only one this report can be measured against.
+  const advanceLeft = selectedAdvance ? Number(selectedAdvance.dueToCompany) || 0 : 0;
+
+  const openForm = () => {
+    setForm(EMPTY_FORM);
+    setLines([blankLine()]);
+    setError("");
+    setShowForm(true);
+  };
+
   const handleCreate = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     try {
       const report = await api.post("/expenses", {
-        title: form.title,
-        title_other: form.title_other,
         expense_type: form.expense_type,
         cash_advance_amount: form.cash_advance_amount ? Number(form.cash_advance_amount) : 0,
         cost_center: form.cost_center,
         notes: form.notes,
         cash_advance_id: form.cash_advance_id ? Number(form.cash_advance_id) : null,
+        // The report's title is derived from these categories server-side, so
+        // it is not sent — asking for it here is what made the form put the
+        // same question twice.
+        items: lines.map((l) => ({
+          expense_date: l.expense_date,
+          category: l.category,
+          category_other: l.category_other,
+          description: l.description,
+          amount: Number(l.amount) || 0,
+          receipt_name: l.receipt?.name,
+          receipt_type: l.receipt?.type,
+          receipt_data: l.receipt?.data,
+        })),
       });
       setShowForm(false);
       setForm(EMPTY_FORM);
+      setLines([blankLine()]);
       await load();
       setOpenId(report.id);
     } catch (err) {
@@ -228,7 +286,7 @@ export default function Expenses() {
           <h1>Liquidation &amp; Expense Reports</h1>
           <p className="subtitle">{isHr ? "Review cash advance liquidations and expense claims" : "Liquidate cash advances and submit expense claims"}</p>
         </div>
-        <button className="btn" onClick={() => setShowForm(true)}>
+        <button className="btn" onClick={openForm}>
           + New report
         </button>
       </div>
@@ -385,7 +443,7 @@ export default function Expenses() {
 
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>
-          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleCreate}>
+          <form className="modal modal-wide" onClick={(e) => e.stopPropagation()} onSubmit={handleCreate}>
             <h2>New liquidation / expense report</h2>
             <div className="form-row">
               <label>Expenses type</label>
@@ -401,31 +459,6 @@ export default function Expenses() {
                 ))}
               </select>
             </div>
-            <div className="form-row">
-              <label>Title / purpose</label>
-              <select
-                value={form.title}
-                onChange={(e) => setForm({ ...form, title: e.target.value, title_other: e.target.value === "Others" ? form.title_other : "" })}
-                required
-              >
-                <option value="" disabled>Select purpose</option>
-                {options.titles.map((opt) => (
-                  <option key={opt} value={opt}>{opt}</option>
-                ))}
-              </select>
-            </div>
-            {form.title === "Others" && (
-              <div className="form-row">
-                <label>Please specify</label>
-                <SuggestInput
-                  field="expense_title"
-                  value={form.title_other}
-                  onChange={(e) => setForm({ ...form, title_other: e.target.value })}
-                  placeholder="Describe the purpose"
-                  required
-                />
-              </div>
-            )}
             {/* Two kinds of claim. Liquidating accounts for money already
                 handed over; a reimbursement is out of pocket and needs no
                 advance — requiring one would mean nobody could claim back a
@@ -482,7 +515,131 @@ export default function Expenses() {
                 </div>
               </div>
             </div>
-            <div className="form-row">
+            <h2 style={{ fontSize: 15, marginTop: 18, marginBottom: 2 }}>Expenses</h2>
+            <p className="subtitle" style={{ margin: "0 0 10px" }}>
+              At least one line. The report's title comes from these categories, so it is never asked for twice.
+            </p>
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th className="th-plain" style={{ minWidth: 140 }}>Date</th>
+                    <th className="th-plain" style={{ minWidth: 170 }}>Category</th>
+                    <th className="th-plain" style={{ minWidth: 160 }}>Description</th>
+                    <th className="th-plain" style={{ minWidth: 120 }}>Amount</th>
+                    <th className="th-plain" style={{ minWidth: 130 }}>Receipt</th>
+                    <th style={{ width: 44 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.map((l, i) => (
+                    <tr key={l.key}>
+                      <td>
+                        <input
+                          type="date"
+                          value={l.expense_date}
+                          onChange={(e) => setLine(l.key, { expense_date: e.target.value })}
+                          required
+                        />
+                      </td>
+                      <td>
+                        <select
+                          value={l.category}
+                          onChange={(e) =>
+                            setLine(l.key, {
+                              category: e.target.value,
+                              category_other: e.target.value === "Others" ? l.category_other : "",
+                            })
+                          }
+                          required
+                          autoFocus={i === 0}
+                        >
+                          <option value="" disabled>Select category…</option>
+                          {options.categories.map((opt) => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                        {l.category === "Others" && (
+                          <input
+                            value={l.category_other}
+                            onChange={(e) => setLine(l.key, { category_other: e.target.value })}
+                            placeholder="Say what it was"
+                            required
+                            style={{ marginTop: 6 }}
+                          />
+                        )}
+                      </td>
+                      <td>
+                        <input
+                          value={l.description}
+                          onChange={(e) => setLine(l.key, { description: e.target.value })}
+                          placeholder="What it was for"
+                        />
+                      </td>
+                      <td>
+                        <DecimalInput
+                          value={l.amount}
+                          onChange={(e) => setLine(l.key, { amount: e.target.value })}
+                          placeholder="0.00"
+                          required
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="file"
+                          accept="image/*,application/pdf"
+                          style={{ display: "none" }}
+                          id={`line-receipt-${l.key}`}
+                          onChange={(e) => attachToLine(l.key, e.target.files?.[0])}
+                        />
+                        <label
+                          htmlFor={`line-receipt-${l.key}`}
+                          className={`btn btn-sm ${l.receipt ? "" : "btn-secondary"}`}
+                          style={{ cursor: "pointer", display: "inline-block" }}
+                          title={l.receipt?.name || "Attach a photo or PDF"}
+                        >
+                          {l.receipt ? "Attached" : "Attach"}
+                        </label>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-danger"
+                          onClick={() => dropLine(l.key)}
+                          disabled={lines.length === 1}
+                          title={lines.length === 1 ? "A report needs at least one line" : "Remove this line"}
+                        >
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, marginTop: 10, flexWrap: "wrap" }}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={addLine}>
+                + Add line
+              </button>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 20, fontWeight: 700 }}>{money(lineTotal)}</div>
+                {/* The reckoning shown while it is still being typed, which the
+                    two-modal flow could not do: the lines did not exist yet. */}
+                <div className="subtitle" style={{ margin: 0, fontSize: 12 }}>
+                  {lines.length} line{lines.length === 1 ? "" : "s"}
+                  {/* Measured against what is *left* on the advance, not its
+                      original amount. Other reports may already have drawn on
+                      it, and comparing to the gross figure told somebody they
+                      were inside an advance that had nothing left in it. */}
+                  {selectedAdvance
+                    ? lineTotal <= advanceLeft
+                      ? ` · ${money(advanceLeft - lineTotal)} would remain unspent on ${selectedAdvance.reference}`
+                      : ` · ${money(lineTotal - advanceLeft)} more than is left on ${selectedAdvance.reference}, due back to you`
+                    : " · claimed back from the company"}
+                </div>
+              </div>
+            </div>
+            <div className="form-row" style={{ marginTop: 14 }}>
               <label>Notes</label>
               <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
             </div>
@@ -491,7 +648,7 @@ export default function Expenses() {
                 Cancel
               </button>
               <button type="submit" className="btn" disabled={saving}>
-                {saving ? "Creating…" : "Create report"}
+                {saving ? "Saving…" : `Create report · ${money(lineTotal)}`}
               </button>
             </div>
           </form>
