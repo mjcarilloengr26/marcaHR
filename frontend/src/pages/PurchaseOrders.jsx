@@ -50,6 +50,8 @@ export default function PurchaseOrders() {
       order_date: po.order_date || "",
       expected_delivery_date: po.expected_delivery_date || "",
       notes: po.notes || "",
+      work_order_id: po.work_order_id || "",
+      project_id: po.project_id || "",
     });
     setShowForm(true);
   };
@@ -129,6 +131,7 @@ export default function PurchaseOrders() {
               <SortTh label="Vendor" sortKey="vendor_name" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Amount" sortKey="amount" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Work order" sortKey="work_order_number" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Project" sortKey="project_code" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Order date" sortKey="order_date" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Expected delivery" sortKey="expected_delivery_date" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
@@ -150,6 +153,16 @@ export default function PurchaseOrders() {
                       <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>
                         {po.work_order_title}
                       </div>
+                    </>
+                  ) : (
+                    <span className="subtitle" style={{ margin: 0 }}>Not linked</span>
+                  )}
+                </td>
+                <td>
+                  {po.project_code ? (
+                    <>
+                      <Link to="/projects" className="location-link">{po.project_code}</Link>
+                      <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>{po.project_name}</div>
                     </>
                   ) : (
                     <span className="subtitle" style={{ margin: 0 }}>Not linked</span>

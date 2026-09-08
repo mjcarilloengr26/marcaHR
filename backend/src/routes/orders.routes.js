@@ -10,12 +10,14 @@ const router = express.Router();
 const ONE = `
   SELECT o.*, (e.first_name || ' ' || e.last_name) AS owner_name, d.title AS deal_title,
          (c.first_name || ' ' || c.last_name) AS created_by_name,
-         (s.first_name || ' ' || s.last_name) AS status_changed_by_name
+         (s.first_name || ' ' || s.last_name) AS status_changed_by_name,
+         pr.code AS project_code, pr.name AS project_name
   FROM orders o
   LEFT JOIN employees e ON e.id = o.owner_id
   LEFT JOIN deals d ON d.id = o.deal_id
   LEFT JOIN employees c ON c.id = o.created_by
   LEFT JOIN employees s ON s.id = o.status_changed_by
+  LEFT JOIN projects pr ON pr.id = o.project_id
   WHERE o.id = ?`;
 
 const nowStamp = () => new Date().toISOString().slice(0, 19).replace("T", " ");
@@ -28,12 +30,14 @@ router.get(
     const { status, owner_id } = req.query;
     let sql = `SELECT o.*, (e.first_name || ' ' || e.last_name) AS owner_name, d.title AS deal_title,
              (c.first_name || ' ' || c.last_name) AS created_by_name,
-             (s.first_name || ' ' || s.last_name) AS status_changed_by_name
+             (s.first_name || ' ' || s.last_name) AS status_changed_by_name,
+             pr.code AS project_code, pr.name AS project_name
              FROM orders o
              LEFT JOIN employees e ON e.id = o.owner_id
              LEFT JOIN deals d ON d.id = o.deal_id
              LEFT JOIN employees c ON c.id = o.created_by
              LEFT JOIN employees s ON s.id = o.status_changed_by
+             LEFT JOIN projects pr ON pr.id = o.project_id
              WHERE 1=1`;
     const params = [];
     if (status) {
@@ -54,14 +58,14 @@ router.post(
   requireAuth,
   requireRole("admin", "hr"),
   asyncHandler(async (req, res) => {
-    const { order_number, customer_name, amount, status, owner_id, order_date, notes } = req.body || {};
+    const { order_number, customer_name, amount, status, owner_id, order_date, notes, project_id } = req.body || {};
     if (!order_number || !customer_name) return res.status(400).json({ error: "order_number and customer_name are required" });
     try {
       const info = await db
         .prepare(
           `INSERT INTO orders (order_number, customer_name, amount, status, owner_id, order_date, notes,
-                              created_by, status_changed_by, status_changed_at)
-         VALUES (?, ?, ?, ?, ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?)`
+                              project_id, created_by, status_changed_by, status_changed_at)
+         VALUES (?, ?, ?, ?, ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?, ?)`
         )
         .run(
           order_number,
@@ -71,6 +75,10 @@ router.post(
           owner_id || null,
           order_date || null,
           notes || null,
+          // The job the order belongs to. Billing an order copies this onto the
+          // invoice it raises, so the project is chosen once on the sale rather
+          // than re-picked on every invoice against it.
+          project_id || null,
           req.user.employee_id || null,
           req.user.employee_id || null,
           nowStamp()
@@ -89,7 +97,7 @@ router.put(
   asyncHandler(async (req, res) => {
     const existing = await db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
     if (!existing) return res.status(404).json({ error: "Order not found" });
-    const { order_number, customer_name, amount, status, owner_id, order_date, notes } = req.body || {};
+    const { order_number, customer_name, amount, status, owner_id, order_date, notes, project_id } = req.body || {};
     if (status && !["placed", "processing", "shipped", "delivered", "cancelled"].includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
     }
@@ -100,7 +108,7 @@ router.put(
       await db
         .prepare(
           `UPDATE orders SET order_number = ?, customer_name = ?, amount = ?, status = ?, owner_id = ?, order_date = ?, notes = ?,
-            status_changed_by = ?, status_changed_at = ?
+            project_id = ?, status_changed_by = ?, status_changed_at = ?
        WHERE id = ?`
         )
         .run(
@@ -111,6 +119,8 @@ router.put(
           owner_id !== undefined ? owner_id || null : existing.owner_id,
           order_date ?? existing.order_date,
           notes !== undefined ? notes : existing.notes,
+          // An empty string clears the link; omitting the field leaves it alone.
+          project_id !== undefined ? project_id || null : existing.project_id,
           // Only a status move re-stamps this. Correcting a customer's spelling
           // must not make it look like someone re-approved the order.
           statusMoved ? req.user.employee_id || null : existing.status_changed_by,

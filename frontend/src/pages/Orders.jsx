@@ -5,8 +5,9 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
+import { Link } from "react-router-dom";
 
-const emptyForm = { order_number: "", customer_name: "", amount: "", status: "placed", owner_id: "", order_date: "", notes: "" };
+const emptyForm = { order_number: "", customer_name: "", amount: "", status: "placed", owner_id: "", order_date: "", notes: "", project_id: "" };
 const STATUSES = ["placed", "processing", "shipped", "delivered", "cancelled"];
 
 export default function Orders() {
@@ -19,12 +20,16 @@ export default function Orders() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
+  const [projects, setProjects] = useState([]);
 
   const load = () => api.get("/orders").then(setOrders).catch((err) => setError(err.message));
 
   useEffect(() => {
     load();
     api.get("/employees").then(setEmployees).catch(() => {});
+    // Silent on failure: the picker simply does not appear. An order is a sale
+    // and has to be recordable whether or not anyone has set up projects yet.
+    api.get("/projects/options").then(setProjects).catch(() => {});
   }, []);
 
   const openAdd = () => {
@@ -43,6 +48,7 @@ export default function Orders() {
       owner_id: order.owner_id || "",
       order_date: order.order_date || "",
       notes: order.notes || "",
+      project_id: order.project_id || "",
     });
     setShowForm(true);
   };
@@ -52,7 +58,12 @@ export default function Orders() {
     setSaving(true);
     setError("");
     try {
-      const payload = { ...form, amount: Number(form.amount) || 0, owner_id: form.owner_id || null };
+      const payload = {
+        ...form,
+        amount: Number(form.amount) || 0,
+        owner_id: form.owner_id || null,
+        project_id: form.project_id || null,
+      };
       if (editingId) {
         await api.put(`/orders/${editingId}`, payload);
       } else {
@@ -122,6 +133,7 @@ export default function Orders() {
               <SortTh label="Customer" sortKey="customer_name" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Amount" sortKey="amount" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Owner" sortKey="owner_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Project" sortKey="project_code" toggleSort={toggleSort} arrow={arrow} />
               <th>From opportunity</th>
               <SortTh label="Order date" sortKey="order_date" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
@@ -137,6 +149,16 @@ export default function Orders() {
                 <td>{o.customer_name}</td>
                 <td>{money(o.amount)}</td>
                 <td>{o.owner_name || "—"}</td>
+                <td>
+                  {o.project_code ? (
+                    <>
+                      <Link to="/projects" className="location-link">{o.project_code}</Link>
+                      <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>{o.project_name}</div>
+                    </>
+                  ) : (
+                    <span className="subtitle" style={{ margin: 0 }}>Not linked</span>
+                  )}
+                </td>
                 <td>{o.deal_title || "—"}</td>
                 <td>{o.order_date}</td>
                 <td>
@@ -211,6 +233,20 @@ export default function Orders() {
                 <label>Order date</label>
                 <input type="date" value={form.order_date} onChange={(e) => setForm({ ...form, order_date: e.target.value })} />
               </div>
+              {projects.length > 0 && (
+                <div className="form-row">
+                  <label>Project</label>
+                  <select value={form.project_id} onChange={(e) => setForm({ ...form, project_id: e.target.value })}>
+                    <option value="">Not project work</option>
+                    {projects.map((pr) => (
+                      <option key={pr.id} value={pr.id}>{pr.code} — {pr.name}</option>
+                    ))}
+                  </select>
+                  <span className="subtitle" style={{ fontSize: 12 }}>
+                    Billing this order copies the project onto the invoice it raises.
+                  </span>
+                </div>
+              )}
             </div>
             <div className="form-row">
               <label>Notes</label>
