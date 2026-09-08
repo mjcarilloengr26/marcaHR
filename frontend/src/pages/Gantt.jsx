@@ -29,6 +29,12 @@ const EMPTY_TASK = {
   // [{ id, lag_days }] — what has to finish before this can start.
   predecessors: [],
   duration_days: 1,
+  // Whether the links were actually touched this time round. Sending them
+  // unchanged makes the server assume the schedule might have moved, and it
+  // then reloads and re-solves the whole plan for a save that only nudged a
+  // percentage — the same reason duration is only sent when it was the field
+  // being asserted.
+  predsDirty: false,
   // Which of End and Duration the user touched last, so the save knows which
   // one it is being asked to honour. Stripped before the request goes out.
   durationDriven: false,
@@ -82,7 +88,16 @@ export default function Gantt() {
   }, [data, projectId, showClosed]);
 
   const openNewTask = (pid) => {
-    setForm({ ...EMPTY_TASK, predecessors: [], start_date: data.today, end_date: data.today, duration_days: 1 });
+    setForm({
+      ...EMPTY_TASK,
+      predecessors: [],
+      start_date: data.today,
+      end_date: data.today,
+      duration_days: 1,
+      // A brand new task has no stored links to compare against, so its list is
+      // always worth sending.
+      predsDirty: true,
+    });
     setEditing({ task: null, projectId: pid });
     setError("");
   };
@@ -104,6 +119,7 @@ export default function Gantt() {
       // server would compute rather than a second opinion.
       duration_days: task.duration_days ?? 1,
       durationDriven: false,
+      predsDirty: false,
     });
     setEditing({ task, projectId: task.project_id });
     setError("");
@@ -191,11 +207,12 @@ export default function Gantt() {
     setSaving(true);
     setError("");
     try {
-      const { durationDriven, duration_days, ...rest } = form;
+      const { durationDriven, duration_days, predsDirty, predecessors, ...rest } = form;
       const body = canEditSchedule
         ? {
             ...rest,
             percent_complete: Number(form.percent_complete) || 0,
+            ...(predsDirty ? { predecessors } : {}),
             // Duration and end date are two ways of saying the same thing, and
             // sending both leaves the server guessing which one changed. Only
             // the one just edited is sent.
@@ -226,7 +243,16 @@ export default function Gantt() {
           .filter(Boolean)
           .join(" ")
       );
-      await load();
+      if (editing.task && saved?.id) {
+        setData((d) =>
+          d ? { ...d, tasks: d.tasks.map((t) => (t.id === saved.id ? { ...t, ...saved } : t)) } : d
+        );
+        // Not awaited: the chart is already showing the new value, and the
+        // refresh only has to catch what this one row cannot know about.
+        load();
+      } else {
+        await load();
+      }
     } catch (err) {
       setError(err.message);
     } finally {
@@ -632,6 +658,7 @@ export default function Gantt() {
                                     onChange={(e) =>
                                       setForm({
                                         ...form,
+                                        predsDirty: true,
                                         predecessors: e.target.checked
                                           ? [...form.predecessors, { id: t.id, lag_days: 0 }]
                                           : form.predecessors.filter((x) => Number(x.id) !== t.id),
@@ -652,6 +679,7 @@ export default function Gantt() {
                                       onChange={(e) =>
                                         setForm({
                                           ...form,
+                                          predsDirty: true,
                                           predecessors: form.predecessors.map((x) =>
                                             Number(x.id) === t.id
                                               ? { ...x, lag_days: Math.max(0, Number(e.target.value) || 0) }

@@ -658,53 +658,75 @@ router.put(
       return res.status(400).json({ error: "A phase cannot contain itself" });
     }
 
-    let linkError = null;
-    let shifted = { moved: [] };
-    await db.transaction(async () => {
-      await db
-        .prepare(
-          `UPDATE project_tasks SET parent_id = ?, name = ?, start_date = ?, end_date = ?, percent_complete = ?,
-           assignee_id = ?, is_milestone = ?, position = ?, notes = ?, updated_at = ?, updated_by = ?
-           WHERE id = ?`
-        )
-        .run(
-          v.parent_id, v.name, v.start_date, v.end_date, v.percent_complete,
-          v.assignee_id, v.is_milestone, v.position, v.notes,
-          nowStamp(), req.user.employee_id || null, req.params.taskId
-        );
+    // Whether this edit can move anything. Progress, a name, a note or a change
+    // of assignee cannot: no date shifts, so no successor can follow and no
+    // contradiction can appear or disappear. Rescheduling regardless cost four
+    // queries and a transaction on the most frequent save in the app — somebody
+    // dragging a progress slider — which is why saving felt slow.
+    //
+    // Compared against the stored dates rather than against which fields were
+    // sent, so a start silently moved onto a working day still counts as a move.
+    const datesChanged = v.start_date !== existing.start_date || v.end_date !== existing.end_date;
+    const scheduleTouched = datesChanged || preds !== null;
 
-      if (preds) {
-        const applied = await applyPredecessors(Number(req.params.taskId), Number(req.params.id), preds);
-        if (applied.error) {
-          linkError = applied.error;
-          throw new Error("rollback");
+    const setTask = `UPDATE project_tasks SET parent_id = ?, name = ?, start_date = ?, end_date = ?,
+       percent_complete = ?, assignee_id = ?, is_milestone = ?, position = ?, notes = ?,
+       updated_at = ?, updated_by = ? WHERE id = ? RETURNING *`;
+    const setArgs = [
+      v.parent_id, v.name, v.start_date, v.end_date, v.percent_complete,
+      v.assignee_id, v.is_milestone, v.position, v.notes,
+      nowStamp(), req.user.employee_id || null, req.params.taskId,
+    ];
+
+    let linkError = null;
+    let shifted = { moved: [], conflicts: [] };
+    let updated;
+
+    if (!scheduleTouched) {
+      // One statement, so there is no transaction to open and nothing to
+      // recalculate. RETURNING hands back the stored row, which also saves the
+      // read that used to follow the write.
+      updated = await db.prepare(setTask).get(...setArgs);
+    } else {
+      await db.transaction(async () => {
+        updated = await db.prepare(setTask).get(...setArgs);
+
+        if (preds) {
+          const applied = await applyPredecessors(Number(req.params.taskId), Number(req.params.id), preds);
+          if (applied.error) {
+            linkError = applied.error;
+            throw new Error("rollback");
+          }
         }
-      }
-      // Pinned only when this request actually moved the dates. Typing a date
-      // and having it snap back reads as a failed save, so a hand-set date is
-      // kept and the contradiction reported as a conflict instead.
-      //
-      // Pinning on every edit was wrong: changing a task's predecessors is an
-      // edit too, and pinning there meant the one task the new link was
-      // supposed to move was the one task excluded from moving.
-      const datesTouched =
-        (req.body?.start_date !== undefined && req.body.start_date !== existing.start_date) ||
-        (req.body?.end_date !== undefined && req.body.end_date !== existing.end_date);
-      shifted = await reschedule(Number(req.params.id), {
-        pinnedId: datesTouched ? Number(req.params.taskId) : null,
+        // Pinned only when this request actually moved the dates. Typing a date
+        // and having it snap back reads as a failed save, so a hand-set date is
+        // kept and the contradiction reported as a conflict instead.
+        //
+        // Pinning on every edit was wrong: changing a task's predecessors is an
+        // edit too, and pinning there meant the one task the new link was
+        // supposed to move was the one task excluded from moving.
+        shifted = await reschedule(Number(req.params.id), {
+          pinnedId: datesChanged ? Number(req.params.taskId) : null,
+        });
+        // This row may itself have been pushed by its own predecessors, so the
+        // dates come from the plan the reschedule settled rather than from the
+        // copy written a moment earlier.
+        const after = shifted.moved.find((m) => m.id === Number(req.params.taskId));
+        if (after) updated = { ...updated, start_date: after.to.start, end_date: after.to.end };
+      })().catch((err) => {
+        if (!linkError) throw err;
       });
-    })().catch((err) => {
-      if (!linkError) throw err;
-    });
+    }
 
     if (linkError) return res.status(400).json({ error: linkError });
 
-    const updated = await db.prepare("SELECT * FROM project_tasks WHERE id = ?").get(req.params.taskId);
     res.json({
       ...withDuration([updated], cal)[0],
       moved: shifted.moved,
       snappedFrom: v.snappedFrom,
-      conflicts: await conflicts(Number(req.params.id)),
+      // Computed inside the reschedule from the plan it already held, rather
+      // than by loading both tables a second time.
+      conflicts: shifted.conflicts,
     });
   })
 );

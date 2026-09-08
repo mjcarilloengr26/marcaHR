@@ -128,7 +128,7 @@ function earliestStart(taskId, preds, byId, cal) {
 // get compressed to hit a date nobody has agreed to work faster for.
 async function reschedule(projectId, { pinnedId = null } = {}) {
   const { tasks, deps } = await loadPlan(projectId);
-  if (deps.length === 0) return { moved: [], unresolved: [] };
+  if (deps.length === 0) return { moved: [], unresolved: [], conflicts: [] };
 
   const cal = await currentCalendar();
   const preds = predecessorMap(deps);
@@ -159,6 +159,8 @@ async function reschedule(projectId, { pinnedId = null } = {}) {
     });
   }
 
+  const settled = () => conflictsFrom([...byId.values()], deps, cal);
+
   for (const m of moved) {
     const t = byId.get(m.id);
     // Stamped as changed, because it has been. updated_by is deliberately left
@@ -170,7 +172,11 @@ async function reschedule(projectId, { pinnedId = null } = {}) {
       .run(t.start_date, t.end_date, new Date().toISOString().slice(0, 19).replace("T", " "), t.id);
   }
 
-  return { moved, unresolved };
+  // The conflicts are computed from the same in-memory plan the moves were
+  // worked out on — the rows have just been written, so a second read of both
+  // tables would only fetch back what is already here. That pair of queries
+  // was costing more than the update it followed.
+  return { moved, unresolved, conflicts: settled() };
 }
 
 // Tasks whose dates contradict what they wait on. After a reschedule the only
