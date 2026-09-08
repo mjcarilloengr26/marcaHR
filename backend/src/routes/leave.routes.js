@@ -142,16 +142,45 @@ async function leavePosition(employeeId, leaveTypeId, year, { excludeRequestId =
   };
 }
 
-// One sentence an employee can act on: what they have, what is gone, and what
-// they just asked for.
-function shortfallMessage(typeName, year, days, pos) {
+// The type somebody falls back on when a paid allowance is spent: whichever
+// type is marked unpaid. Reads the flag rather than the name, so this and
+// payroll agree on which types cost the employee money — the two deciding that
+// differently is how a suggestion could send somebody to a type that turns out
+// to be paid after all.
+async function noPayFallback(employeeId, year, currentTypeId) {
+  const types = await db.prepare("SELECT id, name FROM leave_types WHERE is_unpaid = true ORDER BY id").all();
+  const fallback = types[0];
+  // Nothing to suggest when the employee is already asking for it.
+  if (!fallback || Number(fallback.id) === Number(currentTypeId)) return null;
+  const pos = await leavePosition(employeeId, fallback.id, year);
+  return { id: fallback.id, name: fallback.name, remaining: Math.max(0, pos.remaining) };
+}
+
+// One sentence an employee can act on: what they have, what is gone, what they
+// just asked for — and where to go instead.
+//
+// A refusal that only says no leaves somebody stuck: the leave is still needed,
+// and the answer is almost always to take it unpaid. Naming that, with the
+// number of days actually available, turns a dead end into the next step. The
+// suggestion is withheld when the fallback has nothing left either, because
+// pointing at a second closed door is worse than pointing at none.
+function shortfallMessage(typeName, year, days, pos, fallback) {
   const parts = [
     `${typeName}: ${pos.allocated} day${pos.allocated === 1 ? "" : "s"} allocated for ${year}`,
     `${pos.used} already used`,
   ];
   if (pos.pending > 0) parts.push(`${pos.pending} awaiting approval`);
   const left = Math.max(0, pos.remaining);
-  return `${parts.join(", ")} — that leaves ${left}, and this request is for ${days} day${days === 1 ? "" : "s"}.`;
+  let msg = `${parts.join(", ")} — that leaves ${left}, and this request is for ${days} day${days === 1 ? "" : "s"}.`;
+
+  if (fallback && fallback.remaining >= days) {
+    msg += ` File it as ${fallback.name} instead — ${fallback.remaining} day${fallback.remaining === 1 ? "" : "s"} left there.`;
+  } else if (fallback && fallback.remaining > 0) {
+    msg += ` ${fallback.name} has ${fallback.remaining} day${fallback.remaining === 1 ? "" : "s"} left, which is not enough for this either.`;
+  } else if (fallback) {
+    msg += ` ${fallback.name} is used up too, so HR has to raise an allocation.`;
+  }
+  return msg;
 }
 
 router.get(
@@ -251,9 +280,11 @@ router.post(
 
     const position = await leavePosition(employee_id, leave_type_id, year);
     if (days > position.remaining) {
+      const fallback = await noPayFallback(employee_id, year, leave_type_id);
       return res.status(400).json({
-        error: shortfallMessage(leaveTypeRow.name, year, days, position),
+        error: shortfallMessage(leaveTypeRow.name, year, days, position, fallback),
         balance: position,
+        fallback,
       });
     }
 
@@ -302,11 +333,13 @@ router.put(
         excludeRequestId: request.id,
       });
       if (Number(request.days) > position.remaining) {
+        const fallback = await noPayFallback(request.employee_id, year, request.leave_type_id);
         return res.status(400).json({
           error:
-            `Cannot approve — ${shortfallMessage(type?.name || "This leave", year, Number(request.days), position)} ` +
-            "Raise the allocation first if this is meant to be granted.",
+            `Cannot approve — ${shortfallMessage(type?.name || "This leave", year, Number(request.days), position, fallback)} ` +
+            "Raise the allocation, or ask for it to be refiled.",
           balance: position,
+          fallback,
         });
       }
     }
@@ -389,7 +422,12 @@ router.put(
     if (!type) return res.status(400).json({ error: "That leave type does not exist" });
     const position = await leavePosition(request.employee_id, typeId, year, { excludeRequestId: request.id });
     if (days > position.remaining) {
-      return res.status(400).json({ error: shortfallMessage(type.name, year, days, position), balance: position });
+      const fallback = await noPayFallback(request.employee_id, year, typeId);
+      return res.status(400).json({
+        error: shortfallMessage(type.name, year, days, position, fallback),
+        balance: position,
+        fallback,
+      });
     }
 
     const attachment = body.attachment_data !== undefined ? parseAttachment(body) : null;

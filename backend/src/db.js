@@ -180,7 +180,15 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS leave_types (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
-  default_days_per_year INTEGER NOT NULL DEFAULT 0
+  default_days_per_year INTEGER NOT NULL DEFAULT 0,
+  -- Whether a day of this leave is deducted from pay.
+  --
+  -- A flag rather than matching the name against "no pay", because this
+  -- decides money: renaming a type would silently start paying for days that
+  -- should not be paid, and nobody would find out until a payslip was
+  -- questioned. It also lets a second unpaid type exist — suspension, extended
+  -- absence — without teaching payroll another spelling.
+  is_unpaid BOOLEAN NOT NULL DEFAULT false
 );
 
 CREATE TABLE IF NOT EXISTS leave_balances (
@@ -1240,6 +1248,14 @@ async function ensureExpenseType() {
 // than backfilled from created_at: "never touched since it was created" is the
 // truth about those tasks, and inventing an edit date would be worse than the
 // chart saying nothing.
+// leave_types predates the paid/unpaid distinction. Seeded from the name once,
+// because that is the only signal the existing rows carry — after this the flag
+// is what counts and the name is free to change.
+async function ensureUnpaidLeaveFlag() {
+  await pool.query("ALTER TABLE leave_types ADD COLUMN IF NOT EXISTS is_unpaid BOOLEAN NOT NULL DEFAULT false");
+  await pool.query("UPDATE leave_types SET is_unpaid = true WHERE name ~* 'no[[:space:]]*pay' AND is_unpaid = false");
+}
+
 async function ensureTaskUpdateStamp() {
   await pool.query("ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS updated_at TEXT");
   await pool.query(
@@ -1441,6 +1457,7 @@ db.migrate = function () {
       .then(() => ensureProjectLinks())
       .then(() => ensureWorkingWeek())
       .then(() => ensureTaskUpdateStamp())
+      .then(() => ensureUnpaidLeaveFlag())
       .then(() => ensurePayrollTimeSettings())
       .then(() => ensurePayrollNightDifferential())
       .then(() => ensurePayrollDeductionBreakdown())

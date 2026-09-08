@@ -83,6 +83,11 @@ export default function Leave() {
     return Math.round((Number(row.allocated_days) - Number(row.used_days) - pending) * 1000) / 1000;
   };
 
+  // The unpaid type people fall back on when a paid allowance runs out — the
+  // one flagged unpaid, which is the same thing payroll deducts for.
+  const noPayType = types.find((t) => t.is_unpaid);
+  const noPayLeft = noPayType ? remainingFor(noPayType.id) : null;
+
   const loadBalances = (employeeId) => {
     if (!employeeId) {
       setBalances([]);
@@ -553,9 +558,33 @@ export default function Leave() {
                     color: remainingFor(form.leave_type_id) <= 0 ? "var(--danger)" : undefined,
                   }}
                 >
-                  {remainingFor(form.leave_type_id) <= 0
-                    ? "Nothing left in this allowance for the year — HR has to raise the allocation before this can be filed."
-                    : `${remainingFor(form.leave_type_id)} day${remainingFor(form.leave_type_id) === 1 ? "" : "s"} left, counting anything already awaiting approval.`}
+                  {remainingFor(form.leave_type_id) > 0 ? (
+                    `${remainingFor(form.leave_type_id)} day${remainingFor(form.leave_type_id) === 1 ? "" : "s"} left, counting anything already awaiting approval.`
+                  ) : (
+                    <>
+                      Nothing left in this allowance for the year.
+                      {/* The leave is still needed; the usual answer is to take
+                          it unpaid. Offered only when there is actually room
+                          there — pointing at a second closed door is worse than
+                          pointing at none. */}
+                      {noPayType && String(noPayType.id) !== String(form.leave_type_id) && noPayLeft > 0 ? (
+                        <>
+                          {" "}
+                          Take it as{" "}
+                          <button
+                            type="button"
+                            className="link-btn"
+                            onClick={() => setForm({ ...form, leave_type_id: String(noPayType.id) })}
+                          >
+                            {noPayType.name}
+                          </button>{" "}
+                          instead — {noPayLeft} day{noPayLeft === 1 ? "" : "s"} left there.
+                        </>
+                      ) : (
+                        " HR has to raise the allocation before this can be filed."
+                      )}
+                    </>
+                  )}
                 </span>
               )}
             </div>

@@ -136,6 +136,10 @@ async function computeAttendanceForPeriod(employeeId, start, end, settings) {
   let shortfallDays = 0;
   let overtimeHours = 0;
   let nightHours = 0;
+  // What each date was credited, so unpaid leave can be deducted without
+  // taking the same day off twice — a day already marked absent has cost the
+  // employee once already.
+  const creditByDate = new Map();
 
   for (const r of rows) {
     let dayCredit = 0;
@@ -152,6 +156,7 @@ async function computeAttendanceForPeriod(employeeId, start, end, settings) {
       dayCredit = 0.5;
     }
     daysWorked += dayCredit;
+    creditByDate.set(r.date, dayCredit);
 
     // How much of an expected working day this record failed to cover. It is
     // what the 'fixed' basis deducts from a full period's salary. Weekend
@@ -160,7 +165,52 @@ async function computeAttendanceForPeriod(employeeId, start, end, settings) {
     // hours themselves still count toward overtime above.
     if (!isWeekend(r.date)) shortfallDays += 1 - dayCredit;
   }
-  return { daysWorked, shortfallDays, overtimeHours, nightHours };
+  return { daysWorked, shortfallDays, overtimeHours, nightHours, creditByDate };
+}
+
+// Approved leave of a type marked unpaid, expressed as the pay that has to come
+// off this period.
+//
+// Payroll never looked at leave at all, so a day of unpaid leave was paid in
+// full: under the 'fixed' basis a day with no attendance record costs nothing,
+// and a day recorded as "leave" is credited a whole day outright. Either way
+// the employee was paid for time the company had agreed not to pay for.
+//
+// Deducted per date against what attendance already took off, so the two
+// cannot both charge for the same day. Weekends are skipped because no salary
+// was owed for them to begin with — the same rule the shortfall uses.
+async function unpaidLeaveForPeriod(employeeId, start, end, creditByDate, attendanceBasis) {
+  const rows = await db
+    .prepare(
+      `SELECT r.start_date, r.end_date
+       FROM leave_requests r JOIN leave_types lt ON lt.id = r.leave_type_id
+       WHERE r.employee_id = ? AND r.status = 'approved' AND lt.is_unpaid = true
+         AND r.start_date <= ? AND r.end_date >= ?`
+    )
+    .all(employeeId, end, start);
+
+  const DAY = 86400000;
+  const dates = new Set();
+  for (const r of rows) {
+    // A request can begin before the period and end after it, so it is clipped
+    // to the days this payslip actually covers.
+    const from = r.start_date > start ? r.start_date : start;
+    const to = r.end_date < end ? r.end_date : end;
+    for (let t = Date.parse(`${from}T00:00:00Z`); t <= Date.parse(`${to}T00:00:00Z`); t += DAY) {
+      const d = new Date(t).toISOString().slice(0, 10);
+      if (!isWeekend(d)) dates.add(d);
+    }
+  }
+
+  let days = 0;
+  for (const d of dates) {
+    // How much that day was paid before this deduction. On 'fixed' a day with
+    // no record is implicitly a full paid day; on 'worked_days' it earned
+    // nothing, so there is nothing left to take away.
+    const credited = creditByDate.has(d) ? creditByDate.get(d) : attendanceBasis === "worked_days" ? 0 : 1;
+    days += credited;
+  }
+  return { days: Math.round(days * 1000) / 1000, dates: [...dates].sort() };
 }
 
 async function getPayrollSettings() {
@@ -178,12 +228,13 @@ async function computeEmployeePayroll(employee, period_month, period_year, perio
   const half = periodHalfForEmployee(employee, settings, period_half);
   const { start, end } = payrollPeriodRange(period_month, period_year, half);
   const expectedDays = countWeekdays(start, end) || 1;
-  const { daysWorked, shortfallDays, overtimeHours, nightHours } = await computeAttendanceForPeriod(
+  const { daysWorked, shortfallDays, overtimeHours, nightHours, creditByDate } = await computeAttendanceForPeriod(
     employee.id,
     start,
     end,
     settings
   );
+  const unpaidLeave = await unpaidLeaveForPeriod(employee.id, start, end, creditByDate, settings.attendance_basis);
 
   const periodSalary = salaryForOnePeriod(employee);
   const dailyRate = periodSalary / expectedDays;
@@ -193,10 +244,13 @@ async function computeEmployeePayroll(employee, period_month, period_year, perio
   // salaried employee is paid whether or not anyone uses the time clock.
   // 'worked_days' pays only for days attendance can account for — under which
   // a period with no attendance records at all correctly earns nothing.
-  const paidDays =
+  const attendedDays =
     settings.attendance_basis === "worked_days"
       ? daysWorked
       : Math.max(0, Math.min(expectedDays, expectedDays - shortfallDays));
+
+  // Unpaid leave comes off last, and cannot take the figure below zero.
+  const paidDays = Math.max(0, attendedDays - unpaidLeave.days);
 
   const base_salary = Math.round(dailyRate * paidDays * 100) / 100;
   const overtime_pay = Math.round(overtimeHours * hourlyRate * settings.overtime_multiplier * 100) / 100;
@@ -214,6 +268,11 @@ async function computeEmployeePayroll(employee, period_month, period_year, perio
     schedule: scheduleFor(employee, settings),
     expected_days: expectedDays,
     paid_days: Math.round(paidDays * 100) / 100,
+    // Broken out so a payslip can show why the base differs from a full period
+    // rather than leaving somebody to work it out.
+    unpaid_leave_days: unpaidLeave.days,
+    unpaid_leave_dates: unpaidLeave.dates,
+    unpaid_leave_deduction: Math.round(dailyRate * unpaidLeave.days * 100) / 100,
     period_salary: Math.round(periodSalary * 100) / 100,
     daily_rate: Math.round(dailyRate * 100) / 100,
   };
@@ -231,6 +290,7 @@ module.exports = {
   hoursOf,
   overlapHours,
   computeAttendanceForPeriod,
+  unpaidLeaveForPeriod,
   getPayrollSettings,
   computeEmployeePayroll,
 };
