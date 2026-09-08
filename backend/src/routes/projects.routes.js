@@ -19,6 +19,8 @@ const today = async () => new Date().toLocaleDateString("en-CA", { timeZone: awa
 
 const text = (v) => (v === undefined || v === null ? null : String(v).trim() || null);
 
+const nowStamp = () => new Date().toISOString().slice(0, 19).replace("T", " ");
+
 // What is left of a project once the commercial figures are taken out: the
 // schedule, which is the only part of it the Gantt actually draws.
 //
@@ -149,9 +151,11 @@ router.get(
       withRollup(day),
       db
         .prepare(
-          `SELECT t.*, (e.first_name || ' ' || e.last_name) AS assignee_name
+          `SELECT t.*, (e.first_name || ' ' || e.last_name) AS assignee_name,
+                  (u.first_name || ' ' || u.last_name) AS updated_by_name
            FROM project_tasks t
            LEFT JOIN employees e ON e.id = t.assignee_id
+           LEFT JOIN employees u ON u.id = t.updated_by
            ORDER BY t.project_id, t.position, t.start_date, t.id`
         )
         .all(),
@@ -177,6 +181,74 @@ router.get(
   })
 );
 
+// Hand a batch of tasks to one person in a single action.
+//
+// Assigning them one at a time is not merely slower — a plan is usually
+// carved up by who is doing it, so the natural motion is "these eleven are
+// Mark's", and a form that only takes one at a time turns that into eleven
+// chances to mis-click.
+//
+// Tasks may come from more than one project: the chart shows every project at
+// once, and a selection that had to stay inside one would be an arbitrary rule
+// the reader cannot see.
+router.post(
+  "/bulk-assign-tasks",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const raw = req.body?.task_ids;
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return res.status(400).json({ error: "Choose at least one task" });
+    }
+    if (raw.length > 500) {
+      return res.status(400).json({ error: "Too many tasks in one go — select 500 or fewer" });
+    }
+    const ids = [...new Set(raw.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (ids.length === 0) return res.status(400).json({ error: "Choose at least one task" });
+
+    // Empty string clears the assignment; a value has to be a real employee,
+    // or the tasks would end up pointing at nobody with no way to tell that
+    // from deliberately unassigned.
+    const rawAssignee = req.body?.assignee_id;
+    const assigneeId = rawAssignee === "" || rawAssignee === null || rawAssignee === undefined ? null : Number(rawAssignee);
+    let assignee = null;
+    if (assigneeId !== null) {
+      if (!Number.isInteger(assigneeId)) return res.status(400).json({ error: "That is not a valid employee" });
+      assignee = await db
+        .prepare("SELECT id, (first_name || ' ' || last_name) AS name FROM employees WHERE id = ?")
+        .get(assigneeId);
+      if (!assignee) return res.status(400).json({ error: "That employee does not exist" });
+    }
+
+    const found = await db
+      .prepare(`SELECT id FROM project_tasks WHERE id IN (${ids.map(() => "?").join(",")})`)
+      .all(...ids);
+    const foundIds = found.map((t) => t.id);
+    if (foundIds.length === 0) return res.status(404).json({ error: "None of those tasks exist" });
+
+    await db.transaction(async () => {
+      for (const id of foundIds) {
+        await db
+          .prepare("UPDATE project_tasks SET assignee_id = ?, updated_at = ?, updated_by = ? WHERE id = ?")
+          .run(assignee ? assignee.id : null, nowStamp(), req.user.employee_id || null, id);
+      }
+    })();
+
+    await logRequestEvent(req, "bulk_assign_project_tasks", {
+      entityType: "project_task",
+      details: { tasks: foundIds.length, assignee: assignee ? assignee.name : "unassigned" },
+    });
+
+    res.json({
+      assigned: foundIds.length,
+      // Said out loud rather than silently ignored: a selection that included
+      // something since deleted should not quietly do less than it claimed.
+      missing: ids.length - foundIds.length,
+      assignee: assignee ? assignee.name : null,
+    });
+  })
+);
+
 router.get(
   "/:id",
   requireAuth,
@@ -187,9 +259,11 @@ router.get(
     if (!project) return res.status(404).json({ error: "Project not found" });
     const tasks = await db
       .prepare(
-        `SELECT t.*, (e.first_name || ' ' || e.last_name) AS assignee_name
+        `SELECT t.*, (e.first_name || ' ' || e.last_name) AS assignee_name,
+                (u.first_name || ' ' || u.last_name) AS updated_by_name
          FROM project_tasks t
          LEFT JOIN employees e ON e.id = t.assignee_id
+         LEFT JOIN employees u ON u.id = t.updated_by
          WHERE t.project_id = ? ORDER BY t.position, t.start_date, t.id`
       )
       .all(req.params.id);
@@ -590,11 +664,13 @@ router.put(
       await db
         .prepare(
           `UPDATE project_tasks SET parent_id = ?, name = ?, start_date = ?, end_date = ?, percent_complete = ?,
-           assignee_id = ?, is_milestone = ?, position = ?, notes = ? WHERE id = ?`
+           assignee_id = ?, is_milestone = ?, position = ?, notes = ?, updated_at = ?, updated_by = ?
+           WHERE id = ?`
         )
         .run(
           v.parent_id, v.name, v.start_date, v.end_date, v.percent_complete,
-          v.assignee_id, v.is_milestone, v.position, v.notes, req.params.taskId
+          v.assignee_id, v.is_milestone, v.position, v.notes,
+          nowStamp(), req.user.employee_id || null, req.params.taskId
         );
 
       if (preds) {

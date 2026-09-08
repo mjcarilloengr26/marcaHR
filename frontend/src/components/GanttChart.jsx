@@ -78,6 +78,9 @@ export default function GanttChart({
   dependencies = [],
   conflicts = [],
   workingWeek,
+  selectable = false,
+  selected,
+  onToggleSelect,
   today,
   zoom = "fit",
   onTaskClick,
@@ -449,7 +452,19 @@ export default function GanttChart({
               const t = row.task;
               const state = stateOf(t, today);
               const pos = place(t.start_date, t.end_date);
-              const detail = `${t.name} · ${t.start_date}${t.is_milestone ? "" : ` to ${t.end_date}`} · ${t.percent_complete}% complete${t.assignee_name ? ` · ${t.assignee_name}` : ""}`;
+              // Hovering a bar has to answer "is this current?" as well as
+              // "what is it". A plan is only as trustworthy as its last edit,
+              // and 20% set in March means something very different from 20%
+              // set this morning — without the date the bar cannot say which.
+              //
+              // A cascade stamps the time but not a person, so an unattributed
+              // change is named as what it was rather than left blank.
+              const changed = t.updated_at
+                ? `\nLast changed ${t.updated_at}${t.updated_by_name ? ` by ${t.updated_by_name}` : " by the schedule shifting"}`
+                : "\nNot changed since it was created";
+              const detail =
+                `${t.name} · ${t.start_date}${t.is_milestone ? "" : ` to ${t.end_date}`} · ${t.percent_complete}% complete${t.assignee_name ? ` · ${t.assignee_name}` : " · unassigned"}` +
+                changed;
 
               return (
                 <div className="gantt-row" key={`t${t.id}`}>
@@ -458,8 +473,22 @@ export default function GanttChart({
                       t.parent_id ? " is-child" : ""
                     }`}
                   >
-                    <span title={t.name}>{t.name}</span>
-                    {t.assignee_name && <span className="gantt-label-sub">{t.assignee_name}</span>}
+                    <span title={t.name} style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+                      {selectable && (
+                        <input
+                          type="checkbox"
+                          className="gantt-pick"
+                          checked={Boolean(selected?.has(t.id))}
+                          onChange={() => onToggleSelect?.(t.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          aria-label={`Select ${t.name}`}
+                        />
+                      )}
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
+                    </span>
+                    <span className="gantt-label-sub">
+                      {t.assignee_name || (selectable ? "Unassigned" : "")}
+                    </span>
                   </div>
                   <div className="gantt-track" style={{ width }}>
                     {bands.map((b) => (

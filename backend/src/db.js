@@ -884,6 +884,16 @@ CREATE TABLE IF NOT EXISTS project_tasks (
   position INTEGER NOT NULL DEFAULT 0,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  -- When the row last changed and who changed it. A plan is only worth reading
+  -- if you can tell how old it is: a bar showing 20% is a different thing
+  -- depending on whether that was set this morning or in March, and the chart
+  -- has no way to say which without this.
+  --
+  -- Written on every edit including the automatic ones, because a task that
+  -- moved because its predecessor slipped has changed just as much as one
+  -- somebody dragged.
+  updated_at TEXT,
+  updated_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   CHECK (end_date >= start_date)
 );
 
@@ -1226,6 +1236,18 @@ async function ensureExpenseType() {
 // figures into a project P&L that is supposed to be the reliable one.
 // app_settings predates the planning calendar. Added with the whole-week
 // default so an existing plan is untouched until the setting is changed.
+// project_tasks predates the update stamp. Left NULL on existing rows rather
+// than backfilled from created_at: "never touched since it was created" is the
+// truth about those tasks, and inventing an edit date would be worse than the
+// chart saying nothing.
+async function ensureTaskUpdateStamp() {
+  await pool.query("ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS updated_at TEXT");
+  await pool.query(
+    "ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS updated_by INTEGER REFERENCES employees(id) ON DELETE SET NULL"
+  );
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_project_tasks_updated ON project_tasks(updated_at DESC)");
+}
+
 async function ensureWorkingWeek() {
   await pool.query(
     "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS working_week TEXT NOT NULL DEFAULT 'mon_sun'"
@@ -1418,6 +1440,7 @@ db.migrate = function () {
       .then(() => ensureExpenseType())
       .then(() => ensureProjectLinks())
       .then(() => ensureWorkingWeek())
+      .then(() => ensureTaskUpdateStamp())
       .then(() => ensurePayrollTimeSettings())
       .then(() => ensurePayrollNightDifferential())
       .then(() => ensurePayrollDeductionBreakdown())

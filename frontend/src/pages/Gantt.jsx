@@ -52,6 +52,12 @@ export default function Gantt() {
   const [editing, setEditing] = useState(null); // { task, projectId }
   const [form, setForm] = useState(EMPTY_TASK);
   const [saving, setSaving] = useState(false);
+  // Bulk assignment. Off until asked for: checkboxes down a chart nobody is
+  // reassigning are just clutter in the column that holds the names.
+  const [assignMode, setAssignMode] = useState(false);
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkAssignee, setBulkAssignee] = useState("");
+  const [assigning, setAssigning] = useState(false);
 
   const load = () =>
     api
@@ -104,6 +110,50 @@ export default function Gantt() {
   };
 
   const canEditSchedule = isHr;
+
+  const toggleSelect = (id) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const selectAllVisible = () => setSelected(new Set(visible.tasks.map((t) => t.id)));
+  const clearSelection = () => setSelected(new Set());
+
+  const applyAssignment = async () => {
+    setAssigning(true);
+    setError("");
+    try {
+      const r = await api.post("/projects/bulk-assign-tasks", {
+        task_ids: [...selected],
+        assignee_id: bulkAssignee || "",
+      });
+      setNotice(
+        `${r.assigned} task${r.assigned === 1 ? "" : "s"} assigned to ${r.assignee || "nobody"}.` +
+          (r.missing ? ` ${r.missing} could not be found and were skipped.` : "")
+      );
+      clearSelection();
+      setAssignMode(false);
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAssigning(false);
+    }
+  };
+
+  // Progress belongs to whoever is doing the work, and to nobody else. Mirrors
+  // the check the server makes; the server stays the one that enforces it.
+  const editingTask = editing?.task || null;
+  const isAssignee = Boolean(
+    editingTask && user.employee_id && Number(editingTask.assignee_id) === Number(user.employee_id)
+  );
+  // A new task has no assignee yet, so there is nobody to be but its author —
+  // only the people who own the schedule can create one anyway.
+  const canEditProgress = isHr || isAssignee;
+  const canSave = canEditSchedule || canEditProgress;
 
   // A live preview of what the server will work out. The server recomputes
   // both from the same rule and its answer is what gets stored, so the worst a
@@ -322,6 +372,57 @@ export default function Gantt() {
         </div>
       </div>
 
+      {isHr && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          {!assignMode ? (
+            <button className="btn btn-secondary btn-sm" onClick={() => setAssignMode(true)}>
+              Assign tasks to someone
+            </button>
+          ) : (
+            <div className="form-inline" style={{ margin: 0, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div className="form-row" style={{ marginBottom: 0 }}>
+                <label>Assign {selected.size} selected task{selected.size === 1 ? "" : "s"} to</label>
+                <select value={bulkAssignee} onChange={(e) => setBulkAssignee(e.target.value)}>
+                  <option value="">Nobody — clear the assignment</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-row" style={{ marginBottom: 0 }}>
+                <label>&nbsp;</label>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="btn" disabled={selected.size === 0 || assigning} onClick={applyAssignment}>
+                    {assigning ? "Assigning…" : "Apply"}
+                  </button>
+                  <button className="btn btn-secondary" onClick={selectAllVisible}>
+                    Select all {visible.tasks.length} shown
+                  </button>
+                  <button className="btn btn-secondary" onClick={clearSelection} disabled={selected.size === 0}>
+                    Clear
+                  </button>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      clearSelection();
+                      setAssignMode(false);
+                    }}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {assignMode && (
+            <p className="subtitle" style={{ margin: "10px 0 0", fontSize: 12 }}>
+              Tick the tasks in the chart below. The filter above decides what is on offer, so narrowing to one
+              project first is usually quicker than scrolling. Choosing nobody clears the assignment instead.
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="card">
         <GanttChart
           projects={visible.projects}
@@ -329,6 +430,9 @@ export default function Gantt() {
           dependencies={data.dependencies || []}
           conflicts={data.conflicts || []}
           workingWeek={data.workingWeek}
+          selectable={assignMode}
+          selected={selected}
+          onToggleSelect={toggleSelect}
           today={data.today}
           zoom={zoom}
           onTaskClick={openTask}
@@ -459,6 +563,13 @@ export default function Gantt() {
                 </div>
               </div>
 
+              {editingTask?.updated_at && (
+                <p className="subtitle" style={{ margin: "0 0 12px", fontSize: 12 }}>
+                  Last changed {editingTask.updated_at}
+                  {editingTask.updated_by_name ? ` by ${editingTask.updated_by_name}` : " by the schedule shifting"}.
+                </p>
+              )}
+
               <div className="grid grid-2">
                 <div className="form-row">
                   <label>Progress — {form.percent_complete}%</label>
@@ -469,20 +580,33 @@ export default function Gantt() {
                     step={5}
                     value={form.percent_complete}
                     onChange={(e) => setForm({ ...form, percent_complete: Number(e.target.value) })}
+                    disabled={!canEditProgress}
                   />
+                  {!canEditProgress && (
+                    <span className="subtitle" style={{ fontSize: 12 }}>
+                      {editingTask?.assignee_name
+                        ? `Only ${editingTask.assignee_name} or an administrator can move this.`
+                        : "Nobody is assigned to this task yet, so only an administrator can move it."}
+                    </span>
+                  )}
                 </div>
                 <div className="form-row">
                   <label>Assigned to</label>
-                  <select
-                    value={form.assignee_id}
-                    onChange={(e) => setForm({ ...form, assignee_id: e.target.value })}
-                    disabled={!canEditSchedule}
-                  >
-                    <option value="">Unassigned</option>
-                    {employees.map((emp) => (
-                      <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>
-                    ))}
-                  </select>
+                  {canEditSchedule ? (
+                    <select
+                      value={form.assignee_id}
+                      onChange={(e) => setForm({ ...form, assignee_id: e.target.value })}
+                    >
+                      <option value="">Unassigned</option>
+                      {employees.map((emp) => (
+                        <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div style={{ padding: "8px 0", fontSize: 14 }}>
+                      {editingTask?.assignee_name || "Nobody yet"}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -588,10 +712,14 @@ export default function Gantt() {
                     Delete
                   </button>
                 )}
-                <button type="button" className="btn btn-secondary" onClick={() => setEditing(null)}>Cancel</button>
-                <button type="submit" className="btn" disabled={saving}>
-                  {saving ? "Saving…" : editing.task ? "Save changes" : "Add task"}
+                <button type="button" className="btn btn-secondary" onClick={() => setEditing(null)}>
+                  {canSave ? "Cancel" : "Close"}
                 </button>
+                {canSave && (
+                  <button type="submit" className="btn" disabled={saving}>
+                    {saving ? "Saving…" : editing.task ? "Save changes" : "Add task"}
+                  </button>
+                )}
               </div>
             </form>
           </div>

@@ -161,7 +161,13 @@ async function reschedule(projectId, { pinnedId = null } = {}) {
 
   for (const m of moved) {
     const t = byId.get(m.id);
-    await db.prepare("UPDATE project_tasks SET start_date = ?, end_date = ? WHERE id = ?").run(t.start_date, t.end_date, t.id);
+    // Stamped as changed, because it has been. updated_by is deliberately left
+    // alone: these dates moved because a predecessor did, and crediting that to
+    // whoever triggered the cascade would attribute to them a change they never
+    // made to this task.
+    await db
+      .prepare("UPDATE project_tasks SET start_date = ?, end_date = ?, updated_at = ? WHERE id = ?")
+      .run(t.start_date, t.end_date, new Date().toISOString().slice(0, 19).replace("T", " "), t.id);
   }
 
   return { moved, unresolved };
