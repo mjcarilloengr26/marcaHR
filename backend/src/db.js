@@ -879,6 +879,32 @@ CREATE TABLE IF NOT EXISTS project_tasks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_project_tasks_project ON project_tasks(project_id, position);
+
+-- What has to finish before a task can start. Finish-to-start only: it is the
+-- link every construction plan is actually written in, and the other three
+-- (SS, FF, SF) are a vocabulary people have to be taught before the chart can
+-- be trusted. lag_days is the gap after the predecessor ends — curing time, a
+-- delivery window, an inspection booked a fortnight out.
+--
+-- A separate table rather than a predecessor_id column, because "commissioning
+-- waits on mechanical AND electrical" is the ordinary case and a single column
+-- forces the plan to lie about one of them.
+--
+-- Cycles are refused when the link is created rather than guarded against when
+-- the chart is drawn: a loop would make rescheduling never terminate, and by
+-- the time it is stored there is no good answer about which link to ignore.
+CREATE TABLE IF NOT EXISTS project_task_dependencies (
+  id SERIAL PRIMARY KEY,
+  task_id INTEGER NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
+  depends_on_id INTEGER NOT NULL REFERENCES project_tasks(id) ON DELETE CASCADE,
+  lag_days INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  UNIQUE (task_id, depends_on_id),
+  CHECK (task_id <> depends_on_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_deps_task ON project_task_dependencies(task_id);
+CREATE INDEX IF NOT EXISTS idx_task_deps_pred ON project_task_dependencies(depends_on_id);
 `;
 
 // One-time correction from the original 3 ad-hoc demo leave types to the 5

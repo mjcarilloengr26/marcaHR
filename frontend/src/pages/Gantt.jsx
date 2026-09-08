@@ -26,6 +26,8 @@ const EMPTY_TASK = {
   parent_id: "",
   is_milestone: false,
   notes: "",
+  // [{ id, lag_days }] — what has to finish before this can start.
+  predecessors: [],
 };
 
 export default function Gantt() {
@@ -70,7 +72,7 @@ export default function Gantt() {
   }, [data, projectId, showClosed]);
 
   const openNewTask = (pid) => {
-    setForm({ ...EMPTY_TASK, start_date: data.today, end_date: data.today });
+    setForm({ ...EMPTY_TASK, predecessors: [], start_date: data.today, end_date: data.today });
     setEditing({ task: null, projectId: pid });
     setError("");
   };
@@ -85,6 +87,9 @@ export default function Gantt() {
       parent_id: task.parent_id || "",
       is_milestone: task.is_milestone,
       notes: task.notes || "",
+      predecessors: (data.dependencies || [])
+        .filter((d) => d.task_id === task.id)
+        .map((d) => ({ id: d.depends_on_id, lag_days: d.lag_days })),
     });
     setEditing({ task, projectId: task.project_id });
     setError("");
@@ -100,10 +105,27 @@ export default function Gantt() {
       const body = canEditSchedule
         ? { ...form, percent_complete: Number(form.percent_complete) || 0 }
         : { percent_complete: Number(form.percent_complete) || 0 };
-      if (editing.task) await api.put(`/projects/${editing.projectId}/tasks/${editing.task.id}`, body);
-      else await api.post(`/projects/${editing.projectId}/tasks`, body);
+      const saved = editing.task
+        ? await api.put(`/projects/${editing.projectId}/tasks/${editing.task.id}`, body)
+        : await api.post(`/projects/${editing.projectId}/tasks`, body);
       setEditing(null);
-      setNotice(editing.task ? `"${form.name}" updated.` : `"${form.name}" added to the plan.`);
+      const moved = saved?.moved || [];
+      const clash = (saved?.conflicts || []).find((c) => c.id === saved.id);
+      setNotice(
+        [
+          editing.task ? `"${form.name}" updated.` : `"${form.name}" added to the plan.`,
+          moved.length
+            ? `${moved.length} later task${moved.length === 1 ? "" : "s"} moved to keep the sequence: ` +
+              moved.slice(0, 3).map((m) => `${m.name} +${m.days}d`).join(", ") +
+              (moved.length > 3 ? `, and ${moved.length - 3} more` : "") + "."
+            : "",
+          clash
+            ? `It still starts ${clash.daysEarly} day${clash.daysEarly === 1 ? "" : "s"} before what it waits on finishes — saved as asked, but the plan does not add up.`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      );
       await load();
     } catch (err) {
       setError(err.message);
@@ -154,6 +176,29 @@ export default function Gantt() {
   const phaseOptions = data.tasks.filter(
     (t) => t.project_id === editing?.projectId && !t.is_milestone && t.id !== editing?.task?.id
   );
+
+  // Anything downstream of the task being edited is left out: the server
+  // refuses a link that would close a loop, and offering a choice that can only
+  // be rejected is worse than not offering it at all.
+  const predecessorOptions = (() => {
+    if (!editing) return [];
+    const deps = data.dependencies || [];
+    const downstream = new Set();
+    if (editing.task) {
+      const stack = [editing.task.id];
+      while (stack.length) {
+        const at = stack.pop();
+        for (const d of deps.filter((x) => x.depends_on_id === at)) {
+          if (downstream.has(d.task_id)) continue;
+          downstream.add(d.task_id);
+          stack.push(d.task_id);
+        }
+      }
+    }
+    return data.tasks.filter(
+      (t) => t.project_id === editing.projectId && t.id !== editing.task?.id && !downstream.has(t.id)
+    );
+  })();
 
   const atRisk = visible.projects.filter((p) => p.schedule.key === "overdue" || p.schedule.key === "behind");
 
@@ -231,6 +276,8 @@ export default function Gantt() {
         <GanttChart
           projects={visible.projects}
           tasks={visible.tasks}
+          dependencies={data.dependencies || []}
+          conflicts={data.conflicts || []}
           today={data.today}
           zoom={zoom}
           onTaskClick={openTask}
@@ -356,6 +403,69 @@ export default function Gantt() {
 
               {canEditSchedule && (
                 <div className="grid grid-2">
+                  <div className="form-row" style={{ gridColumn: "1 / -1" }}>
+                    <label>Waits for</label>
+                    {predecessorOptions.length === 0 ? (
+                      <span className="subtitle" style={{ fontSize: 12, margin: 0 }}>
+                        Nothing else is scheduled on this project yet.
+                      </span>
+                    ) : (
+                      <>
+                        <div className="gantt-pred-list">
+                          {predecessorOptions.map((t) => {
+                            const chosen = form.predecessors.find((x) => Number(x.id) === t.id);
+                            return (
+                              <div key={t.id} className={chosen ? "gantt-pred is-on" : "gantt-pred"}>
+                                <label className="gantt-pred-pick">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(chosen)}
+                                    onChange={(e) =>
+                                      setForm({
+                                        ...form,
+                                        predecessors: e.target.checked
+                                          ? [...form.predecessors, { id: t.id, lag_days: 0 }]
+                                          : form.predecessors.filter((x) => Number(x.id) !== t.id),
+                                      })
+                                    }
+                                  />
+                                  <span className="gantt-pred-name" title={t.name}>{t.name}</span>
+                                  <span className="gantt-pred-when">ends {t.end_date}</span>
+                                </label>
+                                {chosen && (
+                                  <span className="gantt-pred-lag">
+                                    then wait
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      max="3650"
+                                      value={chosen.lag_days}
+                                      onChange={(e) =>
+                                        setForm({
+                                          ...form,
+                                          predecessors: form.predecessors.map((x) =>
+                                            Number(x.id) === t.id
+                                              ? { ...x, lag_days: Math.max(0, Number(e.target.value) || 0) }
+                                              : x
+                                          ),
+                                        })
+                                      }
+                                    />
+                                    days
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <span className="subtitle" style={{ fontSize: 12 }}>
+                          This starts the day after the last of these finishes, plus any lag. Work downstream
+                          shifts out of the way on its own — nothing is ever pulled earlier.
+                        </span>
+                      </>
+                    )}
+                  </div>
+
                   <div className="form-row">
                     <label>Part of phase</label>
                     <select value={form.parent_id} onChange={(e) => setForm({ ...form, parent_id: e.target.value })}>

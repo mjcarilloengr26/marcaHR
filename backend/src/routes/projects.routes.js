@@ -5,6 +5,7 @@ const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
 const { withRollup, money } = require("../services/projectRollup");
 const { appTimezone } = require("../services/timezone");
+const { wouldCycle, reschedule, conflicts, allDependencies } = require("../services/taskSchedule");
 
 const router = express.Router();
 
@@ -146,7 +147,11 @@ router.get(
          ORDER BY t.project_id, t.position, t.start_date, t.id`
       )
       .all();
-    res.json({ today: day, projects, tasks });
+    const dependencies = await allDependencies();
+    // Conflicts are worked out per project rather than globally: a task can
+    // only ever wait on one inside its own plan.
+    const clashes = (await Promise.all(all.map((pr) => conflicts(pr.id)))).flat();
+    res.json({ today: day, projects, tasks, dependencies, conflicts: clashes });
   })
 );
 
@@ -166,7 +171,12 @@ router.get(
          WHERE t.project_id = ? ORDER BY t.position, t.start_date, t.id`
       )
       .all(req.params.id);
-    res.json({ ...project, taskList: tasks });
+    res.json({
+      ...project,
+      taskList: tasks,
+      dependencies: (await allDependencies()).filter((d) => tasks.some((t) => t.id === d.task_id)),
+      conflicts: await conflicts(project.id),
+    });
   })
 );
 
@@ -350,6 +360,65 @@ function validateTask(body, existing = {}) {
   };
 }
 
+// Accepts either bare ids or {id, lag_days} objects, so the simple case stays
+// simple. Omitting the field entirely leaves existing links alone; sending an
+// empty array clears them — the same distinction the rest of the app draws
+// between "not mentioned" and "deliberately blank".
+function parsePredecessors(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (!Array.isArray(raw)) return { error: "Predecessors must be a list" };
+  const out = [];
+  for (const entry of raw) {
+    const id = Number(typeof entry === "object" && entry !== null ? entry.id ?? entry.depends_on_id : entry);
+    if (!Number.isInteger(id) || id <= 0) return { error: "Each predecessor must be a task id" };
+    const lag = Number(typeof entry === "object" && entry !== null ? entry.lag_days ?? entry.lag ?? 0 : 0);
+    if (!Number.isFinite(lag) || lag < 0 || lag > 3650) return { error: "Lag must be between 0 and 3650 days" };
+    if (out.some((o) => o.id === id)) continue;
+    out.push({ id, lag: Math.round(lag) });
+  }
+  return out;
+}
+
+// Writes the link set for one task, refusing anything that would make the plan
+// impossible to compute: a task waiting on itself, on a task in another
+// project, or on a chain that leads back to it.
+async function applyPredecessors(taskId, projectId, list) {
+  const inProject = await db.prepare("SELECT id FROM project_tasks WHERE project_id = ?").all(projectId);
+  const ids = new Set(inProject.map((t) => t.id));
+
+  for (const p of list) {
+    if (p.id === Number(taskId)) return { error: "A task cannot wait on itself" };
+    if (!ids.has(p.id)) return { error: "A task can only wait on another task in the same project" };
+  }
+
+  // Checked against the links as they will be, not as they are — adding two at
+  // once can close a loop that neither would close on its own.
+  const existing = await db
+    .prepare(
+      `SELECT d.* FROM project_task_dependencies d
+       JOIN project_tasks t ON t.id = d.task_id
+       WHERE t.project_id = ? AND d.task_id <> ?`
+    )
+    .all(projectId, taskId);
+
+  const proposed = [...existing];
+  for (const p of list) {
+    if (wouldCycle(proposed, taskId, p.id)) {
+      const name = (await db.prepare("SELECT name FROM project_tasks WHERE id = ?").get(p.id))?.name || `task ${p.id}`;
+      return { error: `Waiting on "${name}" would make a loop — it already waits on this task, directly or through others` };
+    }
+    proposed.push({ task_id: Number(taskId), depends_on_id: p.id, lag_days: p.lag });
+  }
+
+  await db.prepare("DELETE FROM project_task_dependencies WHERE task_id = ?").run(taskId);
+  for (const p of list) {
+    await db
+      .prepare("INSERT INTO project_task_dependencies (task_id, depends_on_id, lag_days) VALUES (?, ?, ?)")
+      .run(taskId, p.id, p.lag);
+  }
+  return {};
+}
+
 router.post(
   "/:id/tasks",
   requireAuth,
@@ -374,18 +443,49 @@ router.post(
       .prepare("SELECT COALESCE(MAX(position), 0) + 1 AS n FROM project_tasks WHERE project_id = ?")
       .get(req.params.id);
 
-    const info = await db
-      .prepare(
-        `INSERT INTO project_tasks (project_id, parent_id, name, start_date, end_date, percent_complete,
-                                    assignee_id, is_milestone, position, notes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        req.params.id, v.parent_id, v.name, v.start_date, v.end_date, v.percent_complete,
-        v.assignee_id, v.is_milestone, v.position || next.n, v.notes
-      );
+    const preds = parsePredecessors(req.body?.predecessors);
+    if (preds && preds.error) return res.status(400).json({ error: preds.error });
 
-    res.status(201).json(await db.prepare("SELECT * FROM project_tasks WHERE id = ?").get(info.lastInsertRowid));
+    let taskId;
+    let linkError = null;
+    let shifted = { moved: [] };
+    // One transaction: a task stored without the links it was created with, or
+    // with links but none of the dates they imply, is a plan that says
+    // something nobody asked for.
+    await db.transaction(async () => {
+      const info = await db
+        .prepare(
+          `INSERT INTO project_tasks (project_id, parent_id, name, start_date, end_date, percent_complete,
+                                      assignee_id, is_milestone, position, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          req.params.id, v.parent_id, v.name, v.start_date, v.end_date, v.percent_complete,
+          v.assignee_id, v.is_milestone, v.position || next.n, v.notes
+        );
+      taskId = info.lastInsertRowid;
+
+      if (preds && preds.length > 0) {
+        const applied = await applyPredecessors(taskId, Number(req.params.id), preds);
+        if (applied.error) {
+          linkError = applied.error;
+          throw new Error("rollback");
+        }
+      }
+      // Not pinned. A task created with predecessors should land where they
+      // allow rather than where the date box happened to be sitting, which is
+      // what every other planning tool does and what people expect.
+      shifted = await reschedule(Number(req.params.id));
+    })().catch((err) => {
+      if (!linkError) throw err;
+    });
+
+    if (linkError) return res.status(400).json({ error: linkError });
+
+    res.status(201).json({
+      ...(await db.prepare("SELECT * FROM project_tasks WHERE id = ?").get(taskId)),
+      moved: shifted.moved,
+    });
   })
 );
 
@@ -409,6 +509,9 @@ router.put(
       return res.status(403).json({ error: "Only admin/HR can change the schedule — you can update progress" });
     }
 
+    const preds = parsePredecessors(req.body?.predecessors);
+    if (preds && preds.error) return res.status(400).json({ error: preds.error });
+
     const v = validateTask(req.body || {}, existing);
     if (v.error) return res.status(400).json({ error: v.error });
 
@@ -416,17 +519,50 @@ router.put(
       return res.status(400).json({ error: "A phase cannot contain itself" });
     }
 
-    await db
-      .prepare(
-        `UPDATE project_tasks SET parent_id = ?, name = ?, start_date = ?, end_date = ?, percent_complete = ?,
-         assignee_id = ?, is_milestone = ?, position = ?, notes = ? WHERE id = ?`
-      )
-      .run(
-        v.parent_id, v.name, v.start_date, v.end_date, v.percent_complete,
-        v.assignee_id, v.is_milestone, v.position, v.notes, req.params.taskId
-      );
+    let linkError = null;
+    let shifted = { moved: [] };
+    await db.transaction(async () => {
+      await db
+        .prepare(
+          `UPDATE project_tasks SET parent_id = ?, name = ?, start_date = ?, end_date = ?, percent_complete = ?,
+           assignee_id = ?, is_milestone = ?, position = ?, notes = ? WHERE id = ?`
+        )
+        .run(
+          v.parent_id, v.name, v.start_date, v.end_date, v.percent_complete,
+          v.assignee_id, v.is_milestone, v.position, v.notes, req.params.taskId
+        );
 
-    res.json(await db.prepare("SELECT * FROM project_tasks WHERE id = ?").get(req.params.taskId));
+      if (preds) {
+        const applied = await applyPredecessors(Number(req.params.taskId), Number(req.params.id), preds);
+        if (applied.error) {
+          linkError = applied.error;
+          throw new Error("rollback");
+        }
+      }
+      // Pinned only when this request actually moved the dates. Typing a date
+      // and having it snap back reads as a failed save, so a hand-set date is
+      // kept and the contradiction reported as a conflict instead.
+      //
+      // Pinning on every edit was wrong: changing a task's predecessors is an
+      // edit too, and pinning there meant the one task the new link was
+      // supposed to move was the one task excluded from moving.
+      const datesTouched =
+        (req.body?.start_date !== undefined && req.body.start_date !== existing.start_date) ||
+        (req.body?.end_date !== undefined && req.body.end_date !== existing.end_date);
+      shifted = await reschedule(Number(req.params.id), {
+        pinnedId: datesTouched ? Number(req.params.taskId) : null,
+      });
+    })().catch((err) => {
+      if (!linkError) throw err;
+    });
+
+    if (linkError) return res.status(400).json({ error: linkError });
+
+    res.json({
+      ...(await db.prepare("SELECT * FROM project_tasks WHERE id = ?").get(req.params.taskId)),
+      moved: shifted.moved,
+      conflicts: await conflicts(Number(req.params.id)),
+    });
   })
 );
 
@@ -440,6 +576,7 @@ router.delete(
       .get(req.params.taskId, req.params.id);
     if (!existing) return res.status(404).json({ error: "Task not found" });
     await db.prepare("DELETE FROM project_tasks WHERE id = ?").run(req.params.taskId);
+    await reschedule(Number(req.params.id));
     res.status(204).end();
   })
 );

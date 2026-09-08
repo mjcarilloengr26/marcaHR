@@ -13,7 +13,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 // moment the plan is longer than the screen.
 
 const DAY_MS = 86400000;
-const LABEL_W = 240;
+// The name column's default, and the range it may be dragged to. Task names on
+// a real plan run long — "1.1 Design preparation and su…" is not a name anyone
+// can act on — so the column is draggable and remembers where it was left.
+const LABEL_W_DEFAULT = 240;
+const LABEL_W_MIN = 140;
+const LABEL_W_MAX = 620;
+const LABEL_W_KEY = "gantt_label_width";
+// Every row is exactly this tall (index.css, .gantt-row and .gantt-row-project
+// both 38px with border-box), which is what lets a dependency arrow be drawn
+// from a row index instead of measuring the DOM.
+const ROW_H = 38;
 
 const toUTC = (iso) => Date.parse(`${iso}T00:00:00Z`);
 const daysBetween = (from, to) => Math.round((toUTC(to) - toUTC(from)) / DAY_MS);
@@ -62,12 +72,34 @@ function monthBands(start, end) {
   return bands;
 }
 
-export default function GanttChart({ projects, tasks, today, zoom = "fit", onTaskClick }) {
+export default function GanttChart({
+  projects,
+  tasks,
+  dependencies = [],
+  conflicts = [],
+  today,
+  zoom = "fit",
+  onTaskClick,
+}) {
   // The scroller's own width, so "Fit to screen" can work out a scale. A
   // callback ref rather than useRef + useEffect: on the first render the page
   // is still a spinner and the element does not exist yet, so an effect with an
   // empty dependency list would measure nothing and the chart would keep the
   // placeholder scale for good.
+  // Per-viewer convenience, so localStorage is the right home for it: it is
+  // not shared state and losing it costs one drag. Every access is guarded —
+  // a private window or a browser set to block site data throws on read.
+  const [labelW, setLabelW] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem(LABEL_W_KEY));
+      if (Number.isFinite(saved) && saved >= LABEL_W_MIN && saved <= LABEL_W_MAX) return saved;
+    } catch {
+      /* no stored preference available */
+    }
+    return LABEL_W_DEFAULT;
+  });
+  const [dragging, setDragging] = useState(false);
+
   const [viewW, setViewW] = useState(0);
   const scroller = useRef(null);
   const observer = useRef(null);
@@ -80,6 +112,50 @@ export default function GanttChart({ projects, tasks, today, zoom = "fit", onTas
     observer.current.observe(node);
   }, []);
   useEffect(() => () => observer.current?.disconnect(), []);
+
+  // Tracked on the document rather than the handle: at speed the pointer
+  // outruns a 6px grip, and a drag that stops the moment the cursor slips off
+  // it feels broken. Pointer capture would do the same job but not while the
+  // cursor is over the chart's own scroller.
+  const startResize = useCallback(
+    (e) => {
+      e.preventDefault();
+      const originX = e.clientX;
+      const originW = labelW;
+      setDragging(true);
+
+      const move = (ev) => {
+        const next = Math.min(LABEL_W_MAX, Math.max(LABEL_W_MIN, originW + (ev.clientX - originX)));
+        setLabelW(next);
+      };
+      const stop = () => {
+        setDragging(false);
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", stop);
+        document.removeEventListener("pointercancel", stop);
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", stop);
+      document.addEventListener("pointercancel", stop);
+    },
+    [labelW]
+  );
+
+  // Written when the drag settles rather than on every pointer move, so one
+  // resize is one write instead of a few hundred.
+  useEffect(() => {
+    if (dragging) return;
+    try {
+      localStorage.setItem(LABEL_W_KEY, String(labelW));
+    } catch {
+      /* the column simply starts at its default next time */
+    }
+  }, [dragging, labelW]);
+
+  // Keyboard equivalent, and a double-click to put it back.
+  const nudge = useCallback((by) => {
+    setLabelW((w) => Math.min(LABEL_W_MAX, Math.max(LABEL_W_MIN, w + by)));
+  }, []);
 
   const { start, end, rows } = useMemo(() => {
     const dates = [];
@@ -127,7 +203,7 @@ export default function GanttChart({ projects, tasks, today, zoom = "fit", onTas
   // Floored, because below about a pixel a day a bar stops being a bar.
   const px =
     ZOOM[zoom].px ??
-    (viewW > LABEL_W + 40 ? Math.max(0.9, (viewW - LABEL_W - 2) / totalDays) : ZOOM.month.px);
+    (viewW > labelW + 40 ? Math.max(0.9, (viewW - labelW - 2) / totalDays) : ZOOM.month.px);
   const width = Math.round(totalDays * px);
   const bands = monthBands(start, end);
   const todayX = Math.round(daysBetween(start, today) * px);
@@ -139,11 +215,61 @@ export default function GanttChart({ projects, tasks, today, zoom = "fit", onTas
   const scrollToToday = useCallback(() => {
     const el = scroller.current;
     if (!el) return;
-    const target = LABEL_W + todayX - (el.clientWidth - LABEL_W) / 3;
+    const target = labelW + todayX - (el.clientWidth - labelW) / 3;
     el.scrollLeft = Math.max(0, target);
-  }, [todayX]);
+  }, [todayX, labelW]);
 
   useEffect(scrollToToday, [scrollToToday, zoom]);
+
+  // One arrow per dependency: out of the right-hand end of the predecessor,
+  // around, and into the left-hand start of the task that waits on it.
+  //
+  // Drawn only when both ends are on screen. A link to a task the filter has
+  // hidden would otherwise become a line that leaves the chart and arrives
+  // nowhere, which reads as a rendering fault rather than a filtered view.
+  const links = useMemo(() => {
+    const rowIndex = new Map();
+    rows.forEach((r, i) => {
+      if (r.kind === "task") rowIndex.set(r.task.id, i);
+    });
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+
+    const out = [];
+    for (const d of dependencies) {
+      const fromRow = rowIndex.get(d.depends_on_id);
+      const toRow = rowIndex.get(d.task_id);
+      if (fromRow === undefined || toRow === undefined) continue;
+      const pred = byId.get(d.depends_on_id);
+      const succ = byId.get(d.task_id);
+      if (!pred || !succ) continue;
+
+      const x1 = Math.round((daysBetween(start, pred.end_date) + 1) * px);
+      const y1 = fromRow * ROW_H + ROW_H / 2;
+      const x2 = Math.round(daysBetween(start, succ.start_date) * px);
+      const y2 = toRow * ROW_H + ROW_H / 2;
+
+      // Elbowed rather than straight: a diagonal across six rows crosses every
+      // bar in between and stops being followable. Out a little, down, then in.
+      const gap = 9;
+      const midX = x2 - gap > x1 + gap ? x2 - gap : x1 + gap;
+      const path =
+        `M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`;
+
+      out.push({
+        key: `${d.depends_on_id}-${d.task_id}`,
+        path,
+        headX: x2,
+        headY: y2,
+        // A link is "tight" when the successor starts the very next working day
+        // it could — worth seeing, because those are the ones a slip propagates
+        // straight through.
+        late: succ.start_date < addDays(pred.end_date, (Number(d.lag_days) || 0) + 1),
+      });
+    }
+    return out;
+  }, [dependencies, rows, tasks, start, px]);
+
+  const conflictIds = useMemo(() => new Set(conflicts.map((c) => c.id)), [conflicts]);
 
   const place = (from, to) => ({
     left: Math.round(daysBetween(start, from) * px),
@@ -159,21 +285,42 @@ export default function GanttChart({ projects, tasks, today, zoom = "fit", onTas
   }
 
   return (
-    <div className="gantt">
+    <div className={dragging ? "gantt is-resizing" : "gantt"} style={{ "--gantt-label-w": `${labelW}px` }}>
       <div className="gantt-legend">
         <span><i className="gantt-key gantt-key-active" /> In progress</span>
         <span><i className="gantt-key gantt-key-planned" /> Planned</span>
         <span><i className="gantt-key gantt-key-done" /> Complete</span>
         <span><i className="gantt-key gantt-key-overdue" /> Past its end date</span>
         <span><i className="gantt-key gantt-key-milestone" /> Milestone</span>
+        <span><i className="gantt-key gantt-key-link" /> Waits for</span>
         <span><i className="gantt-key gantt-key-today" /> Today</span>
         <button type="button" className="link-btn" onClick={scrollToToday}>Jump to today</button>
       </div>
 
       <div className="gantt-scroll" ref={attach}>
-        <div className="gantt-inner" style={{ width: LABEL_W + width }}>
+        <div className="gantt-inner" style={{ width: labelW + width }}>
           <div className="gantt-head">
-            <div className="gantt-label gantt-head-label">Project / task</div>
+            <div className="gantt-label gantt-head-label">
+              <span>Project / task</span>
+              <span
+                className="gantt-resizer"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize the project and task column"
+                aria-valuenow={labelW}
+                aria-valuemin={LABEL_W_MIN}
+                aria-valuemax={LABEL_W_MAX}
+                tabIndex={0}
+                title="Drag to resize · double-click to reset"
+                onPointerDown={startResize}
+                onDoubleClick={() => setLabelW(LABEL_W_DEFAULT)}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowLeft") { e.preventDefault(); nudge(-16); }
+                  if (e.key === "ArrowRight") { e.preventDefault(); nudge(16); }
+                  if (e.key === "Home") { e.preventDefault(); setLabelW(LABEL_W_DEFAULT); }
+                }}
+              />
+            </div>
             <div className="gantt-track" style={{ width }}>
               {bands.map((b) => (
                 <div
@@ -191,7 +338,34 @@ export default function GanttChart({ projects, tasks, today, zoom = "fit", onTas
             {/* One line for today across the whole chart rather than one per
                 row: it is a single fact about the calendar, and repeating it
                 per row makes it break wherever a row has no bar. */}
-            <div className="gantt-today-line" style={{ left: LABEL_W + todayX }} />
+            <div className="gantt-today-line" style={{ left: labelW + todayX }} />
+
+            {/* Dependency arrows. One overlay for the whole body rather than
+                one per row, because a link spans rows by definition. Pointer
+                events are off so the bars underneath stay clickable. */}
+            {links.length > 0 && (
+              <svg
+                className="gantt-links"
+                style={{ left: labelW, width, height: rows.length * ROW_H }}
+                width={width}
+                height={rows.length * ROW_H}
+                aria-hidden="true"
+              >
+                <defs>
+                  <marker id="gantt-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                    <path d="M0,0 L6,3 L0,6 z" fill="currentColor" />
+                  </marker>
+                </defs>
+                {links.map((l) => (
+                  <path
+                    key={l.key}
+                    d={l.path}
+                    className={l.late ? "gantt-link is-late" : "gantt-link"}
+                    markerEnd="url(#gantt-arrow)"
+                  />
+                ))}
+              </svg>
+            )}
 
             {rows.map((row) => {
               if (row.kind === "project") {
@@ -266,9 +440,9 @@ export default function GanttChart({ projects, tasks, today, zoom = "fit", onTas
                       />
                     ) : (
                       <div
-                        className={`gantt-bar is-${state}`}
+                        className={`gantt-bar is-${state}${conflictIds.has(t.id) ? " is-conflict" : ""}`}
                         style={pos}
-                        title={detail}
+                        title={conflictIds.has(t.id) ? `${detail} · starts before what it waits on finishes` : detail}
                         onClick={onTaskClick ? () => onTaskClick(t) : undefined}
                       >
                         <div className="gantt-bar-fill" style={{ width: `${t.percent_complete}%` }} />

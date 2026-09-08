@@ -1490,8 +1490,12 @@ body.snapshot-tv .content {
 .gantt-head-label { font-weight: 600; font-size: 12px; color: var(--text-muted); }
 
 .gantt-label {
-  flex: 0 0 240px;
-  width: 240px;
+  /* Driven by --gantt-label-w, set on .gantt by the drag handle. A custom
+     property rather than an inline style on every cell: the label is rendered
+     once per row, and re-rendering the whole body on each pointer move during
+     a drag is the difference between smooth and not. */
+  flex: 0 0 var(--gantt-label-w, 240px);
+  width: var(--gantt-label-w, 240px);
   /* Sticky against the horizontal scroll, not the page: the row it belongs to
      scrolls with the chart, the name stays put. */
   position: sticky;
@@ -1517,6 +1521,35 @@ body.snapshot-tv .content {
 
 .gantt-track { position: relative; flex: 0 0 auto; }
 .gantt-head .gantt-track { height: 30px; }
+
+/* The grip on the right edge of the name column. Sits inside the header cell,
+   overhanging it slightly so the target is comfortable without the column
+   having to reserve space for it. */
+.gantt-head-label { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.gantt-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 9px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 4;
+  /* The line people aim at is drawn in the middle of a wider hit area, so the
+     grip is easy to catch without a 9px rule down the chart. */
+  background: linear-gradient(to right, transparent 3px, var(--border) 3px, var(--border) 5px, transparent 5px);
+}
+.gantt-resizer:hover,
+.gantt-resizer:focus-visible {
+  background: linear-gradient(to right, transparent 3px, var(--primary) 3px, var(--primary) 5px, transparent 5px);
+  outline: none;
+}
+/* While dragging: no text selection anywhere, and the resize cursor holds even
+   when the pointer runs ahead of the column edge. */
+.gantt.is-resizing { cursor: col-resize; user-select: none; }
+.gantt.is-resizing .gantt-resizer {
+  background: linear-gradient(to right, transparent 3px, var(--primary) 3px, var(--primary) 5px, transparent 5px);
+}
 
 .gantt-month {
   position: absolute;
@@ -1589,6 +1622,94 @@ body.snapshot-tv .content {
 .gantt-bar.is-done { --bar: var(--success); --bar-soft: var(--badge-success-bg); }
 .gantt-bar.is-overdue { --bar: var(--danger); --bar-soft: var(--badge-danger-bg); }
 .gantt-bar-fill { height: 100%; background: var(--bar); border-radius: 4px 0 0 4px; }
+
+/* Dependency arrows. The overlay covers the whole body and must not intercept
+   clicks — the bars underneath are the things people aim at. */
+.gantt-links {
+  position: absolute;
+  top: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 2;
+  color: var(--text-muted);
+}
+.gantt-link {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1.5;
+  opacity: 0.75;
+}
+/* A link whose successor already starts too early: the plan contradicts itself
+   here, so the line says so rather than being drawn as though it were fine. */
+.gantt-link.is-late { stroke: var(--danger); opacity: 1; stroke-dasharray: 4 3; }
+
+/* A bar that starts before what it waits on has finished. Outlined rather than
+   recoloured: the fill still has to carry the task's own state, and overwriting
+   that would trade one fact for another. */
+.gantt-bar.is-conflict {
+  outline: 2px solid var(--danger);
+  outline-offset: 1px;
+}
+
+.gantt-key-link {
+  width: 14px;
+  height: 0;
+  border-top: 1.5px solid var(--text-muted);
+  border-radius: 0;
+  align-self: center;
+}
+
+/* The predecessor picker in the task dialog. A scrolling list rather than a
+   multi-select: a plan of thirty tasks makes a native multi-select unusable,
+   and the lag field has to sit next to the row it belongs to. */
+.gantt-pred-list {
+  max-height: 190px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input-bg);
+}
+.gantt-pred {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.gantt-pred:last-child { border-bottom: none; }
+.gantt-pred.is-on { background: var(--primary-light); }
+.gantt-pred .gantt-pred-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  /* min-width:0 on both the container and the name, or the ellipsis never
+     engages: a flex item will not shrink below its content's width without it,
+     and a long task name pushes the date off the row instead of truncating. */
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text);
+  margin-bottom: 0;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.gantt-pred .gantt-pred-pick input[type="checkbox"] { width: auto; flex: 0 0 auto; margin: 0; }
+.gantt-pred-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1 1 auto; }
+.gantt-pred-when { color: var(--text-muted); font-size: 12px; white-space: nowrap; flex: 0 0 auto; }
+.gantt-pred-lag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.gantt-pred-lag input { width: 62px; padding: 3px 6px; font-size: 12px; margin: 0; }
+
 .gantt-bar-fill[style*="100%"] { border-radius: 4px; }
 
 /* The project's own span, drawn thinner than its tasks so the eye reads it as
