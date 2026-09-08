@@ -20,6 +20,43 @@ const router = express.Router();
 
 const round = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
+// One Snapshot costs about fifty queries — the profit and loss for the period
+// and for the same span last year, the standing position, the revenue trend,
+// the cost-centre rollup and the project rollup. None of it is duplicated;
+// that is genuinely what the page reports.
+//
+// The trouble is the shape of the connection: the pool holds five clients
+// against a database a network hop away, so fifty queries settle in ten waves
+// of about a quarter-second each whether or not they are issued in parallel.
+// Raising the pool is not on the table — Supabase allows fifteen client
+// connections in total and two instances overlap on every deploy.
+//
+// So the answer is not to run it on every request. The page refreshes itself
+// every five minutes and the figures move as fast as somebody approving an
+// expense, which is to say slowly. A short cache turns the second visitor, the
+// wall panel's own refresh and every reload into a free read.
+//
+// Deliberately short. Long enough to cover a burst of readers and the wall
+// panel's polling, brief enough that an admin who has just approved something
+// and reloads to check sees it. generatedAt is left as the moment the figures
+// were computed rather than the moment they were served, so the page can say
+// how old they are.
+const CACHE_TTL_MS = 30_000;
+const cache = new Map();
+
+function cached(key) {
+  const hit = cache.get(key);
+  if (!hit || Date.now() - hit.storedAt >= CACHE_TTL_MS) return null;
+  return hit.payload;
+}
+
+function remember(key, payload) {
+  // Bounded: the key space is period type, year and index, which is small, but
+  // a map that only ever grows is a leak waiting to be found in six months.
+  if (cache.size > 40) cache.clear();
+  cache.set(key, { payload, storedAt: Date.now() });
+}
+
 // Returns { error } rather than throwing: the app's global handler turns every
 // thrown error into a flat 500, so a bad query string would report itself as a
 // server fault instead of a bad request.
@@ -222,6 +259,12 @@ router.get(
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const { periodType, year, index } = parsed;
 
+    // Keyed by the day as well as the period, so a year-to-date reading never
+    // survives midnight — its cut-off changes even when nothing else does.
+    const key = `${periodType}:${year}:${index}:${today}`;
+    const ready = cached(key);
+    if (ready) return res.json(ready);
+
     const [factSheet, trend, costCenters, projects] = await Promise.all([
       buildFactSheet({ periodType, year, index, asOf: today }),
       getRevenueTrend(),
@@ -235,7 +278,7 @@ router.get(
     const cur = factSheet.current;
     const prev = factSheet.previous;
 
-    res.json({
+    const payload = {
       period: factSheet.period,
       comparedWith: factSheet.comparedWith,
       headlines: headlines(cur, prev),
@@ -276,7 +319,10 @@ router.get(
         comparedLabel: factSheet.comparedWith.label,
       }),
       generatedAt: new Date().toISOString(),
-    });
+    };
+
+    remember(key, payload);
+    res.json(payload);
   })
 );
 

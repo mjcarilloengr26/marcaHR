@@ -5,7 +5,7 @@ const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
 const { withRollup, money } = require("../services/projectRollup");
 const { appTimezone } = require("../services/timezone");
-const { wouldCycle, reschedule, conflicts, allDependencies } = require("../services/taskSchedule");
+const { wouldCycle, reschedule, conflicts, conflictsFrom, allDependencies } = require("../services/taskSchedule");
 const { currentCalendar, LABELS } = require("../services/workingWeek");
 
 const router = express.Router();
@@ -133,26 +133,37 @@ router.get(
   "/gantt",
   requireAuth,
   asyncHandler(async (req, res) => {
+    // Everything this page needs, asked for at once.
+    //
+    // It used to be six awaits in a row, and against a database a network hop
+    // away each one costs a full round trip whether or not it depends on the
+    // last. Only the rollup genuinely needs the date first, so the rest go
+    // together.
     const day = await today();
-    // The chart is not a money screen, and the people who keep it current are
-    // the ones the work is assigned to — so they can read it. What they must
-    // not read is the contract value and margin riding along on the same
-    // rollup, so those are dropped rather than the whole page being closed off.
-    const all = await withRollup(day);
+    const [all, tasks, dependencies, cal] = await Promise.all([
+      // The chart is not a money screen, and the people who keep it current
+      // are the ones the work is assigned to — so they can read it. What they
+      // must not read is the contract value and margin riding along on the
+      // same rollup, so those are dropped below rather than the whole page
+      // being closed off.
+      withRollup(day),
+      db
+        .prepare(
+          `SELECT t.*, (e.first_name || ' ' || e.last_name) AS assignee_name
+           FROM project_tasks t
+           LEFT JOIN employees e ON e.id = t.assignee_id
+           ORDER BY t.project_id, t.position, t.start_date, t.id`
+        )
+        .all(),
+      allDependencies(),
+      currentCalendar(),
+    ]);
     const projects = ["admin", "hr"].includes(req.user.role) ? all : all.map(stripMoney);
-    const tasks = await db
-      .prepare(
-        `SELECT t.*, (e.first_name || ' ' || e.last_name) AS assignee_name
-         FROM project_tasks t
-         LEFT JOIN employees e ON e.id = t.assignee_id
-         ORDER BY t.project_id, t.position, t.start_date, t.id`
-      )
-      .all();
-    const cal = await currentCalendar();
-    const dependencies = await allDependencies();
-    // Conflicts are worked out per project rather than globally: a task can
-    // only ever wait on one inside its own plan.
-    const clashes = (await Promise.all(all.map((pr) => conflicts(pr.id)))).flat();
+
+    // Worked out from the tasks and links already in hand. Calling conflicts()
+    // per project re-read both tables once per project — two more queries per
+    // row on a page that had just fetched all of it.
+    const clashes = conflictsFrom(tasks, dependencies, cal);
     res.json({
       today: day,
       projects,

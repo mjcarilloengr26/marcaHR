@@ -144,32 +144,37 @@ async function withTotals(report) {
 async function withTotalsBatch(reports) {
   if (reports.length === 0) return [];
   const placeholders = reports.map(() => "?").join(",");
-  const sums = await db
-    .prepare(`SELECT report_id, COALESCE(SUM(amount), 0) AS total FROM expense_items WHERE report_id IN (${placeholders}) GROUP BY report_id`)
-    .all(...reports.map((r) => r.id));
-  const totalByReportId = new Map(sums.map((s) => [s.report_id, s.total]));
+  const ids = reports.map((r) => r.id);
 
-  // What each report was actually spent on, so the list can show the split
-  // without opening every row. One query for the whole page, same as the
-  // totals above — a per-report query here would reintroduce the N+1 that
-  // withTotalsBatch exists to avoid.
+  // All three read from the same set of report ids and none of them needs an
+  // answer from the others, so they go together. Run in sequence they cost
+  // three round trips to a database a network hop away, which was most of the
+  // time this endpoint took.
   //
-  // Grouped case-insensitively and labelled with the spelling used most often
-  // in that report: "sop" and "SOP" are one category typed twice and must not
-  // appear as two lines. mode() picks the spelling rather than an arbitrary
-  // MIN, which would silently prefer whichever sorts first.
-  const catRows = await db
-    .prepare(
-      `SELECT report_id,
-              COALESCE(NULLIF(TRIM(mode() WITHIN GROUP (ORDER BY category)), ''), 'Uncategorised') AS category,
-              COALESCE(SUM(amount), 0) AS total,
-              COUNT(*)::int AS items
-       FROM expense_items
-       WHERE report_id IN (${placeholders})
-       GROUP BY report_id, LOWER(TRIM(COALESCE(category, '')))
-       ORDER BY report_id, 3 DESC`
-    )
-    .all(...reports.map((r) => r.id));
+  // The category grouping is case-insensitive and labelled with the spelling
+  // used most often in that report: "sop" and "SOP" are one category typed
+  // twice and must not appear as two lines. mode() picks the spelling rather
+  // than an arbitrary MIN, which would silently prefer whichever sorts first.
+  const [sums, catRows, positions] = await Promise.all([
+    db
+      .prepare(`SELECT report_id, COALESCE(SUM(amount), 0) AS total FROM expense_items WHERE report_id IN (${placeholders}) GROUP BY report_id`)
+      .all(...ids),
+    db
+      .prepare(
+        `SELECT report_id,
+                COALESCE(NULLIF(TRIM(mode() WITHIN GROUP (ORDER BY category)), ''), 'Uncategorised') AS category,
+                COALESCE(SUM(amount), 0) AS total,
+                COUNT(*)::int AS items
+         FROM expense_items
+         WHERE report_id IN (${placeholders})
+         GROUP BY report_id, LOWER(TRIM(COALESCE(category, '')))
+         ORDER BY report_id, 3 DESC`
+      )
+      .all(...ids),
+    advancePositions(reports.map((r) => r.cash_advance_id)),
+  ]);
+
+  const totalByReportId = new Map(sums.map((s) => [s.report_id, s.total]));
 
   const catsByReportId = new Map();
   for (const c of catRows) {
@@ -177,8 +182,6 @@ async function withTotalsBatch(reports) {
     list.push({ category: c.category, total: c.total, items: c.items });
     catsByReportId.set(c.report_id, list);
   }
-
-  const positions = await advancePositions(reports.map((r) => r.cash_advance_id));
 
   return reports.map((report) =>
     shapeTotals(report, totalByReportId.get(report.id) || 0, {

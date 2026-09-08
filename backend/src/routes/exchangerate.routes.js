@@ -13,6 +13,20 @@ const router = express.Router();
 const CACHE_TTL_MS = 60 * 60 * 1000;
 const cache = new Map(); // "USD>PHP" -> { rate, fetchedAt }
 
+// The whole response, not just the provider's number.
+//
+// The rate was already cached for an hour, but every request still paid for
+// three database round trips behind it — read the app currency, upsert today's
+// history row, then read the previous day to compare against. The header
+// mounts on every page in the app, so that was most of a second added to every
+// single navigation to recompute a comparison that cannot change until either
+// the rate refreshes or the day rolls over.
+//
+// Keyed by pair and day so it expires naturally at midnight, and cleared
+// whenever the rate itself is refetched.
+const responseCache = new Map(); // "USD>PHP@2026-09-08" -> payload
+const RESPONSE_TTL_MS = 5 * 60 * 1000;
+
 const RATE_API = (base) => `https://open.er-api.com/v6/latest/${encodeURIComponent(base)}`;
 const CODE_RE = /^[A-Z]{3}$/;
 
@@ -36,6 +50,8 @@ async function fetchRate(base, quote) {
     if (typeof rate !== "number") throw new Error(`no rate for ${quote}`);
     const entry = { rate, fetchedAt: Date.now() };
     cache.set(key, entry);
+    // A fresh rate makes any stored comparison for this pair out of date.
+    for (const k of responseCache.keys()) if (k.startsWith(`${key}@`)) responseCache.delete(k);
     return { ...entry, cached: false };
   } catch (err) {
     if (hit) return { ...hit, cached: true, stale: true };
@@ -43,6 +59,15 @@ async function fetchRate(base, quote) {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+let currencyCache = null;
+let currencyCachedAt = 0;
+async function appCurrency() {
+  if (currencyCache && Date.now() - currencyCachedAt < 60_000) return currencyCache;
+  currencyCache = await db.prepare("SELECT currency_code FROM app_settings WHERE id = 1").get();
+  currencyCachedAt = Date.now();
+  return currencyCache;
 }
 
 // Today as the company sees it. A snapshot keyed on the server's UTC date
@@ -57,8 +82,7 @@ async function localDate() {
 // Record today's rate and hand back the most recent earlier day to compare
 // against. The write is best-effort: a header readout must not fail because a
 // history row could not be stored.
-async function recordAndCompare(base, quote, rate) {
-  const today = await localDate();
+async function recordAndCompare(base, quote, rate, today) {
   try {
     // Last write wins within a day, so the figure shown is the latest reading
     // rather than whatever happened to be first thing in the morning.
@@ -110,7 +134,7 @@ router.get(
     // relevant if that's changed; base is USD unless asked otherwise. If the
     // two would match (app currency already USD) fall back to PHP so the
     // readout isn't a pointless 1.00.
-    const settings = await db.prepare("SELECT currency_code FROM app_settings WHERE id = 1").get();
+    const settings = await appCurrency();
     const base = String(req.query.base || "USD").toUpperCase();
     let quote = String(req.query.quote || settings?.currency_code || "PHP").toUpperCase();
     if (quote === base) quote = base === "PHP" ? "USD" : "PHP";
@@ -119,19 +143,28 @@ router.get(
       return res.status(400).json({ error: "base and quote must be 3-letter currency codes" });
     }
 
+    const day = await localDate();
+    const cacheKey = `${base}>${quote}@${day}`;
+    const hit = responseCache.get(cacheKey);
+    if (hit && Date.now() - hit.storedAt < RESPONSE_TTL_MS) {
+      return res.json(hit.payload);
+    }
+
     const result = await fetchRate(base, quote);
     if (!result) return res.status(503).json({ error: "Exchange rate is unavailable right now" });
 
-    const comparison = await recordAndCompare(base, quote, result.rate);
+    const comparison = await recordAndCompare(base, quote, result.rate, day);
 
-    res.json({
+    const payload = {
       base,
       quote,
       rate: result.rate,
       fetched_at: new Date(result.fetchedAt).toISOString(),
       stale: !!result.stale,
       ...comparison,
-    });
+    };
+    responseCache.set(cacheKey, { payload, storedAt: Date.now() });
+    res.json(payload);
   })
 );
 

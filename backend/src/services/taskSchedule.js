@@ -171,10 +171,12 @@ async function reschedule(projectId, { pinnedId = null } = {}) {
 // one that can be in this state is the task somebody pinned by editing it, and
 // saying so plainly is the point: the plan records what was asked for and the
 // chart shows that it does not add up.
-async function conflicts(projectId) {
-  const { tasks, deps } = await loadPlan(projectId);
-  if (deps.length === 0) return [];
-  const cal = await currentCalendar();
+//
+// Pure, so a caller that has already loaded the plan does not pay to load it
+// again. The Gantt reads every task and every link in one query each and then
+// asks this for the answer, instead of two more queries per project.
+function conflictsFrom(tasks, deps, cal) {
+  if (!deps || deps.length === 0) return [];
   const preds = predecessorMap(deps);
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const out = [];
@@ -185,6 +187,12 @@ async function conflicts(projectId) {
     }
   }
   return out;
+}
+
+// The one-project convenience, for callers that hold nothing yet.
+async function conflicts(projectId) {
+  const [{ tasks, deps }, cal] = await Promise.all([loadPlan(projectId), currentCalendar()]);
+  return conflictsFrom(tasks, deps, cal);
 }
 
 // Every dependency in the app, for the chart to draw. Read in one query rather
@@ -201,6 +209,7 @@ module.exports = {
   wouldCycle,
   reschedule,
   conflicts,
+  conflictsFrom,
   allDependencies,
   addDays,
   dayDiff,
