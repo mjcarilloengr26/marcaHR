@@ -77,6 +77,7 @@ export default function GanttChart({
   tasks,
   dependencies = [],
   conflicts = [],
+  workingWeek,
   today,
   zoom = "fit",
   onTaskClick,
@@ -271,6 +272,29 @@ export default function GanttChart({
 
   const conflictIds = useMemo(() => new Set(conflicts.map((c) => c.id)), [conflicts]);
 
+  // The days the plan may not schedule on, drawn behind everything else.
+  //
+  // Only at Day and Week zoom. At Month, and at any "fit" scale wide enough to
+  // hold a whole job, a day is one or two pixels and weekend stripes turn the
+  // chart into corduroy — the shading would be louder than the bars it is
+  // meant to sit behind.
+  const offDays = useMemo(() => {
+    const days = workingWeek?.days;
+    if (!days || days.length >= 7 || px < 4) return [];
+    const set = new Set(days);
+    const out = [];
+    for (let i = 0; i < totalDays; i += 1) {
+      const date = addDays(start, i);
+      if (set.has(new Date(toUTC(date)).getUTCDay())) continue;
+      // Consecutive non-working days merge into one band, so a Saturday and
+      // Sunday are a single block rather than two with a seam down the middle.
+      const last = out[out.length - 1];
+      if (last && last.offset + last.span === i) last.span += 1;
+      else out.push({ key: date, offset: i, span: 1 });
+    }
+    return out;
+  }, [workingWeek, px, start, totalDays]);
+
   const place = (from, to) => ({
     left: Math.round(daysBetween(start, from) * px),
     width: Math.max(3, Math.round((daysBetween(from, to) + 1) * px)),
@@ -293,6 +317,9 @@ export default function GanttChart({
         <span><i className="gantt-key gantt-key-overdue" /> Past its end date</span>
         <span><i className="gantt-key gantt-key-milestone" /> Milestone</span>
         <span><i className="gantt-key gantt-key-link" /> Waits for</span>
+        {workingWeek && workingWeek.days.length < 7 && (
+          <span><i className="gantt-key gantt-key-offday" /> Non-working</span>
+        )}
         <span><i className="gantt-key gantt-key-today" /> Today</span>
         <button type="button" className="link-btn" onClick={scrollToToday}>Jump to today</button>
       </div>
@@ -380,6 +407,13 @@ export default function GanttChart({
                       <span className="gantt-label-sub" title={p.name}>{p.name}</span>
                     </div>
                     <div className="gantt-track" style={{ width }}>
+                      {offDays.map((o) => (
+                        <div
+                          key={`off${o.key}`}
+                          className="gantt-offday"
+                          style={{ left: Math.round(o.offset * px), width: Math.max(1, Math.round(o.span * px)) }}
+                        />
+                      ))}
                       {bands.map((b) => (
                         <div key={b.key} className="gantt-gridline" style={{ left: Math.round(b.offset * px) }} />
                       ))}

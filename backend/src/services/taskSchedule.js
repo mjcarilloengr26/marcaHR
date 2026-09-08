@@ -1,4 +1,5 @@
 const db = require("../db");
+const { currentCalendar } = require("./workingWeek");
 
 // Dependencies between tasks, and what they do to the dates when one moves.
 //
@@ -12,6 +13,13 @@ const db = require("../db");
 // backwards — that is a decision somebody makes, not one a chart makes for
 // them at two in the morning. Pulling dates in automatically is also how a
 // plan quietly loses the float that was put there on purpose.
+//
+// Two different units are in play, on purpose:
+//   - a task's DURATION is working days, because that is what the work takes;
+//   - a link's LAG is calendar days, because that is what a lag represents —
+//     concrete cures on a Sunday and a delivery lead time does not pause for
+//     the weekend.
+// Both are labelled as such wherever they are entered.
 
 const DAY_MS = 86400000;
 const toUTC = (iso) => Date.parse(`${iso}T00:00:00Z`);
@@ -94,12 +102,17 @@ function topoOrder(tasks, preds) {
 
 // The date a task could start at the earliest, given what it waits on. Null
 // when it waits on nothing.
-function earliestStart(taskId, preds, byId) {
+//
+// The lag is counted in calendar days from the predecessor's end, and only
+// then is the result moved onto a working day — so a two-day cure that lands
+// on a Saturday under a Monday-Friday week starts the job on the Monday, not
+// on the Saturday and not two working days later.
+function earliestStart(taskId, preds, byId, cal) {
   let earliest = null;
   for (const p of preds.get(taskId) || []) {
     const pred = byId.get(p.id);
     if (!pred) continue;
-    const candidate = addDays(pred.end_date, p.lag + 1);
+    const candidate = cal.nextWorkingDay(addDays(pred.end_date, p.lag + 1));
     if (earliest === null || candidate > earliest) earliest = candidate;
   }
   return earliest;
@@ -117,6 +130,7 @@ async function reschedule(projectId, { pinnedId = null } = {}) {
   const { tasks, deps } = await loadPlan(projectId);
   if (deps.length === 0) return { moved: [], unresolved: [] };
 
+  const cal = await currentCalendar();
   const preds = predecessorMap(deps);
   const byId = new Map(tasks.map((t) => [t.id, { ...t }]));
   const { order, unresolved } = topoOrder(tasks, preds);
@@ -125,14 +139,24 @@ async function reschedule(projectId, { pinnedId = null } = {}) {
   for (const id of order) {
     if (pinnedId && Number(id) === Number(pinnedId)) continue;
     const task = byId.get(id);
-    const earliest = earliestStart(id, preds, byId);
+    const earliest = earliestStart(id, preds, byId, cal);
     if (!earliest || task.start_date >= earliest) continue;
 
-    const shift = dayDiff(earliest, task.start_date);
     const from = { start: task.start_date, end: task.end_date };
+    // The end is rebuilt from the new start and the task's own length in
+    // working days, not slid by the same number of calendar days. Sliding
+    // both ends equally is what silently lengthens or shortens a task that
+    // gets pushed across a weekend.
+    const length = task.is_milestone ? 1 : cal.workingDaysBetween(task.start_date, task.end_date) || 1;
     task.start_date = earliest;
-    task.end_date = addDays(task.end_date, shift);
-    moved.push({ id: task.id, name: task.name, days: shift, from, to: { start: task.start_date, end: task.end_date } });
+    task.end_date = task.is_milestone ? earliest : cal.endAfterWorkingDays(earliest, length);
+    moved.push({
+      id: task.id,
+      name: task.name,
+      days: dayDiff(task.start_date, from.start),
+      from,
+      to: { start: task.start_date, end: task.end_date },
+    });
   }
 
   for (const m of moved) {
@@ -150,11 +174,12 @@ async function reschedule(projectId, { pinnedId = null } = {}) {
 async function conflicts(projectId) {
   const { tasks, deps } = await loadPlan(projectId);
   if (deps.length === 0) return [];
+  const cal = await currentCalendar();
   const preds = predecessorMap(deps);
   const byId = new Map(tasks.map((t) => [t.id, t]));
   const out = [];
   for (const t of tasks) {
-    const earliest = earliestStart(t.id, preds, byId);
+    const earliest = earliestStart(t.id, preds, byId, cal);
     if (earliest && t.start_date < earliest) {
       out.push({ id: t.id, name: t.name, starts: t.start_date, earliest, daysEarly: dayDiff(earliest, t.start_date) });
     }

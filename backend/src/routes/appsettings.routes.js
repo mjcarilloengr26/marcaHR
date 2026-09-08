@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
 const { clearTimezoneCache } = require("../services/timezone");
+const { clearWorkingWeekCache, LABELS: WEEK_LABELS } = require("../services/workingWeek");
 
 const router = express.Router();
 
@@ -70,6 +71,16 @@ const TIMEZONES = [
   { code: "UTC", label: "UTC" },
 ];
 
+// Which days a project plan may schedule work on. Only the Gantt reads this —
+// payroll keeps its own weekend rule and attendance records what actually
+// happened, so choosing a six-day plan does not restate anybody's pay.
+const WORKING_WEEKS = [
+  { code: "mon_fri", label: WEEK_LABELS.mon_fri },
+  { code: "mon_sat", label: WEEK_LABELS.mon_sat },
+  { code: "mon_sun", label: WEEK_LABELS.mon_sun },
+];
+const WORKING_WEEK_CODES = new Set(WORKING_WEEKS.map((w) => w.code));
+
 const CURRENCY_CODES = new Set(CURRENCIES.map((c) => c.code));
 const TIMEZONE_CODES = new Set(TIMEZONES.map((t) => t.code));
 const LANGUAGE_CODES = new Set(LANGUAGES.map((l) => l.code));
@@ -79,7 +90,9 @@ const LANGUAGE_CODES = new Set(LANGUAGES.map((l) => l.code));
 router.get(
   "/",
   asyncHandler(async (req, res) => {
-    const row = await db.prepare("SELECT currency_code, language, timezone, updated_at FROM app_settings WHERE id = 1").get();
+    const row = await db
+      .prepare("SELECT currency_code, language, timezone, working_week, updated_at FROM app_settings WHERE id = 1")
+      .get();
     res.json(row);
   })
 );
@@ -89,7 +102,7 @@ router.get(
   requireAuth,
   requireRole("admin"),
   asyncHandler(async (req, res) => {
-    res.json({ currencies: CURRENCIES, languages: LANGUAGES, timezones: TIMEZONES });
+    res.json({ currencies: CURRENCIES, languages: LANGUAGES, timezones: TIMEZONES, workingWeeks: WORKING_WEEKS });
   })
 );
 
@@ -98,8 +111,10 @@ router.put(
   requireAuth,
   requireRole("admin"),
   asyncHandler(async (req, res) => {
-    const existing = await db.prepare("SELECT currency_code, language, timezone FROM app_settings WHERE id = 1").get();
-    const { currency_code, language, timezone } = req.body || {};
+    const existing = await db
+      .prepare("SELECT currency_code, language, timezone, working_week FROM app_settings WHERE id = 1")
+      .get();
+    const { currency_code, language, timezone, working_week } = req.body || {};
 
     if (currency_code !== undefined && !CURRENCY_CODES.has(currency_code)) {
       return res.status(400).json({ error: "Unsupported currency" });
@@ -110,28 +125,40 @@ router.put(
     if (timezone !== undefined && !TIMEZONE_CODES.has(timezone)) {
       return res.status(400).json({ error: "Unsupported timezone" });
     }
+    if (working_week !== undefined && !WORKING_WEEK_CODES.has(working_week)) {
+      return res.status(400).json({ error: "Unsupported working week" });
+    }
 
     await db
       .prepare(
-        `UPDATE app_settings SET currency_code = ?, language = ?, timezone = ?,
+        `UPDATE app_settings SET currency_code = ?, language = ?, timezone = ?, working_week = ?,
          updated_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), updated_by = ? WHERE id = 1`
       )
       .run(
         currency_code !== undefined ? currency_code : existing.currency_code,
         language !== undefined ? language : existing.language,
         timezone !== undefined ? timezone : existing.timezone,
+        working_week !== undefined ? working_week : existing.working_week,
         req.user.id
       );
 
     await logRequestEvent(req, "update_app_settings", {
       entityType: "app_settings",
-      details: { currency_code, language, timezone },
+      details: { currency_code, language, timezone, working_week },
     });
     // Attendance and the period calculations read this through a cached
     // helper; clear it so a change takes effect on the very next request.
     clearTimezoneCache();
-    res.json(await db.prepare("SELECT currency_code, language, timezone, updated_at FROM app_settings WHERE id = 1").get());
+    // Existing task dates are deliberately left alone. Only calculations from
+    // here on use the new week — a dropdown that retroactively reschedules
+    // every project is not something anyone expects a settings page to do.
+    clearWorkingWeekCache();
+    res.json(
+      await db
+        .prepare("SELECT currency_code, language, timezone, working_week, updated_at FROM app_settings WHERE id = 1")
+        .get()
+    );
   })
 );
 
-module.exports = { router, CURRENCIES, LANGUAGES, TIMEZONES };
+module.exports = { router, CURRENCIES, LANGUAGES, TIMEZONES, WORKING_WEEKS };

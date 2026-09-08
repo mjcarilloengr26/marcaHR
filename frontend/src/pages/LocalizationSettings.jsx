@@ -4,8 +4,8 @@ import { useAppSettings } from "../context/AppSettingsContext";
 
 export default function LocalizationSettings() {
   const { money, t } = useAppSettings();
-  const [options, setOptions] = useState({ currencies: [], languages: [], timezones: [] });
-  const [form, setForm] = useState({ currency_code: "", language: "", timezone: "" });
+  const [options, setOptions] = useState({ currencies: [], languages: [], timezones: [], workingWeeks: [] });
+  const [form, setForm] = useState({ currency_code: "", language: "", timezone: "", working_week: "" });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -15,7 +15,14 @@ export default function LocalizationSettings() {
     Promise.all([
       api
         .get("/app-settings")
-        .then((d) => setForm({ currency_code: d.currency_code, language: d.language, timezone: d.timezone })),
+        .then((d) =>
+          setForm({
+            currency_code: d.currency_code,
+            language: d.language,
+            timezone: d.timezone,
+            working_week: d.working_week || "mon_sun",
+          })
+        ),
       api.get("/app-settings/options").then(setOptions),
     ])
       .catch((err) => setError(err.message))
@@ -50,7 +57,12 @@ export default function LocalizationSettings() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
-      {saved && <div className="success-banner">Saved — the new currency, language and timezone are now in use.</div>}
+      {saved && (
+        <div className="success-banner">
+          Saved. The working week applies to plans from here on — dates already scheduled are left exactly where
+          they are.
+        </div>
+      )}
 
       {loading ? (
         <div className="page-loading">Loading…</div>
@@ -89,6 +101,23 @@ export default function LocalizationSettings() {
                 <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
                   Decides what counts as "today" for attendance, and the zone every date and time on screen is
                   shown in. Set it to where the staff actually work, not where the server runs.
+                </p>
+              </div>
+              <div className="form-row">
+                <label>Working week (project plans)</label>
+                <select
+                  value={form.working_week}
+                  onChange={(e) => setForm({ ...form, working_week: e.target.value })}
+                >
+                  {options.workingWeeks.map((w) => (
+                    <option key={w.code} value={w.code}>{w.label}</option>
+                  ))}
+                </select>
+                <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                  Which days a Gantt task may run on. A ten-day task on a Monday-to-Friday week finishes two
+                  calendar weeks after it starts. Payroll and attendance are not affected — they keep their own
+                  rules. Changing this does not move work already scheduled; it applies to plans from here on.
+                  Public holidays are not yet part of the calculation.
                 </p>
               </div>
             </div>

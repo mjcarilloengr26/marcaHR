@@ -28,6 +28,10 @@ const EMPTY_TASK = {
   notes: "",
   // [{ id, lag_days }] — what has to finish before this can start.
   predecessors: [],
+  duration_days: 1,
+  // Which of End and Duration the user touched last, so the save knows which
+  // one it is being asked to honour. Stripped before the request goes out.
+  durationDriven: false,
 };
 
 export default function Gantt() {
@@ -72,7 +76,7 @@ export default function Gantt() {
   }, [data, projectId, showClosed]);
 
   const openNewTask = (pid) => {
-    setForm({ ...EMPTY_TASK, predecessors: [], start_date: data.today, end_date: data.today });
+    setForm({ ...EMPTY_TASK, predecessors: [], start_date: data.today, end_date: data.today, duration_days: 1 });
     setEditing({ task: null, projectId: pid });
     setError("");
   };
@@ -90,6 +94,10 @@ export default function Gantt() {
       predecessors: (data.dependencies || [])
         .filter((d) => d.task_id === task.id)
         .map((d) => ({ id: d.depends_on_id, lag_days: d.lag_days })),
+      // Sent by the server with the task, so the count shown is the one the
+      // server would compute rather than a second opinion.
+      duration_days: task.duration_days ?? 1,
+      durationDriven: false,
     });
     setEditing({ task, projectId: task.project_id });
     setError("");
@@ -97,13 +105,52 @@ export default function Gantt() {
 
   const canEditSchedule = isHr;
 
+  // A live preview of what the server will work out. The server recomputes
+  // both from the same rule and its answer is what gets stored, so the worst a
+  // disagreement here could do is flash for a moment before the reload
+  // corrects it — the arithmetic is not duplicated as a source of truth.
+  const workDays = data?.workingWeek?.days || [0, 1, 2, 3, 4, 5, 6];
+  const DAY = 86400000;
+  const addCal = (d, n) => new Date(Date.parse(`${d}T00:00:00Z`) + n * DAY).toISOString().slice(0, 10);
+  const isWorkDay = (d) => workDays.includes(new Date(`${d}T00:00:00Z`).getUTCDay());
+  const nextWorkDay = (d) => {
+    let out = d;
+    for (let i = 0; i < 7 && !isWorkDay(out); i += 1) out = addCal(out, 1);
+    return out;
+  };
+  const durationBetween = (start, end) => {
+    if (!start || !end || end < start) return 1;
+    let n = 0;
+    for (let d = start; d <= end; d = addCal(d, 1)) if (isWorkDay(d)) n += 1;
+    return n || 1;
+  };
+  const endFromDuration = (start, days) => {
+    if (!start) return "";
+    const from = nextWorkDay(start);
+    let left = Math.max(1, days) - 1;
+    let d = from;
+    for (let guard = 0; left > 0 && guard < 4000; guard += 1) {
+      d = addCal(d, 1);
+      if (isWorkDay(d)) left -= 1;
+    }
+    return d;
+  };
+
   const saveTask = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     try {
+      const { durationDriven, duration_days, ...rest } = form;
       const body = canEditSchedule
-        ? { ...form, percent_complete: Number(form.percent_complete) || 0 }
+        ? {
+            ...rest,
+            percent_complete: Number(form.percent_complete) || 0,
+            // Duration and end date are two ways of saying the same thing, and
+            // sending both leaves the server guessing which one changed. Only
+            // the one just edited is sent.
+            ...(durationDriven ? { duration_days: Number(duration_days) || 1 } : {}),
+          }
         : { percent_complete: Number(form.percent_complete) || 0 };
       const saved = editing.task
         ? await api.put(`/projects/${editing.projectId}/tasks/${editing.task.id}`, body)
@@ -118,6 +165,9 @@ export default function Gantt() {
             ? `${moved.length} later task${moved.length === 1 ? "" : "s"} moved to keep the sequence: ` +
               moved.slice(0, 3).map((m) => `${m.name} +${m.days}d`).join(", ") +
               (moved.length > 3 ? `, and ${moved.length - 3} more` : "") + "."
+            : "",
+          saved?.snappedFrom
+            ? `${saved.snappedFrom} is not a working day, so it starts ${saved.start_date} instead.`
             : "",
           clash
             ? `It still starts ${clash.daysEarly} day${clash.daysEarly === 1 ? "" : "s"} before what it waits on finishes — saved as asked, but the plan does not add up.`
@@ -278,6 +328,7 @@ export default function Gantt() {
           tasks={visible.tasks}
           dependencies={data.dependencies || []}
           conflicts={data.conflicts || []}
+          workingWeek={data.workingWeek}
           today={data.today}
           zoom={zoom}
           onTaskClick={openTask}
@@ -341,22 +392,25 @@ export default function Gantt() {
                 />
               </div>
 
-              <div className="grid grid-2">
+              <div className="grid grid-3">
                 <div className="form-row">
                   <label>Start</label>
                   <input
                     type="date"
                     value={form.start_date}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const start = e.target.value;
+                      // Moving the start keeps the length of the work and
+                      // carries the end with it. Holding the end still instead
+                      // would silently make the task shorter, which is not what
+                      // anyone means by moving a job later.
                       setForm({
                         ...form,
-                        start_date: e.target.value,
-                        // Dragging the start past the end is a typo, not a
-                        // schedule. The end follows rather than the form
-                        // refusing to save later.
-                        end_date: form.end_date && form.end_date < e.target.value ? e.target.value : form.end_date,
-                      })
-                    }
+                        start_date: start,
+                        end_date: start ? endFromDuration(start, form.duration_days) : form.end_date,
+                        durationDriven: true,
+                      });
+                    }}
                     required
                     disabled={!canEditSchedule}
                   />
@@ -367,10 +421,41 @@ export default function Gantt() {
                     type="date"
                     value={form.is_milestone ? form.start_date : form.end_date}
                     min={form.start_date || undefined}
-                    onChange={(e) => setForm({ ...form, end_date: e.target.value })}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        end_date: e.target.value,
+                        duration_days: durationBetween(form.start_date, e.target.value),
+                        durationDriven: false,
+                      })
+                    }
                     required={!form.is_milestone}
                     disabled={!canEditSchedule || form.is_milestone}
                   />
+                </div>
+                <div className="form-row">
+                  <label>Duration</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="3650"
+                    value={form.is_milestone ? 1 : form.duration_days}
+                    onChange={(e) => {
+                      const days = Math.max(1, Number(e.target.value) || 1);
+                      setForm({
+                        ...form,
+                        duration_days: days,
+                        end_date: endFromDuration(form.start_date, days),
+                        durationDriven: true,
+                      });
+                    }}
+                    disabled={!canEditSchedule || form.is_milestone}
+                  />
+                  <span className="subtitle" style={{ fontSize: 12 }}>
+                    {form.is_milestone
+                      ? "a single date"
+                      : `working days · ${data.workingWeek?.label || "every day"}`}
+                  </span>
                 </div>
               </div>
 

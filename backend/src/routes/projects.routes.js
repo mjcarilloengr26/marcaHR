@@ -6,6 +6,7 @@ const { logRequestEvent } = require("../services/auditLog");
 const { withRollup, money } = require("../services/projectRollup");
 const { appTimezone } = require("../services/timezone");
 const { wouldCycle, reschedule, conflicts, allDependencies } = require("../services/taskSchedule");
+const { currentCalendar, LABELS } = require("../services/workingWeek");
 
 const router = express.Router();
 
@@ -147,11 +148,21 @@ router.get(
          ORDER BY t.project_id, t.position, t.start_date, t.id`
       )
       .all();
+    const cal = await currentCalendar();
     const dependencies = await allDependencies();
     // Conflicts are worked out per project rather than globally: a task can
     // only ever wait on one inside its own plan.
     const clashes = (await Promise.all(all.map((pr) => conflicts(pr.id)))).flat();
-    res.json({ today: day, projects, tasks, dependencies, conflicts: clashes });
+    res.json({
+      today: day,
+      projects,
+      tasks: withDuration(tasks, cal),
+      dependencies,
+      conflicts: clashes,
+      // The chart shades the days nobody works; the dialog labels its duration
+      // field with which week it is counting.
+      workingWeek: { value: cal.week, label: LABELS[cal.week], days: [...cal.days] },
+    });
   })
 );
 
@@ -171,9 +182,11 @@ router.get(
          WHERE t.project_id = ? ORDER BY t.position, t.start_date, t.id`
       )
       .all(req.params.id);
+    const cal = await currentCalendar();
     res.json({
       ...project,
-      taskList: tasks,
+      taskList: withDuration(tasks, cal),
+      workingWeek: { value: cal.week, label: LABELS[cal.week], days: [...cal.days] },
       dependencies: (await allDependencies()).filter((d) => tasks.some((t) => t.id === d.task_id)),
       conflicts: await conflicts(project.id),
     });
@@ -327,18 +340,45 @@ router.delete(
 
 /* ---------------------------------------------------------------- tasks --- */
 
-function validateTask(body, existing = {}) {
+// `cal` is the working-week calendar. Duration is accepted as an alternative
+// to the end date and resolved here rather than on the client: the client
+// would need its own copy of the working-day arithmetic to do it, and two
+// implementations of the same rule is how they drift.
+function validateTask(body, existing = {}, cal) {
   const pick = (key) => (body[key] === undefined ? existing[key] : body[key]);
 
   const name = text(pick("name"));
   if (!name) return { error: "Give the task a name" };
 
   const milestone = Boolean(pick("is_milestone"));
-  const start = text(pick("start_date"));
-  if (!start || !DATE.test(start)) return { error: "A task needs a start date" };
-  // A milestone is a single date, so it has no end of its own to get wrong.
-  const end = milestone ? start : text(pick("end_date"));
-  if (!end || !DATE.test(end)) return { error: "A task needs an end date" };
+  const rawStart = text(pick("start_date"));
+  if (!rawStart || !DATE.test(rawStart)) return { error: "A task needs a start date" };
+
+  // A start on a day nobody works gets moved to the next working day rather
+  // than refused. Refusing is irritating and allowing it silently breaks the
+  // duration it is measured with — the save notice says it happened.
+  const start = cal.nextWorkingDay(rawStart);
+  const snapped = start !== rawStart;
+
+  // Duration wins when it is the thing that was sent, because it is the more
+  // specific statement: "this takes ten days" survives the start moving, an
+  // end date does not.
+  const rawDuration = body.duration_days;
+  const hasDuration = rawDuration !== undefined && rawDuration !== null && rawDuration !== "";
+  let end;
+  if (milestone) {
+    // A milestone is a single date, so it has no end of its own to get wrong.
+    end = start;
+  } else if (hasDuration) {
+    const days = Math.round(Number(rawDuration));
+    if (!Number.isFinite(days) || days < 1 || days > 3650) {
+      return { error: "Duration must be between 1 and 3650 working days" };
+    }
+    end = cal.endAfterWorkingDays(start, days);
+  } else {
+    end = text(pick("end_date"));
+  }
+  if (!end || !DATE.test(end)) return { error: "A task needs an end date, or a duration in days" };
   if (end < start) return { error: "The task cannot end before it starts" };
 
   const pct = pick("percent_complete");
@@ -357,7 +397,17 @@ function validateTask(body, existing = {}) {
     is_milestone: milestone,
     position: Number(pick("position")) || 0,
     notes: text(pick("notes")),
+    snappedFrom: snapped ? rawStart : null,
   };
+}
+
+// Durations are derived and handed back with every task, so nothing on the
+// client has to reimplement the working-day count to display one.
+function withDuration(tasks, cal) {
+  return tasks.map((t) => ({
+    ...t,
+    duration_days: t.is_milestone ? 1 : cal.workingDaysBetween(t.start_date, t.end_date),
+  }));
 }
 
 // Accepts either bare ids or {id, lag_days} objects, so the simple case stays
@@ -427,7 +477,8 @@ router.post(
     const project = await db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id);
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    const v = validateTask(req.body || {});
+    const cal = await currentCalendar();
+    const v = validateTask(req.body || {}, {}, cal);
     if (v.error) return res.status(400).json({ error: v.error });
 
     // A phase from another project would draw one project's bar inside
@@ -482,9 +533,11 @@ router.post(
 
     if (linkError) return res.status(400).json({ error: linkError });
 
+    const created = await db.prepare("SELECT * FROM project_tasks WHERE id = ?").get(taskId);
     res.status(201).json({
-      ...(await db.prepare("SELECT * FROM project_tasks WHERE id = ?").get(taskId)),
+      ...withDuration([created], cal)[0],
       moved: shifted.moved,
+      snappedFrom: v.snappedFrom,
     });
   })
 );
@@ -512,7 +565,8 @@ router.put(
     const preds = parsePredecessors(req.body?.predecessors);
     if (preds && preds.error) return res.status(400).json({ error: preds.error });
 
-    const v = validateTask(req.body || {}, existing);
+    const cal = await currentCalendar();
+    const v = validateTask(req.body || {}, existing, cal);
     if (v.error) return res.status(400).json({ error: v.error });
 
     if (v.parent_id && Number(v.parent_id) === Number(req.params.taskId)) {
@@ -558,9 +612,11 @@ router.put(
 
     if (linkError) return res.status(400).json({ error: linkError });
 
+    const updated = await db.prepare("SELECT * FROM project_tasks WHERE id = ?").get(req.params.taskId);
     res.json({
-      ...(await db.prepare("SELECT * FROM project_tasks WHERE id = ?").get(req.params.taskId)),
+      ...withDuration([updated], cal)[0],
       moved: shifted.moved,
+      snappedFrom: v.snappedFrom,
       conflicts: await conflicts(Number(req.params.id)),
     });
   })

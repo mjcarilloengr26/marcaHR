@@ -604,6 +604,15 @@ CREATE TABLE IF NOT EXISTS app_settings (
   -- a 30-day rule that fits fast-moving supply quotes would flag every
   -- long-lead engineering bid as a failure.
   stale_deal_days INTEGER NOT NULL DEFAULT 30,
+  -- Which days a project plan may schedule work on. Only the Gantt reads it:
+  -- payroll has its own weekend rule and attendance records whatever actually
+  -- happened, neither of which should change because a planner chose a
+  -- six-day week.
+  --
+  -- Defaults to the whole week, which is exactly the behaviour that existed
+  -- before the setting — a plan already entered keeps every date it had until
+  -- somebody deliberately chooses a shorter week.
+  working_week TEXT NOT NULL DEFAULT 'mon_sun' CHECK(working_week IN ('mon_fri','mon_sat','mon_sun')),
   updated_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
   updated_by INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
@@ -1215,6 +1224,14 @@ async function ensureExpenseType() {
 // Nullable everywhere, with no backfill: most records genuinely do not belong
 // to a project, and guessing which of the old ones did would put invented
 // figures into a project P&L that is supposed to be the reliable one.
+// app_settings predates the planning calendar. Added with the whole-week
+// default so an existing plan is untouched until the setting is changed.
+async function ensureWorkingWeek() {
+  await pool.query(
+    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS working_week TEXT NOT NULL DEFAULT 'mon_sun'"
+  );
+}
+
 async function ensureProjectLinks() {
   for (const table of ["expense_reports", "purchase_orders", "invoices", "work_orders", "orders"]) {
     await pool.query(
@@ -1400,6 +1417,7 @@ db.migrate = function () {
       .then(() => ensurePurchaseOrderWorkOrder())
       .then(() => ensureExpenseType())
       .then(() => ensureProjectLinks())
+      .then(() => ensureWorkingWeek())
       .then(() => ensurePayrollTimeSettings())
       .then(() => ensurePayrollNightDifferential())
       .then(() => ensurePayrollDeductionBreakdown())

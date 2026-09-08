@@ -1581,6 +1581,17 @@ body.snapshot-tv .content {
 .gantt-row-project .gantt-track { background: var(--hover-bg); }
 .gantt-row-project { height: 38px; }
 
+/* Days the plan may not schedule on. Deliberately faint: it is the ground the
+   chart stands on, not something to read. */
+.gantt-offday {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: var(--hover-bg-subtle);
+  pointer-events: none;
+}
+.gantt-key-offday { background: var(--hover-bg-subtle); border: 1px solid var(--border); }
+
 .gantt-gridline {
   position: absolute;
   top: 0;
