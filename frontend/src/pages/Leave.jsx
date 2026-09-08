@@ -37,8 +37,51 @@ export default function Leave() {
   const [editingBalance, setEditingBalance] = useState(null); // the balance row being edited, or null
   const [balanceAmount, setBalanceAmount] = useState("");
   const [search, setSearch] = useState("");
+  // The applicant's own allowances, so the form can say what is left before
+  // anything is typed. The server refuses an overdraw either way, but finding
+  // that out only after pressing Submit is a poor way to learn you have no
+  // sick leave.
+  const [applicantBalances, setApplicantBalances] = useState([]);
 
   const loadRequests = () => api.get("/leave/requests").then(setRequests).catch((err) => setError(err.message));
+
+  // Who the request is being raised for: an employee can only file their own,
+  // and HR picks from the dropdown.
+  const applicantId = isHr ? form.employee_id : user.employee_id;
+
+  useEffect(() => {
+    if (!showForm || !applicantId) {
+      setApplicantBalances([]);
+      return;
+    }
+    api
+      .get(`/leave/balances/${applicantId}`)
+      .then(setApplicantBalances)
+      // Silent: the field still works, it just cannot annotate itself, and the
+      // server is the thing that actually enforces the limit.
+      .catch(() => setApplicantBalances([]));
+  }, [showForm, applicantId]);
+
+  // What is genuinely left: allocated, less what has been used, less anything
+  // already waiting for a decision. Pending is counted from the requests
+  // already on the page — the same rule the server applies, so the number in
+  // the dropdown is the number the server will check against.
+  const remainingFor = (leaveTypeId) => {
+    const row = applicantBalances.find((b) => String(b.leave_type_id) === String(leaveTypeId));
+    if (!row) return null;
+    const year = new Date().getFullYear();
+    const pending = requests
+      .filter(
+        (r) =>
+          String(r.employee_id) === String(applicantId) &&
+          String(r.leave_type_id) === String(leaveTypeId) &&
+          r.status === "pending" &&
+          String(r.start_date).slice(0, 4) === String(year) &&
+          (!resubmitting || r.id !== resubmitting.id)
+      )
+      .reduce((n, r) => n + Number(r.days || 0), 0);
+    return Math.round((Number(row.allocated_days) - Number(row.used_days) - pending) * 1000) / 1000;
+  };
 
   const loadBalances = (employeeId) => {
     if (!employeeId) {
@@ -492,10 +535,29 @@ export default function Leave() {
               <label>Leave type</label>
               <select value={form.leave_type_id} onChange={(e) => setForm({ ...form, leave_type_id: e.target.value })} required>
                 <option value="">Select type</option>
-                {types.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
-                ))}
+                {types.map((t) => {
+                  const left = remainingFor(t.id);
+                  return (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                      {left === null ? "" : left <= 0 ? " — none left" : ` — ${left} day${left === 1 ? "" : "s"} left`}
+                    </option>
+                  );
+                })}
               </select>
+              {form.leave_type_id && remainingFor(form.leave_type_id) !== null && (
+                <span
+                  className="subtitle"
+                  style={{
+                    fontSize: 12,
+                    color: remainingFor(form.leave_type_id) <= 0 ? "var(--danger)" : undefined,
+                  }}
+                >
+                  {remainingFor(form.leave_type_id) <= 0
+                    ? "Nothing left in this allowance for the year — HR has to raise the allocation before this can be filed."
+                    : `${remainingFor(form.leave_type_id)} day${remainingFor(form.leave_type_id) === 1 ? "" : "s"} left, counting anything already awaiting approval.`}
+                </span>
+              )}
             </div>
             <div className="grid grid-2">
               <div className="form-row">

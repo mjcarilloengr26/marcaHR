@@ -97,6 +97,63 @@ async function ensureLeaveBalancesForYear(employeeId, year) {
   }
 }
 
+// What is actually left of an allowance, and the one place that decides it.
+//
+// Nothing checked this before: an employee could apply for sick leave with
+// nothing allocated, and an approver could grant it, because neither path ever
+// read the balance. That is how a zero allocation ended up with a day used
+// against it.
+//
+// Pending requests count against the remainder. They are not spent yet, but
+// they have been asked for, and ignoring them lets somebody with five days
+// left submit five separate five-day requests and have every one of them
+// approved — each looking affordable on its own.
+//
+// excludeRequestId leaves one request out of that pending total, so approving
+// a request does not find itself already counted and refuse itself.
+async function leavePosition(employeeId, leaveTypeId, year, { excludeRequestId = null } = {}) {
+  await ensureLeaveBalancesForYear(employeeId, year);
+
+  const [balance, pendingRow] = await Promise.all([
+    db
+      .prepare(
+        "SELECT allocated_days, used_days FROM leave_balances WHERE employee_id = ? AND leave_type_id = ? AND year = ?"
+      )
+      .get(employeeId, leaveTypeId, year),
+    db
+      .prepare(
+        `SELECT COALESCE(SUM(days), 0) AS days FROM leave_requests
+         WHERE employee_id = ? AND leave_type_id = ? AND status = 'pending'
+           AND substr(start_date, 1, 4) = ? AND id <> ?`
+      )
+      .get(employeeId, leaveTypeId, String(year), excludeRequestId || 0),
+  ]);
+
+  const allocated = Number(balance?.allocated_days) || 0;
+  const used = Number(balance?.used_days) || 0;
+  const pending = Number(pendingRow?.days) || 0;
+  return {
+    allocated,
+    used,
+    pending,
+    // Can go negative where days were granted before this check existed. Left
+    // signed rather than clamped, so the message can say how far over it is.
+    remaining: Number((allocated - used - pending).toFixed(3)),
+  };
+}
+
+// One sentence an employee can act on: what they have, what is gone, and what
+// they just asked for.
+function shortfallMessage(typeName, year, days, pos) {
+  const parts = [
+    `${typeName}: ${pos.allocated} day${pos.allocated === 1 ? "" : "s"} allocated for ${year}`,
+    `${pos.used} already used`,
+  ];
+  if (pos.pending > 0) parts.push(`${pos.pending} awaiting approval`);
+  const left = Math.max(0, pos.remaining);
+  return `${parts.join(", ")} — that leaves ${left}, and this request is for ${days} day${days === 1 ? "" : "s"}.`;
+}
+
 router.get(
   "/balances/:employeeId",
   requireAuth,
@@ -186,6 +243,20 @@ router.post(
     const days = daysBetween(start_date, end_date);
     if (days <= 0) return res.status(400).json({ error: "end_date must be on or after start_date" });
 
+    // The allowance is keyed to the year the leave starts in, which is the same
+    // year the approval will later deduct from.
+    const year = Number(String(start_date).slice(0, 4));
+    const leaveTypeRow = await db.prepare("SELECT id, name FROM leave_types WHERE id = ?").get(leave_type_id);
+    if (!leaveTypeRow) return res.status(400).json({ error: "That leave type does not exist" });
+
+    const position = await leavePosition(employee_id, leave_type_id, year);
+    if (days > position.remaining) {
+      return res.status(400).json({
+        error: shortfallMessage(leaveTypeRow.name, year, days, position),
+        balance: position,
+      });
+    }
+
     const attachment = parseAttachment(body);
     const info = await db
       .prepare(
@@ -219,6 +290,26 @@ router.put(
     }
     const request = await db.prepare("SELECT * FROM leave_requests WHERE id = ?").get(req.params.id);
     if (!request) return res.status(404).json({ error: "Leave request not found" });
+
+    // Re-checked at approval, not just at application. Time passes between
+    // the two: another request may have been approved since, or HR may have cut
+    // the allocation, and the figure that mattered when it was asked for is not
+    // the figure that matters when it is granted.
+    if (status === "approved" && request.status !== "approved") {
+      const year = Number(String(request.start_date).slice(0, 4));
+      const type = await db.prepare("SELECT name FROM leave_types WHERE id = ?").get(request.leave_type_id);
+      const position = await leavePosition(request.employee_id, request.leave_type_id, year, {
+        excludeRequestId: request.id,
+      });
+      if (Number(request.days) > position.remaining) {
+        return res.status(400).json({
+          error:
+            `Cannot approve — ${shortfallMessage(type?.name || "This leave", year, Number(request.days), position)} ` +
+            "Raise the allocation first if this is meant to be granted.",
+          balance: position,
+        });
+      }
+    }
 
     const reviewerId = req.user.employee_id || null;
     await db.prepare("UPDATE leave_requests SET status = ?, reviewed_by = ?, review_note = ? WHERE id = ?").run(
@@ -288,6 +379,18 @@ router.put(
     const end_date = body.end_date || request.end_date;
     const days = daysBetween(start_date, end_date);
     if (days <= 0) return res.status(400).json({ error: "end_date must be on or after start_date" });
+
+    // Resubmitting puts the request back in the queue, so it has to clear the
+    // same bar as a fresh one — the type or the dates may have been edited on
+    // the way through, and the allowance may have moved since it was rejected.
+    const typeId = body.leave_type_id || request.leave_type_id;
+    const year = Number(String(start_date).slice(0, 4));
+    const type = await db.prepare("SELECT name FROM leave_types WHERE id = ?").get(typeId);
+    if (!type) return res.status(400).json({ error: "That leave type does not exist" });
+    const position = await leavePosition(request.employee_id, typeId, year, { excludeRequestId: request.id });
+    if (days > position.remaining) {
+      return res.status(400).json({ error: shortfallMessage(type.name, year, days, position), balance: position });
+    }
 
     const attachment = body.attachment_data !== undefined ? parseAttachment(body) : null;
 
