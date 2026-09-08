@@ -42,6 +42,14 @@ const BILLING_SQL = `
   WHERE project_id IS NOT NULL
   GROUP BY project_id`;
 
+const ORDERS_SQL = `
+  SELECT project_id,
+         COUNT(*)::int AS orders,
+         COALESCE(SUM(amount) FILTER (WHERE status <> 'cancelled'), 0) AS ordered
+  FROM orders
+  WHERE project_id IS NOT NULL
+  GROUP BY project_id`;
+
 const DELIVERY_SQL = `
   SELECT project_id,
          COUNT(*)::int AS work_orders,
@@ -117,13 +125,14 @@ function schedule(project, progressPercent, today) {
 }
 
 async function withRollup(today = new Date().toISOString().slice(0, 10)) {
-  const [projects, spend, procurement, billing, delivery, tasks] = await Promise.all([
+  const [projects, spend, procurement, billing, delivery, tasks, orders] = await Promise.all([
     db.prepare(PROJECT_SQL).all(),
     db.prepare(SPEND_SQL).all(),
     db.prepare(PROCUREMENT_SQL).all(),
     db.prepare(BILLING_SQL).all(),
     db.prepare(DELIVERY_SQL).all(),
     db.prepare(TASK_SQL).all(today),
+    db.prepare(ORDERS_SQL).all(),
   ]);
 
   const byId = (rows) => new Map(rows.map((r) => [r.project_id, r]));
@@ -132,6 +141,7 @@ async function withRollup(today = new Date().toISOString().slice(0, 10)) {
   const billBy = byId(billing);
   const delivBy = byId(delivery);
   const taskBy = byId(tasks);
+  const orderBy = byId(orders);
 
   return projects.map((p) => {
     const e = spendBy.get(p.id);
@@ -139,6 +149,7 @@ async function withRollup(today = new Date().toISOString().slice(0, 10)) {
     const b = billBy.get(p.id);
     const d = delivBy.get(p.id);
     const t = taskBy.get(p.id);
+    const ord = orderBy.get(p.id);
 
     const expenseSpend = money(e ? e.spent : 0);
     const procurementSpend = money(po ? po.spent : 0);
@@ -164,6 +175,17 @@ async function withRollup(today = new Date().toISOString().slice(0, 10)) {
         draftInvoices: b ? b.draft_invoices : 0,
       },
       delivery: { workOrders: d ? d.work_orders : 0, completed: d ? d.work_orders_done : 0 },
+      // What has actually been ordered against the job, next to what the
+      // contract says it is worth. The two are allowed to differ — a signed
+      // contract is not always the sum of the order records, and a project in
+      // planning has a value before it has a single order — but a difference
+      // nobody can see is one that quietly makes the margin wrong, so the
+      // register shows it rather than reconciling it silently.
+      orders: {
+        count: ord ? ord.orders : 0,
+        value: money(ord ? ord.ordered : 0),
+        differsFromContract: Boolean(ord && Math.abs(money(ord.ordered) - contract) >= 0.01),
+      },
       margin: money(contract - spent),
       // Null rather than 0 when nothing was sold: a project with no contract
       // value has an unknown margin, not a break-even one, and 0% reads as the

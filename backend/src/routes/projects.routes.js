@@ -24,7 +24,7 @@ const text = (v) => (v === undefined || v === null ? null : String(v).trim() || 
 // nearly identical query for people who may not see money — and two queries
 // that are meant to agree are exactly how figures drift apart.
 function stripMoney(p) {
-  const { contract_value, spend, margin, marginPercent, spentPercent, overSpend, billing, ...rest } = p;
+  const { contract_value, spend, margin, marginPercent, spentPercent, overSpend, billing, orders, ...rest } = p;
   return rest;
 }
 
@@ -181,24 +181,56 @@ router.post(
     const clash = await codeClash(v.code);
     if (clash) return res.status(409).json({ error: `Project code "${clash.code}" is already in use` });
 
-    const info = await db
-      .prepare(
-        `INSERT INTO projects (code, name, client_name, description, status, start_date, target_end_date,
-                               actual_end_date, contract_value, owner_id, cost_center_id, notes, created_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        v.code, v.name, v.client_name, v.description, v.status, v.start_date, v.target_end_date,
-        v.actual_end_date, v.contract_value, v.owner_id, v.cost_center_id, v.notes,
-        req.user.employee_id || null
-      );
+    // Created from an order: the sale it came from is attached to the project
+    // in the same breath. Prefilling the name, client and value from an order
+    // and then not linking it would leave a project quoting a contract figure
+    // taken from an order that is not on its books — the value would be there
+    // but nothing billed against it would ever find its way home.
+    const fromOrderId = req.body?.from_order_id ? Number(req.body.from_order_id) : null;
+    let order = null;
+    if (fromOrderId) {
+      order = await db.prepare("SELECT id, order_number, project_id, status FROM orders WHERE id = ?").get(fromOrderId);
+      if (!order) return res.status(400).json({ error: "That order does not exist" });
+      if (order.project_id) {
+        return res.status(409).json({ error: `${order.order_number} is already booked to another project` });
+      }
+      if (order.status === "cancelled") {
+        return res.status(400).json({ error: `${order.order_number} is cancelled — it cannot start a project` });
+      }
+    }
+
+    // One transaction: a project created with its order left unattached is the
+    // half-state this whole path exists to avoid, and it would be invisible —
+    // the project would look complete and simply never collect its billing.
+    let projectId;
+    await db.transaction(async () => {
+      const info = await db
+        .prepare(
+          `INSERT INTO projects (code, name, client_name, description, status, start_date, target_end_date,
+                                 actual_end_date, contract_value, owner_id, cost_center_id, notes, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          v.code, v.name, v.client_name, v.description, v.status, v.start_date, v.target_end_date,
+          v.actual_end_date, v.contract_value, v.owner_id, v.cost_center_id, v.notes,
+          req.user.employee_id || null
+        );
+      projectId = info.lastInsertRowid;
+
+      if (order) {
+        await db.prepare("UPDATE orders SET project_id = ? WHERE id = ?").run(projectId, order.id);
+      }
+    })();
 
     await logRequestEvent(req, "create_project", {
       entityType: "project",
-      entityId: info.lastInsertRowid,
-      details: { code: v.code, name: v.name, contract_value: v.contract_value },
+      entityId: projectId,
+      details: { code: v.code, name: v.name, contract_value: v.contract_value, fromOrder: order?.order_number || null },
     });
-    res.status(201).json(await db.prepare("SELECT * FROM projects WHERE id = ?").get(info.lastInsertRowid));
+    res.status(201).json({
+      ...(await db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId)),
+      linkedOrder: order ? order.order_number : null,
+    });
   })
 );
 

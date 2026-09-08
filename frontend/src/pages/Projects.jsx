@@ -26,6 +26,9 @@ const EMPTY = {
   owner_id: "",
   cost_center_id: "",
   notes: "",
+  // The order the project was raised from. Not a project column — it is written
+  // to the order's own project_id when the project is created.
+  from_order_id: "",
 };
 
 const STATUS_LABEL = {
@@ -67,6 +70,7 @@ export default function Projects() {
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [showClosed, setShowClosed] = useState(false);
+  const [orders, setOrders] = useState([]);
 
   const load = () =>
     api
@@ -80,15 +84,55 @@ export default function Projects() {
     if (isHr) {
       api.get("/employees").then(setEmployees).catch(() => {});
       api.get("/cost-centers/options").then(setCostCenters).catch(() => {});
+      // Silent on failure: the shortcut simply does not appear, and the form
+      // still works the way it always has.
+      api.get("/orders").then(setOrders).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const openNew = () => {
     setForm(EMPTY);
+    setPrefilled({});
     setEditingId(null);
     setError("");
     setShowForm(true);
+  };
+
+  // Orders not yet booked to a project. A cancelled one cannot start a job,
+  // and one already attached belongs to a project that exists — offering either
+  // would only produce a link the server refuses.
+  const availableOrders = orders.filter((o) => !o.project_id && o.status !== "cancelled");
+
+  // What the last chosen order put into the form. Changing your mind about the
+  // order has to move the three fields with it: filling only blanks meant
+  // switching from one order to another kept the first order's name and value
+  // while linking the second — a project labelled and priced from one job and
+  // booked to a different one, with nothing on screen to show it.
+  //
+  // Anything typed by hand is still safe. A field is only replaced when it is
+  // empty or still holds exactly what the previous order wrote there.
+  const [prefilled, setPrefilled] = useState({});
+
+  const pickOrder = (id) => {
+    const o = orders.find((x) => String(x.id) === String(id));
+    // The order number is the fallback name — an order raised without an
+    // opportunity behind it has no title of its own.
+    const next = o
+      ? { name: o.deal_title || o.order_number, client_name: o.customer_name || "", contract_value: o.amount ? String(o.amount) : "" }
+      : { name: "", client_name: "", contract_value: "" };
+
+    setForm((f) => {
+      const keep = (field) => (f[field] && f[field] !== prefilled[field] ? f[field] : next[field]);
+      return {
+        ...f,
+        from_order_id: o ? String(o.id) : "",
+        name: keep("name"),
+        client_name: keep("client_name"),
+        contract_value: keep("contract_value"),
+      };
+    });
+    setPrefilled(next);
   };
 
   const openEdit = (p) => {
@@ -117,13 +161,16 @@ export default function Projects() {
     setError("");
     try {
       const body = { ...form, contract_value: Number(form.contract_value || 0) };
+      let created = null;
       if (editingId) await api.put(`/projects/${editingId}`, body);
-      else await api.post("/projects", body);
+      else created = await api.post("/projects", body);
       setShowForm(false);
       setNotice(
         editingId
           ? `${form.code} updated.`
-          : `${form.code} added — expenses, purchase orders and invoices can now be filed against it.`
+          : created?.linkedOrder
+            ? `${form.code} added, with ${created.linkedOrder} booked to it — billing that order now lands on this project.`
+            : `${form.code} added — expenses, purchase orders and invoices can now be filed against it.`
       );
       await load();
     } catch (err) {
@@ -252,7 +299,22 @@ export default function Projects() {
                             : ""}
                         </div>
                       </td>
-                      <td className="col-nowrap">{p.contract_value > 0 ? money(p.contract_value) : "—"}</td>
+                      <td className="col-nowrap">
+                        {p.contract_value > 0 ? money(p.contract_value) : "—"}
+                        {/* A signed contract is not always the sum of the order
+                            records — a variation raised as its own order is the
+                            usual reason — so the two are shown side by side
+                            rather than reconciled. A gap nobody can see is one
+                            that quietly makes the margin wrong. */}
+                        {p.orders.count > 0 && (
+                          <div
+                            className="subtitle"
+                            style={{ fontSize: 12, margin: 0, color: p.orders.differsFromContract ? "var(--warning)" : undefined }}
+                          >
+                            {money(p.orders.value)} ordered · {p.orders.count} order{p.orders.count === 1 ? "" : "s"}
+                          </div>
+                        )}
+                      </td>
                       <td className="col-nowrap">
                         {money(p.spend.total)}
                         <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>
@@ -326,6 +388,25 @@ export default function Projects() {
               The code is how spend is filed against the job, so it is worth choosing one people will
               recognise on an expense form.
             </p>
+            {!editingId && availableOrders.length > 0 && (
+              <div className="card" style={{ padding: 12, marginBottom: 14 }}>
+                <div className="form-row" style={{ margin: 0 }}>
+                  <label>Start from an order (optional)</label>
+                  <select value={form.from_order_id} onChange={(e) => pickOrder(e.target.value)}>
+                    <option value="">Not from an order — enter the details below</option>
+                    {availableOrders.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.order_number} — {o.customer_name} — {money(o.amount)}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="subtitle" style={{ fontSize: 12 }}>
+                    Fills the name, client and contract value, and books that order to the project so
+                    billing it lands here. Anything you have already typed is left alone.
+                  </span>
+                </div>
+              </div>
+            )}
             <form onSubmit={save}>
               <div className="grid grid-3">
                 <div className="form-row">
