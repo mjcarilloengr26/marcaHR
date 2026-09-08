@@ -24,6 +24,8 @@ export default function Reports() {
   const [exportingPayroll, setExportingPayroll] = useState(false);
   const [exportingProjects, setExportingProjects] = useState(false);
   const [projectsIncludeClosed, setProjectsIncludeClosed] = useState(false);
+  const [spendIncludeClosed, setSpendIncludeClosed] = useState(false);
+  const [exportingSpend, setExportingSpend] = useState(false);
 
   const [expPeriodType, setExpPeriodType] = useState("monthly");
   const [expPeriodIndex, setExpPeriodIndex] = useState(now.getMonth() + 1);
@@ -117,6 +119,21 @@ export default function Reports() {
       setError(err.message);
     } finally {
       setExportingProjects(false);
+    }
+  };
+
+  const exportProjectSpend = async () => {
+    setExportingSpend(true);
+    setError("");
+    try {
+      await downloadFile(
+        `/reports/project-spend-export?include_closed=${spendIncludeClosed ? 1 : 0}`,
+        "marca-group-project-spend.xlsx"
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setExportingSpend(false);
     }
   };
 
@@ -318,10 +335,11 @@ export default function Reports() {
         <div className="card" style={{ marginBottom: 16 }}>
           <h2>Projects &amp; Gantt</h2>
           <p className="subtitle" style={{ margin: "0 0 12px" }}>
-            One workbook with three sheets: the project register and its P&amp;L, the Gantt drawn as a
-            week-by-week grid that prints in landscape, and the same tasks as flat rows to sort and
-            filter. No period to choose — a project runs across months, so it is exported as it stands
-            today.
+            The plan: the project register, the Gantt drawn as a week-by-week grid that prints in
+            landscape, and the same tasks as flat rows to sort and filter. No money on it — contract
+            values and margins are in Project Spend below, so this one can be handed to anybody doing
+            the work. No period to choose: a project runs across months, so it is exported as it
+            stands today.
           </p>
           <div className="form-inline" style={{ marginBottom: 16 }}>
             <div className="form-row">
@@ -339,6 +357,35 @@ export default function Reports() {
           </div>
           <button className="btn" onClick={exportProjects} disabled={exportingProjects}>
             {exportingProjects ? "Building…" : "Download Excel"}
+          </button>
+        </div>
+      )}
+
+      {canExportPayroll && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>Project Spend</h2>
+          <p className="subtitle" style={{ margin: "0 0 12px" }}>
+            What every job was sold for against what it has actually cost — the Projects page as a
+            sheet, then every expense line and every purchase order behind those totals so a figure
+            can be taken apart without opening the app. Counted on exactly the rules the app uses, so
+            the detail adds up to the summary rather than to something near it.
+          </p>
+          <div className="form-inline" style={{ marginBottom: 16 }}>
+            <div className="form-row">
+              <label>&nbsp;</label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={spendIncludeClosed}
+                  onChange={(e) => setSpendIncludeClosed(e.target.checked)}
+                  style={{ width: "auto" }}
+                />
+                Include completed and cancelled projects
+              </label>
+            </div>
+          </div>
+          <button className="btn" onClick={exportProjectSpend} disabled={exportingSpend}>
+            {exportingSpend ? "Building…" : "Download Excel"}
           </button>
         </div>
       )}

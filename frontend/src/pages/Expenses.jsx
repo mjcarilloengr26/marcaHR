@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import SuggestInput from "../components/SuggestInput";
 import { useAuth } from "../context/AuthContext";
@@ -328,7 +329,7 @@ export default function Expenses() {
     // Category is searchable too, so "transport" finds the reports containing
     // transport lines rather than only ones titled that.
     const categories = (r.categories || []).map((c) => c.category).join(" ");
-    return [r.employee_name, r.title, r.expense_type, r.cost_center, r.status, categories]
+    return [r.employee_name, r.title, r.expense_type, r.cost_center, r.project_code, r.project_name, r.status, categories]
       .some((v) => (v || "").toLowerCase().includes(q));
   });
   const { sorted, toggleSort, arrow } = useSort(filteredReports, "created_at", "desc");
@@ -493,6 +494,7 @@ export default function Expenses() {
                   colour as the sortable headings either way. */}
               <th className="th-plain">Category</th>
               <th className="th-plain" style={{ minWidth: 130 }}>Cost center</th>
+              <th className="th-plain" style={{ minWidth: 130 }}>Project</th>
               <SortTh label="Cash advance" sortKey="cash_advance_amount" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 130 }} />
               <SortTh label="Expenses" sortKey="total_expenses" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 100 }} />
               <SortTh label="Balance" sortKey="balance" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 175 }} />
@@ -536,6 +538,16 @@ export default function Expenses() {
                   )}
                 </td>
                 <td>{r.cost_center || "—"}</td>
+                <td>
+                  {r.project_code ? (
+                    <>
+                      <Link to="/projects" className="location-link">{r.project_code}</Link>
+                      <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>{r.project_name}</div>
+                    </>
+                  ) : (
+                    <span className="subtitle" style={{ margin: 0 }}>Not project work</span>
+                  )}
+                </td>
                 <td>
                   {r.advance_reference ? (
                     <>

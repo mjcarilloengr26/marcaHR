@@ -309,14 +309,20 @@ function weekStart(iso) {
   return addDays(iso, -back);
 }
 
+// The plan, and nothing about money.
+//
+// Anyone who can read the chart can export it: the people keeping a schedule
+// current are the ones doing the work, and a plan they cannot take away with
+// them is a plan they update from memory. What they must not carry off is the
+// contract value and the margin, so those are not on this workbook at all —
+// for anybody. Withholding them by role would leave one export whose contents
+// depend on who asked, which is the kind of thing nobody notices has leaked
+// until it has. The commercial figures live in their own report instead, at
+// /project-spend-export.
 router.get(
   "/projects-export",
   requireAuth,
   asyncHandler(async (req, res) => {
-    if (!(await isAdminHrOrFinance(req))) {
-      return res.status(403).json({ error: "Insufficient permissions" });
-    }
-
     const today = new Date().toLocaleDateString("en-CA", { timeZone: await appTimezone() });
     const includeClosed = String(req.query.include_closed || "") === "1";
 
@@ -325,7 +331,6 @@ router.get(
       ? all
       : all.filter((p) => p.status !== "completed" && p.status !== "cancelled");
     const ids = projects.map((p) => p.id);
-
     const tasks = ids.length
       ? await db
           .prepare(
@@ -354,14 +359,6 @@ router.get(
       { header: "Start", key: "start_date", width: 12 },
       { header: "Target End", key: "target_end_date", width: 12 },
       { header: "Actual End", key: "actual_end_date", width: 12 },
-      { header: "Contract Value", key: "contract_value", width: 16 },
-      { header: "Spend — Expenses", key: "spend_expenses", width: 17 },
-      { header: "Spend — Purchasing", key: "spend_procurement", width: 18 },
-      { header: "Spend — Total", key: "spend_total", width: 15 },
-      { header: "Margin", key: "margin", width: 15 },
-      { header: "Margin %", key: "margin_percent", width: 10 },
-      { header: "Invoiced", key: "invoiced", width: 15 },
-      { header: "Collected", key: "collected", width: 15 },
       { header: "Progress %", key: "progress", width: 11 },
       { header: "Tasks Done", key: "tasks_done", width: 12 },
       { header: "Tasks Total", key: "tasks_total", width: 12 },
@@ -378,16 +375,8 @@ router.get(
         start_date: p.start_date || "—",
         target_end_date: p.target_end_date || "—",
         actual_end_date: p.actual_end_date || "—",
-        contract_value: p.contract_value,
-        spend_expenses: p.spend.expenses,
-        spend_procurement: p.spend.procurement,
-        spend_total: p.spend.total,
-        margin: p.contract_value > 0 ? p.margin : "NO CONTRACT VALUE",
         // Spelled out rather than left blank: an empty cell in a percentage
         // column reads as zero, and "no tasks scheduled" is not zero progress.
-        margin_percent: p.marginPercent === null ? "—" : p.marginPercent,
-        invoiced: p.billing.invoiced,
-        collected: p.billing.collected,
         progress: p.progressPercent === null ? "NOT SCHEDULED" : p.progressPercent,
         tasks_done: p.tasks.done,
         tasks_total: p.tasks.total,
@@ -575,6 +564,248 @@ router.get(
   })
 );
 
+// The commercial half of a project: what it was sold for, what it has cost, and
+// every line behind those two figures.
+//
+// A separate report rather than more sheets on the schedule export, because the
+// two have different audiences. The plan is for whoever is doing the work; the
+// contract value and the margin are not. Splitting them means the schedule
+// export can be handed to anybody without a role check deciding which columns
+// they get — a workbook whose contents vary by who downloaded it is a leak
+// waiting to happen the first time someone forwards one.
+router.get(
+  "/project-spend-export",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!(await isAdminHrOrFinance(req))) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: await appTimezone() });
+    const includeClosed = String(req.query.include_closed || "") === "1";
+
+    const all = await withRollup(today);
+    const projects = includeClosed
+      ? all
+      : all.filter((p) => p.status !== "completed" && p.status !== "cancelled");
+    const ids = projects.map((p) => p.id);
+
+    // Every line of spend behind the register's totals, so a figure on the
+    // Projects sheet can be taken apart without opening the app. Filtered by
+    // exactly the rules the rollup uses — the counted expense statuses, and
+    // purchase orders that are neither draft nor cancelled — so the detail
+    // sheets add up to the summary rather than to something near it.
+    const spendRows = ids.length
+      ? await db
+          .prepare(
+            `SELECT pr.code AS project_code, pr.name AS project_name,
+                    er.id AS report_id, er.status, er.cost_center, er.expense_type,
+                    (e.first_name || ' ' || e.last_name) AS employee_name,
+                    ei.expense_date, ei.category, ei.description, ei.amount,
+                    ei.supplier_name, ei.supplier_tin, ei.receipt_ref,
+                    (ei.receipt_data IS NOT NULL) AS has_receipt
+             FROM expense_items ei
+             JOIN expense_reports er ON er.id = ei.report_id
+             JOIN projects pr ON pr.id = er.project_id
+             JOIN employees e ON e.id = er.employee_id
+             WHERE er.project_id IN (${ids.map(() => "?").join(",")})
+               AND er.status IN ${COUNTED_SQL}
+             ORDER BY pr.code, ei.expense_date, er.id`
+          )
+          .all(...ids)
+      : [];
+
+    const purchaseRows = ids.length
+      ? await db
+          .prepare(
+            `SELECT pr.code AS project_code, po.po_number, po.vendor_name, po.description,
+                    po.amount, po.status, po.order_date, po.expected_delivery_date, po.received_date,
+                    (rq.first_name || ' ' || rq.last_name) AS requested_by_name,
+                    (ap.first_name || ' ' || ap.last_name) AS approved_by_name,
+                    w.work_order_number
+             FROM purchase_orders po
+             JOIN projects pr ON pr.id = po.project_id
+             LEFT JOIN employees rq ON rq.id = po.requested_by
+             LEFT JOIN employees ap ON ap.id = po.approved_by
+             LEFT JOIN work_orders w ON w.id = po.work_order_id
+             WHERE po.project_id IN (${ids.map(() => "?").join(",")})
+               AND po.status NOT IN ('cancelled', 'draft')
+             ORDER BY pr.code, po.order_date, po.id`
+          )
+          .all(...ids)
+      : [];
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = await companyName();
+    workbook.created = new Date();
+
+    /* --------------------------------------------------------- Summary --- */
+    // The Projects page, as a sheet — the same columns in the same order, so a
+    // figure queried here can be found on screen without translation.
+    const sum = workbook.addWorksheet("Project Summary");
+    sum.columns = [
+      { header: "Project #", key: "code", width: 16 },
+      { header: "Name", key: "name", width: 30 },
+      { header: "Client", key: "client_name", width: 24 },
+      { header: "Status", key: "status", width: 12 },
+      { header: "Project Manager", key: "owner_name", width: 22 },
+      { header: "Cost Center", key: "cost_center_name", width: 18 },
+      { header: "Start", key: "start_date", width: 12 },
+      { header: "Target End", key: "target_end_date", width: 12 },
+      { header: "Contract Value", key: "contract_value", width: 16 },
+      { header: "Ordered", key: "ordered", width: 15 },
+      { header: "Orders", key: "orders", width: 8 },
+      { header: "Spend — Expenses", key: "spend_expenses", width: 17 },
+      { header: "Spend — Purchasing", key: "spend_procurement", width: 18 },
+      { header: "Spend — Total", key: "spend_total", width: 15 },
+      { header: "Margin", key: "margin", width: 15 },
+      { header: "Margin %", key: "margin_percent", width: 10 },
+      { header: "Invoiced", key: "invoiced", width: 15 },
+      { header: "Collected", key: "collected", width: 15 },
+      { header: "Uninvoiced", key: "uninvoiced", width: 15 },
+      { header: "Reports", key: "reports", width: 9 },
+      { header: "POs", key: "pos", width: 8 },
+      { header: "Progress %", key: "progress", width: 11 },
+      { header: "Schedule", key: "schedule", width: 26 },
+    ];
+    sum.addRows(
+      projects.map((p) => ({
+        code: p.code,
+        name: p.name,
+        client_name: p.client_name || "—",
+        status: p.status,
+        owner_name: p.owner_name || "UNASSIGNED",
+        cost_center_name: p.cost_center_name || "—",
+        start_date: p.start_date || "—",
+        target_end_date: p.target_end_date || "—",
+        contract_value: p.contract_value,
+        // Shown beside the contract rather than reconciled into it: a signed
+        // contract is not always the sum of the order records, and a gap
+        // between the two is the thing worth seeing.
+        ordered: p.orders.count > 0 ? p.orders.value : "NO ORDERS",
+        orders: p.orders.count,
+        spend_expenses: p.spend.expenses,
+        spend_procurement: p.spend.procurement,
+        spend_total: p.spend.total,
+        margin: p.contract_value > 0 ? p.margin : "NO CONTRACT VALUE",
+        // Spelled out rather than left blank: an empty cell in a percentage
+        // column reads as zero, and unknown is not zero.
+        margin_percent: p.marginPercent === null ? "—" : p.marginPercent,
+        invoiced: p.billing.invoiced,
+        collected: p.billing.collected,
+        uninvoiced: p.contract_value > 0 ? p.billing.uninvoiced : "—",
+        reports: p.reports,
+        pos: p.purchaseOrders,
+        progress: p.progressPercent === null ? "NOT SCHEDULED" : p.progressPercent,
+        schedule: p.schedule.label,
+      }))
+    );
+    sum.getRow(1).font = { bold: true };
+
+    // The totals the Projects page shows above the table, on the row beneath
+    // so a filter or a sort cannot separate them from what they total.
+    const totalRow = sum.addRow({
+      code: "TOTAL",
+      contract_value: projects.reduce((n, p) => n + p.contract_value, 0),
+      spend_expenses: projects.reduce((n, p) => n + p.spend.expenses, 0),
+      spend_procurement: projects.reduce((n, p) => n + p.spend.procurement, 0),
+      spend_total: projects.reduce((n, p) => n + p.spend.total, 0),
+      margin: projects.reduce((n, p) => n + p.margin, 0),
+      invoiced: projects.reduce((n, p) => n + p.billing.invoiced, 0),
+      collected: projects.reduce((n, p) => n + p.billing.collected, 0),
+    });
+    totalRow.font = { bold: true };
+    /* ------------------------------------------------ Project Expenses --- */
+    // One row per expense line, not per report: a report covering fuel, meals
+    // and a permit is three different things charged to the job, and rolling
+    // them into one row is what makes a cost impossible to query later.
+    const spend = workbook.addWorksheet("Project Expenses");
+    spend.columns = [
+      { header: "Project #", key: "project_code", width: 16 },
+      { header: "Project", key: "project_name", width: 28 },
+      { header: "Expense Date", key: "expense_date", width: 14 },
+      { header: "Report #", key: "report_id", width: 10 },
+      { header: "Employee", key: "employee_name", width: 24 },
+      { header: "Expenses Type", key: "expense_type", width: 18 },
+      { header: "Cost Center", key: "cost_center", width: 16 },
+      { header: "Category", key: "category", width: 18 },
+      { header: "Description", key: "description", width: 34 },
+      { header: "Supplier", key: "supplier_name", width: 26 },
+      { header: "Supplier TIN", key: "supplier_tin", width: 16 },
+      { header: "Receipt #", key: "receipt_ref", width: 14 },
+      { header: "Proof Attached", key: "has_receipt", width: 15 },
+      { header: "Amount", key: "amount", width: 14 },
+      { header: "Report Status", key: "status", width: 14 },
+    ];
+    spend.addRows(
+      spendRows.map((r) => ({
+        ...r,
+        expense_type: r.expense_type || "Unspecified",
+        cost_center: r.cost_center || "—",
+        category: r.category || "—",
+        description: r.description || "—",
+        supplier_name: r.supplier_name || "—",
+        supplier_tin: r.supplier_tin || "—",
+        receipt_ref: r.receipt_ref || "—",
+        has_receipt: r.has_receipt ? "YES" : "NO",
+      }))
+    );
+    spend.getRow(1).font = { bold: true };
+    if (spendRows.length === 0) {
+      spend.addRow({ project_code: "No expenses have been booked to a project yet" });
+    }
+
+    /* ----------------------------------------------- Project Purchases --- */
+    const buys = workbook.addWorksheet("Project Purchases");
+    buys.columns = [
+      { header: "Project #", key: "project_code", width: 16 },
+      { header: "PO #", key: "po_number", width: 18 },
+      { header: "Vendor", key: "vendor_name", width: 28 },
+      { header: "Description", key: "description", width: 36 },
+      { header: "Work Order", key: "work_order_number", width: 18 },
+      { header: "Order Date", key: "order_date", width: 13 },
+      { header: "Expected", key: "expected_delivery_date", width: 13 },
+      { header: "Received", key: "received_date", width: 13 },
+      { header: "Amount", key: "amount", width: 14 },
+      { header: "Status", key: "status", width: 12 },
+      { header: "Raised By", key: "requested_by_name", width: 22 },
+      { header: "Approved By", key: "approved_by_name", width: 22 },
+    ];
+    buys.addRows(
+      purchaseRows.map((r) => ({
+        ...r,
+        description: r.description || "—",
+        work_order_number: r.work_order_number || "—",
+        expected_delivery_date: r.expected_delivery_date || "—",
+        received_date: r.received_date || "NOT RECEIVED",
+        requested_by_name: r.requested_by_name || "—",
+        approved_by_name: r.approved_by_name || "NOT APPROVED",
+      }))
+    );
+    buys.getRow(1).font = { bold: true };
+    if (purchaseRows.length === 0) {
+      buys.addRow({ project_code: "No purchase orders have been booked to a project yet" });
+    }
+
+
+    await logRequestEvent(req, "export_excel", {
+      entityType: "report",
+      details: {
+        report: "project-spend",
+        projects: projects.length,
+        expenseLines: spendRows.length,
+        purchaseOrders: purchaseRows.length,
+      },
+    });
+
+    const filename = `marca-group-project-spend-${today}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  })
+);
+
 router.get(
   "/purchase-orders-export",
   requireAuth,
@@ -672,10 +903,12 @@ router.get(
                 er.created_at, er.submitted_at,
                 (e.first_name || ' ' || e.last_name) AS employee_name,
                 ca.reference AS advance_reference, ca.amount AS advance_amount,
+                pr.code AS project_code, pr.name AS project_name,
                 COALESCE((SELECT SUM(ei.amount) FROM expense_items ei WHERE ei.report_id = er.id), 0) AS total_expenses
          FROM expense_reports er
          JOIN employees e ON e.id = er.employee_id
          LEFT JOIN cash_advances ca ON ca.id = er.cash_advance_id
+         LEFT JOIN projects pr ON pr.id = er.project_id
          WHERE er.created_at::date BETWEEN ? AND ?
          ORDER BY er.created_at DESC`
       )
@@ -694,10 +927,12 @@ router.get(
                 ei.supplier_name, ei.supplier_address, ei.supplier_tin, ei.receipt_ref,
                 (ei.receipt_data IS NOT NULL) AS has_receipt,
                 er.id AS report_id, er.title, er.expense_type, er.cost_center, er.status,
+                pr.code AS project_code, pr.name AS project_name,
                 (e.first_name || ' ' || e.last_name) AS employee_name
          FROM expense_items ei
          JOIN expense_reports er ON er.id = ei.report_id
          JOIN employees e ON e.id = er.employee_id
+         LEFT JOIN projects pr ON pr.id = er.project_id
          WHERE er.created_at::date BETWEEN ? AND ?
          ORDER BY ei.expense_date, er.id`
       )
@@ -717,6 +952,10 @@ router.get(
       ...r,
       expense_type: r.expense_type || "Unspecified",
       advance_reference: r.advance_reference || "—",
+      // Spelled out rather than blank. An empty cell in this column reads as
+      // "somebody forgot", and overhead genuinely belonging to no project is
+      // the ordinary case, not an omission.
+      project_code: r.project_code || "Not project work",
       // A funded report settles nothing on its own: the cash left the company
       // when the advance was released. An earlier attempt at this balanced
       // each report against the whole advance, which counted one release once
@@ -757,6 +996,7 @@ router.get(
         { header: "Employee", key: "employee_name", width: 24 },
         { header: "Expenses Type", key: "expense_type", width: 18 },
         { header: "Cost Center", key: "cost_center", width: 18 },
+        { header: "Project", key: "project_code", width: 16 },
         { header: "Cash Advance", key: "cash_advance_amount", width: 14 },
         { header: "Drawn On Advance", key: "advance_reference", width: 16 },
         { header: "Total Expenses", key: "total_expenses", width: 15 },
@@ -778,6 +1018,7 @@ router.get(
         { header: "Employee", key: "employee_name", width: 24 },
         { header: "Expenses Type", key: "expense_type", width: 18 },
         { header: "Cost Center", key: "cost_center", width: 16 },
+        { header: "Project", key: "project_code", width: 16 },
         { header: "Category", key: "category", width: 18 },
         { header: "Description", key: "description", width: 34 },
         { header: "Supplier", key: "supplier_name", width: 26 },
@@ -794,6 +1035,7 @@ router.get(
         ...it,
         expense_type: it.expense_type || "Unspecified",
         cost_center: it.cost_center || "—",
+        project_code: it.project_code || "Not project work",
         category: it.category || "—",
         description: it.description || "—",
         // Blank only survives on rows filed before supplier details were
