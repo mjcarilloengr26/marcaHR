@@ -193,10 +193,12 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     let sql = `SELECT r.*, (e.first_name || ' ' || e.last_name) AS employee_name,
-                    a.reference AS advance_reference, a.amount AS advance_amount
+                    a.reference AS advance_reference, a.amount AS advance_amount,
+                    pr.code AS project_code, pr.name AS project_name
              FROM expense_reports r
              JOIN employees e ON e.id = r.employee_id
              LEFT JOIN cash_advances a ON a.id = r.cash_advance_id
+             LEFT JOIN projects pr ON pr.id = r.project_id
              WHERE 1=1`;
     const params = [];
 
@@ -280,7 +282,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const body = req.body || {};
     const employee_id = req.user.role === "employee" ? req.user.employee_id : body.employee_id || req.user.employee_id;
-    const { expense_type, cash_advance_amount, cost_center, notes, cash_advance_id } = body;
+    const { expense_type, cash_advance_amount, cost_center, notes, cash_advance_id, project_id } = body;
     if (!employee_id) return res.status(400).json({ error: "employee is required" });
     // Type, cost centre and category are all mandatory now. Every breakdown on
     // the dashboard groups by one of them, and a blank turns into an
@@ -389,8 +391,8 @@ router.post(
     await db.transaction(async () => {
       const info = await db
         .prepare(
-          `INSERT INTO expense_reports (employee_id, title, expense_type, cash_advance_amount, cost_center, notes, status, cash_advance_id)
-       VALUES (?, ?, ?, ?, ?, ?, 'draft', ?)`
+          `INSERT INTO expense_reports (employee_id, title, expense_type, cash_advance_amount, cost_center, notes, status, cash_advance_id, project_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'draft', ?, ?)`
         )
         .run(
           employee_id,
@@ -404,7 +406,11 @@ router.post(
           // against the wrong one more often than the right one.
           body.cost_center || null,
           notes || null,
-          advanceId
+          advanceId,
+          // Optional, and left null rather than guessed. Overheads genuinely
+          // belong to no project, and inventing a link would put made-up cost
+          // into a project P&L that is meant to be the trustworthy one.
+          project_id || null
         );
       reportId = info.lastInsertRowid;
 
@@ -452,7 +458,7 @@ router.put(
   requireAuth,
   asyncHandler(loadEditableReport),
   asyncHandler(async (req, res) => {
-    const { title, expense_type, cash_advance_amount, cost_center, notes } = req.body || {};
+    const { title, expense_type, cash_advance_amount, cost_center, notes, project_id } = req.body || {};
     // Held to the same rule as creating one, or a report could be filed
     // correctly and then edited back to blank.
     if (expense_type !== undefined) {
@@ -469,13 +475,16 @@ router.put(
     }
     const report = req.expenseReport;
     await db
-      .prepare("UPDATE expense_reports SET title = ?, expense_type = ?, cash_advance_amount = ?, cost_center = ?, notes = ? WHERE id = ?")
+      .prepare(
+        "UPDATE expense_reports SET title = ?, expense_type = ?, cash_advance_amount = ?, cost_center = ?, notes = ?, project_id = ? WHERE id = ?"
+      )
       .run(
         title ?? report.title,
         expense_type !== undefined ? expense_type || null : report.expense_type,
         cash_advance_amount ?? report.cash_advance_amount,
         cost_center !== undefined ? costCenterName : report.cost_center,
         notes !== undefined ? notes : report.notes,
+        project_id !== undefined ? project_id || null : report.project_id,
         report.id
       );
     res.json(await withTotals(await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(report.id)));

@@ -33,6 +33,7 @@ const GRANTABLE_PAGES = [
   { key: "billing", label: "Billing", route: "/billing", apiPrefix: "/api/invoices" },
   { key: "purchase-orders", label: "Purchase Orders", route: "/purchase-orders", apiPrefix: "/api/purchase-orders" },
   { key: "work-orders", label: "Work Orders", route: "/work-orders", apiPrefix: "/api/work-orders" },
+  { key: "projects", label: "Projects & Gantt", route: "/projects", apiPrefix: "/api/projects" },
   { key: "sales", label: "Sales Dashboard", route: "/sales", apiPrefix: "/api/sales" },
   { key: "deals", label: "Sales Opportunities", route: "/deals", apiPrefix: "/api/deals" },
   { key: "expenses", label: "Expenses", route: "/expenses", apiPrefix: "/api/expenses" },

@@ -6,13 +6,14 @@ import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
 
-const emptyForm = { invoice_number: "", order_id: "", customer_name: "", amount: "", status: "draft", issue_date: "", due_date: "", notes: "" };
+const emptyForm = { invoice_number: "", order_id: "", customer_name: "", amount: "", status: "draft", issue_date: "", due_date: "", notes: "", project_id: "" };
 const STATUSES = ["draft", "sent", "paid", "overdue", "cancelled"];
 
 export default function Billing() {
   const { money } = useAppSettings();
   const [invoices, setInvoices] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -25,6 +26,7 @@ export default function Billing() {
   useEffect(() => {
     load();
     api.get("/orders").then(setOrders).catch(() => {});
+    api.get("/projects/options").then(setProjects).catch(() => {});
   }, []);
 
   const openAdd = () => {
@@ -38,6 +40,7 @@ export default function Billing() {
     setForm({
       invoice_number: inv.invoice_number,
       order_id: inv.order_id || "",
+      project_id: inv.project_id || "",
       customer_name: inv.customer_name,
       amount: inv.amount,
       status: inv.status,
@@ -53,7 +56,12 @@ export default function Billing() {
     setSaving(true);
     setError("");
     try {
-      const payload = { ...form, order_id: form.order_id || null, amount: Number(form.amount) || 0 };
+      const payload = {
+        ...form,
+        order_id: form.order_id || null,
+        project_id: form.project_id || null,
+        amount: Number(form.amount) || 0,
+      };
       if (editingId) {
         await api.put(`/invoices/${editingId}`, payload);
       } else {
@@ -281,6 +289,20 @@ export default function Billing() {
                   ))}
                 </select>
               </div>
+              {projects.length > 0 && (
+                <div className="form-row">
+                  <label>Project</label>
+                  <select value={form.project_id} onChange={(e) => setForm({ ...form, project_id: e.target.value })}>
+                    <option value="">Not project work</option>
+                    {projects.map((pr) => (
+                      <option key={pr.id} value={pr.id}>{pr.code} — {pr.name}</option>
+                    ))}
+                  </select>
+                  <span className="subtitle" style={{ fontSize: 12 }}>
+                    Which job this belongs to. Leave blank for work that belongs to none.
+                  </span>
+                </div>
+              )}
               <div className="form-row">
                 <label>Amount{formOrderRemaining !== null && ` (up to ${money(formOrderRemaining)} remaining on this order)`}</label>
                 <DecimalInput

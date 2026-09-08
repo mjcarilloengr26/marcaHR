@@ -7,7 +7,7 @@ import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
 import { Link } from "react-router-dom";
 
-const emptyForm = { po_number: "", vendor_name: "", description: "", amount: "", order_date: "", expected_delivery_date: "", notes: "", work_order_id: "" };
+const emptyForm = { po_number: "", vendor_name: "", description: "", amount: "", order_date: "", expected_delivery_date: "", notes: "", work_order_id: "", project_id: "" };
 const STATUSES = ["draft", "submitted", "approved", "received", "cancelled"];
 
 export default function PurchaseOrders() {
@@ -24,11 +24,13 @@ export default function PurchaseOrders() {
   // offering for a new PO, but a PO already attached to a finished job must
   // keep showing it, so completed ones are merged back in below.
   const [workOrders, setWorkOrders] = useState([]);
+  const [projects, setProjects] = useState([]);
 
   const load = () => api.get("/purchase-orders").then(setPos).catch((err) => setError(err.message));
 
   useEffect(() => {
     api.get("/work-orders").then(setWorkOrders).catch(() => {});
+    api.get("/projects/options").then(setProjects).catch(() => {});
     load();
   }, []);
 
@@ -241,6 +243,20 @@ export default function PurchaseOrders() {
                 Ties this spend to the job that caused it. Leave unlinked for overheads.
               </span>
             </div>
+            {projects.length > 0 && (
+              <div className="form-row">
+                <label>Project</label>
+                <select value={form.project_id} onChange={(e) => setForm({ ...form, project_id: e.target.value })}>
+                  <option value="">Not project work</option>
+                  {projects.map((pr) => (
+                    <option key={pr.id} value={pr.id}>{pr.code} — {pr.name}</option>
+                  ))}
+                </select>
+                <span className="subtitle" style={{ fontSize: 12 }}>
+                  Which job this belongs to. Leave blank for work that belongs to none.
+                </span>
+              </div>
+            )}
             <div className="form-row">
               <label>Notes</label>
               <textarea rows={2} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />

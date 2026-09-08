@@ -31,6 +31,10 @@ export const NAV_ITEMS = [
   { to: "/billing", label: "Billing", icon: "💳", roles: ["admin", "hr"], pageKey: "billing" },
   { to: "/orders", label: "Orders", icon: "🛍️", roles: ["admin", "hr"], pageKey: "orders" },
 
+  { section: "Projects", icon: "🏗️", roles: ["admin", "hr", "employee"] },
+  { to: "/projects", label: "Projects", icon: "📁", roles: ["admin", "hr"], pageKey: "projects" },
+  { to: "/gantt", label: "Gantt Chart", icon: "📅", roles: ["admin", "hr", "employee"] },
+
   { section: "Fulfillment", icon: "🚚", roles: ["admin", "hr", "employee"] },
   { to: "/work-orders", label: "Work Orders", icon: "🔧", roles: ["admin", "hr", "employee"], pageKey: "work-orders" },
 

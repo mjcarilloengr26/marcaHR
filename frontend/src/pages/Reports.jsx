@@ -22,6 +22,8 @@ export default function Reports() {
   const [payrollYear, setPayrollYear] = useState(now.getFullYear());
   const [payrollHalf, setPayrollHalf] = useState(""); // "" = both halves
   const [exportingPayroll, setExportingPayroll] = useState(false);
+  const [exportingProjects, setExportingProjects] = useState(false);
+  const [projectsIncludeClosed, setProjectsIncludeClosed] = useState(false);
 
   const [expPeriodType, setExpPeriodType] = useState("monthly");
   const [expPeriodIndex, setExpPeriodIndex] = useState(now.getMonth() + 1);
@@ -100,6 +102,21 @@ export default function Reports() {
       setError(err.message);
     } finally {
       setExportingPurchaseOrders(false);
+    }
+  };
+
+  const exportProjects = async () => {
+    setExportingProjects(true);
+    setError("");
+    try {
+      await downloadFile(
+        `/reports/projects-export?include_closed=${projectsIncludeClosed ? 1 : 0}`,
+        "marca-group-projects-gantt.xlsx"
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setExportingProjects(false);
     }
   };
 
@@ -293,6 +310,35 @@ export default function Reports() {
           </div>
           <button type="button" className="btn" onClick={exportPurchaseOrders} disabled={exportingPurchaseOrders}>
             {exportingPurchaseOrders ? "Exporting…" : "Export to Excel"}
+          </button>
+        </div>
+      )}
+
+      {canExportPayroll && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>Projects &amp; Gantt</h2>
+          <p className="subtitle" style={{ margin: "0 0 12px" }}>
+            One workbook with three sheets: the project register and its P&amp;L, the Gantt drawn as a
+            week-by-week grid that prints in landscape, and the same tasks as flat rows to sort and
+            filter. No period to choose — a project runs across months, so it is exported as it stands
+            today.
+          </p>
+          <div className="form-inline" style={{ marginBottom: 16 }}>
+            <div className="form-row">
+              <label>&nbsp;</label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={projectsIncludeClosed}
+                  onChange={(e) => setProjectsIncludeClosed(e.target.checked)}
+                  style={{ width: "auto" }}
+                />
+                Include completed and cancelled projects
+              </label>
+            </div>
+          </div>
+          <button className="btn" onClick={exportProjects} disabled={exportingProjects}>
+            {exportingProjects ? "Building…" : "Download Excel"}
           </button>
         </div>
       )}

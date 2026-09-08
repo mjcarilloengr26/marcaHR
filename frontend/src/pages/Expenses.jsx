@@ -70,7 +70,7 @@ const blankLine = () => ({
   supplier_tin: "",
 });
 
-const EMPTY_FORM = { expense_type: "", cash_advance_amount: "", cost_center: "", notes: "", cash_advance_id: "" };
+const EMPTY_FORM = { expense_type: "", cash_advance_amount: "", cost_center: "", notes: "", cash_advance_id: "", project_id: "" };
 const EMPTY_ITEM_FORM = {
   expense_date: "",
   category: "",
@@ -208,9 +208,14 @@ export default function Expenses() {
   // cannot invent one, so the same spend cannot arrive under three spellings
   // and slip past whichever budget was meant to catch it.
   const [costCenters, setCostCenters] = useState([]);
+  // Which job the money was spent on, where there is one. Optional on purpose:
+  // office supplies and general overheads belong to no project, and forcing a
+  // choice would only produce a wrong one.
+  const [projects, setProjects] = useState([]);
   useEffect(() => {
     api.get("/expenses/options").then(setOptions).catch(() => {});
     api.get("/cost-centers/options").then(setCostCenters).catch(() => {});
+    api.get("/projects/options").then(setProjects).catch(() => {});
   }, []);
 
   const load = () => api.get("/expenses").then(setReports).catch((err) => setError(err.message));
@@ -369,6 +374,7 @@ export default function Expenses() {
         expense_type: form.expense_type,
         cash_advance_amount: form.cash_advance_amount ? Number(form.cash_advance_amount) : 0,
         cost_center: form.cost_center,
+        project_id: form.project_id ? Number(form.project_id) : null,
         notes: form.notes,
         cash_advance_id: form.cash_advance_id ? Number(form.cash_advance_id) : null,
         // The report's title is derived from these categories server-side, so
@@ -648,6 +654,24 @@ export default function Expenses() {
                 </div>
               </div>
             </div>
+            {projects.length > 0 && (
+              <div className="form-row">
+                <label>Project (optional)</label>
+                <select
+                  value={form.project_id}
+                  onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                >
+                  <option value="">Not project work</option>
+                  {projects.map((pr) => (
+                    <option key={pr.id} value={pr.id}>{pr.code} — {pr.name}</option>
+                  ))}
+                </select>
+                <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
+                  Naming the job here is what lets the Projects screen say what it cost. Leave it blank
+                  for overheads that belong to no particular job.
+                </div>
+              </div>
+            )}
             <h2 style={{ fontSize: 15, marginTop: 18, marginBottom: 2 }}>Expenses</h2>
             <p className="subtitle" style={{ margin: "0 0 10px" }}>
               At least one line. The report's title comes from these categories, so it is never asked for twice.

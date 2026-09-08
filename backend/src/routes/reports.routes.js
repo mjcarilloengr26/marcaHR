@@ -10,6 +10,8 @@ const { getExpenseSummary } = require("../services/expenseSummary");
 const { companyName } = require("../services/branding");
 const { AGING_COLUMNS, staleDealDays } = require("../services/dealAging");
 const { logRequestEvent } = require("../services/auditLog");
+const { withRollup } = require("../services/projectRollup");
+const { appTimezone } = require("../services/timezone");
 
 const router = express.Router();
 
@@ -263,6 +265,316 @@ router.get(
 // finance report it sits next to on the Reports page — procurement spend is
 // financial data, not day-to-day HR territory, so this deliberately doesn't
 // widen to isAdminHrOrFinance the way the payroll export does.
+// The Gantt, as a spreadsheet.
+//
+// Three sheets rather than one, because they answer different questions and
+// one sheet cannot be good at all three:
+//   Projects — the register and its P&L, one row per job;
+//   Gantt    — the chart itself, drawn as filled cells across a week-by-week
+//              grid, so it prints and can be read away from the app;
+//   Tasks    — the same tasks as flat rows, which is the sheet you can sort,
+//              filter and pivot. The chart sheet deliberately cannot be.
+//
+// The grid is weekly. Monthly columns would be less to scroll, but a fortnight
+// of work and a five-week phase would then fill exactly the same one cell,
+// which is not a schedule — it is a list with colour.
+const GANTT_FILL = {
+  done: "FF1E8E5A",
+  overdue: "FFD64545",
+  active: "FF3454D1",
+  planned: "FFB9BFCC",
+  summary: "FF2A41A8",
+  summaryLate: "FFD64545",
+};
+
+const DAY_MS = 86400000;
+const toUTC = (iso) => Date.parse(`${iso}T00:00:00Z`);
+const addDays = (iso, n) => new Date(toUTC(iso) + n * DAY_MS).toISOString().slice(0, 10);
+const dayGap = (a, b) => Math.round((toUTC(b) - toUTC(a)) / DAY_MS);
+const EXPORT_MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function taskState(task, today) {
+  if (task.percent_complete >= 100) return "done";
+  if (task.end_date < today) return "overdue";
+  if (task.start_date > today) return "planned";
+  return "active";
+}
+
+// Monday-aligned so the columns line up with how people actually talk about a
+// schedule ("week of the 12th"), rather than starting on whatever weekday the
+// earliest task happens to fall on.
+function weekStart(iso) {
+  const d = new Date(toUTC(iso));
+  const back = (d.getUTCDay() + 6) % 7;
+  return addDays(iso, -back);
+}
+
+router.get(
+  "/projects-export",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!(await isAdminHrOrFinance(req))) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: await appTimezone() });
+    const includeClosed = String(req.query.include_closed || "") === "1";
+
+    const all = await withRollup(today);
+    const projects = includeClosed
+      ? all
+      : all.filter((p) => p.status !== "completed" && p.status !== "cancelled");
+    const ids = projects.map((p) => p.id);
+
+    const tasks = ids.length
+      ? await db
+          .prepare(
+            `SELECT t.*, (e.first_name || ' ' || e.last_name) AS assignee_name
+             FROM project_tasks t
+             LEFT JOIN employees e ON e.id = t.assignee_id
+             WHERE t.project_id IN (${ids.map(() => "?").join(",")})
+             ORDER BY t.project_id, t.position, t.start_date, t.id`
+          )
+          .all(...ids)
+      : [];
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = await companyName();
+    workbook.created = new Date();
+
+    /* ------------------------------------------------------- Projects --- */
+    const reg = workbook.addWorksheet("Projects");
+    reg.columns = [
+      { header: "Project #", key: "code", width: 16 },
+      { header: "Name", key: "name", width: 30 },
+      { header: "Client", key: "client_name", width: 24 },
+      { header: "Status", key: "status", width: 12 },
+      { header: "Project Manager", key: "owner_name", width: 22 },
+      { header: "Cost Center", key: "cost_center_name", width: 18 },
+      { header: "Start", key: "start_date", width: 12 },
+      { header: "Target End", key: "target_end_date", width: 12 },
+      { header: "Actual End", key: "actual_end_date", width: 12 },
+      { header: "Contract Value", key: "contract_value", width: 16 },
+      { header: "Spend — Expenses", key: "spend_expenses", width: 17 },
+      { header: "Spend — Purchasing", key: "spend_procurement", width: 18 },
+      { header: "Spend — Total", key: "spend_total", width: 15 },
+      { header: "Margin", key: "margin", width: 15 },
+      { header: "Margin %", key: "margin_percent", width: 10 },
+      { header: "Invoiced", key: "invoiced", width: 15 },
+      { header: "Collected", key: "collected", width: 15 },
+      { header: "Progress %", key: "progress", width: 11 },
+      { header: "Tasks Done", key: "tasks_done", width: 12 },
+      { header: "Tasks Total", key: "tasks_total", width: 12 },
+      { header: "Schedule", key: "schedule", width: 26 },
+    ];
+    reg.addRows(
+      projects.map((p) => ({
+        code: p.code,
+        name: p.name,
+        client_name: p.client_name || "—",
+        status: p.status,
+        owner_name: p.owner_name || "UNASSIGNED",
+        cost_center_name: p.cost_center_name || "—",
+        start_date: p.start_date || "—",
+        target_end_date: p.target_end_date || "—",
+        actual_end_date: p.actual_end_date || "—",
+        contract_value: p.contract_value,
+        spend_expenses: p.spend.expenses,
+        spend_procurement: p.spend.procurement,
+        spend_total: p.spend.total,
+        margin: p.contract_value > 0 ? p.margin : "NO CONTRACT VALUE",
+        // Spelled out rather than left blank: an empty cell in a percentage
+        // column reads as zero, and "no tasks scheduled" is not zero progress.
+        margin_percent: p.marginPercent === null ? "—" : p.marginPercent,
+        invoiced: p.billing.invoiced,
+        collected: p.billing.collected,
+        progress: p.progressPercent === null ? "NOT SCHEDULED" : p.progressPercent,
+        tasks_done: p.tasks.done,
+        tasks_total: p.tasks.total,
+        schedule: p.schedule.label,
+      }))
+    );
+    reg.getRow(1).font = { bold: true };
+
+    /* ---------------------------------------------------------- Tasks --- */
+    const list = workbook.addWorksheet("Tasks");
+    list.columns = [
+      { header: "Project #", key: "code", width: 16 },
+      { header: "Project", key: "project", width: 28 },
+      { header: "Task", key: "name", width: 34 },
+      { header: "Phase", key: "phase", width: 24 },
+      { header: "Type", key: "type", width: 11 },
+      { header: "Assigned To", key: "assignee_name", width: 22 },
+      { header: "Start", key: "start_date", width: 12 },
+      { header: "End", key: "end_date", width: 12 },
+      { header: "Days", key: "days", width: 8 },
+      { header: "Progress %", key: "percent_complete", width: 11 },
+      { header: "State", key: "state", width: 12 },
+      { header: "Notes", key: "notes", width: 30 },
+    ];
+    const projectById = new Map(projects.map((p) => [p.id, p]));
+    const taskById = new Map(tasks.map((t) => [t.id, t]));
+    list.addRows(
+      tasks.map((t) => ({
+        code: projectById.get(t.project_id)?.code || "—",
+        project: projectById.get(t.project_id)?.name || "—",
+        name: t.name,
+        phase: t.parent_id ? taskById.get(t.parent_id)?.name || "—" : "—",
+        type: t.is_milestone ? "Milestone" : "Task",
+        assignee_name: t.assignee_name || "UNASSIGNED",
+        start_date: t.start_date,
+        end_date: t.end_date,
+        days: dayGap(t.start_date, t.end_date) + 1,
+        percent_complete: t.percent_complete,
+        state: taskState(t, today),
+        notes: t.notes || "—",
+      }))
+    );
+    list.getRow(1).font = { bold: true };
+
+    /* ---------------------------------------------------------- Gantt --- */
+    const chart = workbook.addWorksheet("Gantt", {
+      views: [{ state: "frozen", xSplit: 5, ySplit: 2 }],
+      pageSetup: { orientation: "landscape", fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+    });
+
+    const dates = [today];
+    for (const p of projects) {
+      if (p.start_date) dates.push(p.start_date);
+      if (p.target_end_date) dates.push(p.target_end_date);
+      if (p.actual_end_date) dates.push(p.actual_end_date);
+    }
+    for (const t of tasks) dates.push(t.start_date, t.end_date);
+
+    const first = weekStart(dates.reduce((a, d) => (d < a ? d : a), dates[0]));
+    const last = dates.reduce((a, d) => (d > a ? d : a), dates[0]);
+    const weeks = [];
+    for (let w = first; w <= last && weeks.length < 400; w = addDays(w, 7)) weeks.push(w);
+
+    const FIXED = [
+      { header: "Project #", width: 15 },
+      { header: "Task", width: 32 },
+      { header: "Owner", width: 20 },
+      { header: "Start", width: 11 },
+      { header: "End", width: 11 },
+    ];
+    chart.columns = [
+      ...FIXED.map((c) => ({ width: c.width })),
+      ...weeks.map(() => ({ width: 3.2 })),
+    ];
+
+    // Two header rows: the month across the top, the week's starting day under
+    // it. One row of 57 dates is unreadable; the month band is what makes the
+    // grid navigable.
+    const monthRow = chart.getRow(1);
+    const weekRow = chart.getRow(2);
+    FIXED.forEach((c, i) => {
+      weekRow.getCell(i + 1).value = c.header;
+    });
+    weeks.forEach((w, i) => {
+      const col = FIXED.length + 1 + i;
+      const [, m, d] = w.split("-").map(Number);
+      const prev = i === 0 ? null : weeks[i - 1].slice(0, 7);
+      if (prev !== w.slice(0, 7)) monthRow.getCell(col).value = `${EXPORT_MONTHS[m]} ${w.slice(2, 4)}`;
+      weekRow.getCell(col).value = d;
+      weekRow.getCell(col).alignment = { horizontal: "center" };
+      // The week the reader is standing in, so "are we behind?" is answerable
+      // without counting columns.
+      if (today >= w && today < addDays(w, 7)) {
+        for (const cell of [monthRow.getCell(col), weekRow.getCell(col)]) {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFB8860B" } };
+          cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+        }
+      }
+    });
+    monthRow.font = { bold: true };
+    weekRow.font = { bold: true };
+
+    const paint = (rowNumber, from, to, argb, label) => {
+      const startIdx = Math.max(0, Math.floor(dayGap(first, from) / 7));
+      const endIdx = Math.min(weeks.length - 1, Math.floor(dayGap(first, to) / 7));
+      for (let i = startIdx; i <= endIdx; i += 1) {
+        const cell = chart.getRow(rowNumber).getCell(FIXED.length + 1 + i);
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
+        if (label && i === startIdx) {
+          cell.value = label;
+          cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 9 };
+        }
+      }
+    };
+
+    const byProject = new Map();
+    for (const t of tasks) {
+      const l = byProject.get(t.project_id) || [];
+      l.push(t);
+      byProject.set(t.project_id, l);
+    }
+
+    let rowNumber = 2;
+    for (const p of projects) {
+      rowNumber += 1;
+      const row = chart.getRow(rowNumber);
+      row.getCell(1).value = p.code;
+      row.getCell(2).value = p.name;
+      row.getCell(3).value = p.owner_name || "—";
+      row.getCell(4).value = p.start_date || "—";
+      row.getCell(5).value = p.actual_end_date || p.target_end_date || "—";
+      row.font = { bold: true };
+      const from = p.start_date || p.tasks.firstStart;
+      const to = p.actual_end_date || p.target_end_date || p.tasks.lastEnd;
+      if (from && to) {
+        paint(rowNumber, from, to, p.schedule.tone === "bad" ? GANTT_FILL.summaryLate : GANTT_FILL.summary);
+      }
+
+      for (const t of byProject.get(p.id) || []) {
+        rowNumber += 1;
+        const r = chart.getRow(rowNumber);
+        r.getCell(1).value = "";
+        r.getCell(2).value = `   ${t.is_milestone ? "◆ " : ""}${t.name}`;
+        r.getCell(3).value = t.assignee_name || "—";
+        r.getCell(4).value = t.start_date;
+        r.getCell(5).value = t.is_milestone ? "" : t.end_date;
+        paint(
+          rowNumber,
+          t.start_date,
+          t.end_date,
+          GANTT_FILL[taskState(t, today)],
+          t.is_milestone ? "◆" : `${t.percent_complete}%`
+        );
+      }
+    }
+
+    // A key, under the grid — a spreadsheet has no legend of its own, and a
+    // sheet of coloured cells with nothing explaining them is a puzzle.
+    const keyRow = rowNumber + 2;
+    chart.getRow(keyRow).getCell(1).value = "Key";
+    chart.getRow(keyRow).getCell(1).font = { bold: true };
+    [
+      ["Project span", GANTT_FILL.summary],
+      ["In progress", GANTT_FILL.active],
+      ["Planned", GANTT_FILL.planned],
+      ["Complete", GANTT_FILL.done],
+      ["Past its end date", GANTT_FILL.overdue],
+      ["This week", "FFB8860B"],
+    ].forEach(([label, argb], i) => {
+      const r = chart.getRow(keyRow + 1 + i);
+      r.getCell(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
+      r.getCell(2).value = label;
+    });
+
+    await logRequestEvent(req, "export_excel", {
+      entityType: "report",
+      details: { report: "projects-gantt", projects: projects.length, tasks: tasks.length },
+    });
+
+    const filename = `marca-group-projects-gantt-${today}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  })
+);
+
 router.get(
   "/purchase-orders-export",
   requireAuth,

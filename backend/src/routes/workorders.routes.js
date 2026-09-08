@@ -13,12 +13,14 @@ const SELECT_BASE = `
     (asg.first_name || ' ' || asg.last_name) AS assigned_to_name,
     (c.first_name || ' ' || c.last_name) AS created_by_name,
     (s.first_name || ' ' || s.last_name) AS status_changed_by_name,
-    o.order_number
+    o.order_number,
+    pr.code AS project_code, pr.name AS project_name
   FROM work_orders w
   LEFT JOIN employees asg ON asg.id = w.assigned_to
   LEFT JOIN employees c ON c.id = w.created_by
   LEFT JOIN employees s ON s.id = w.status_changed_by
   LEFT JOIN orders o ON o.id = w.order_id
+  LEFT JOIN projects pr ON pr.id = w.project_id
 `;
 
 router.get("/", requireAuth, asyncHandler(async (req, res) => {
@@ -44,7 +46,7 @@ router.get("/", requireAuth, asyncHandler(async (req, res) => {
 }));
 
 router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
-  const { work_order_number, title, customer_name, description, address, order_id, assigned_to, priority, scheduled_date, notes } =
+  const { work_order_number, title, customer_name, description, address, order_id, assigned_to, priority, scheduled_date, notes, project_id } =
     req.body || {};
   if (!work_order_number || !title || !customer_name) {
     return res.status(400).json({ error: "work_order_number, title and customer_name are required" });
@@ -54,8 +56,8 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
     const info = await db
       .prepare(
         `INSERT INTO work_orders (work_order_number, title, customer_name, description, address, order_id, assigned_to, priority, status, scheduled_date, notes,
-                                  created_by, status_changed_by, status_changed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                                  project_id, created_by, status_changed_by, status_changed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         work_order_number,
@@ -69,6 +71,7 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
         status,
         scheduled_date || null,
         notes || null,
+        project_id || null,
         req.user.employee_id || null,
         req.user.employee_id || null,
         nowStamp()
@@ -104,6 +107,7 @@ router.put("/:id", requireAuth, asyncHandler(async (req, res) => {
   const assigned_to = isHr ? (body.assigned_to !== undefined ? body.assigned_to || null : existing.assigned_to) : existing.assigned_to;
   const priority = isHr ? body.priority || existing.priority : existing.priority;
   const scheduled_date = isHr ? (body.scheduled_date !== undefined ? body.scheduled_date : existing.scheduled_date) : existing.scheduled_date;
+  const project_id = isHr ? (body.project_id !== undefined ? body.project_id || null : existing.project_id) : existing.project_id;
   const notes = body.notes !== undefined ? body.notes : existing.notes;
   const status = body.status || existing.status;
   const completed_at = status === "completed" && existing.status !== "completed" ? new Date().toISOString() : existing.completed_at;
@@ -114,10 +118,10 @@ router.put("/:id", requireAuth, asyncHandler(async (req, res) => {
 
   await db.prepare(
     `UPDATE work_orders SET title = ?, customer_name = ?, description = ?, address = ?, order_id = ?, assigned_to = ?,
-     priority = ?, status = ?, scheduled_date = ?, notes = ?, completed_at = ?,
+     priority = ?, status = ?, scheduled_date = ?, notes = ?, completed_at = ?, project_id = ?,
      status_changed_by = ?, status_changed_at = ? WHERE id = ?`
   ).run(
-    title, customer_name, description, address, order_id, assigned_to, priority, status, scheduled_date, notes, completed_at,
+    title, customer_name, description, address, order_id, assigned_to, priority, status, scheduled_date, notes, completed_at, project_id,
     statusMoved ? req.user.employee_id || null : existing.status_changed_by,
     statusMoved ? nowStamp() : existing.status_changed_at,
     req.params.id

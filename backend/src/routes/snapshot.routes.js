@@ -4,6 +4,7 @@ const asyncHandler = require("../middleware/asyncHandler");
 const { buildFactSheet, FACT_PERIOD_TYPES } = require("../services/businessReview");
 const { getRevenueTrend } = require("../services/revenueTrend");
 const { spendRollup } = require("../services/costCenterSpend");
+const { projectRollup } = require("../services/projectRollup");
 const { appTimezone } = require("../services/timezone");
 
 const router = express.Router();
@@ -129,7 +130,7 @@ function headlines(cur, prev) {
 const MONTH_LABELS = ["", "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"];
 
-function highlights({ cur, prev, standing, costCenters, trend, comparedLabel }) {
+function highlights({ cur, prev, standing, costCenters, projects, trend, comparedLabel }) {
   const out = [];
   const add = (title, detail, amounts = []) => out.push({ title, detail, amounts });
 
@@ -184,6 +185,18 @@ function highlights({ cur, prev, standing, costCenters, trend, comparedLabel }) 
     );
   }
 
+  if (projects.onTrack > 0 && projects.atRisk === 0) {
+    add(
+      "Projects on schedule",
+      `All ${projects.onTrack} live project${projects.onTrack === 1 ? " is" : "s are"} on track and inside contract.`
+    );
+  } else if (projects.mostAdvanced && projects.mostAdvanced.progressPercent >= 50) {
+    add(
+      "Project progress",
+      `${projects.mostAdvanced.name} is ${projects.mostAdvanced.progressPercent}% through its plan.`
+    );
+  }
+
   if (cur.delivery.workOrdersCompleted > 0) {
     add(
       "Work delivered",
@@ -209,10 +222,14 @@ router.get(
     if (parsed.error) return res.status(400).json({ error: parsed.error });
     const { periodType, year, index } = parsed;
 
-    const [factSheet, trend, costCenters] = await Promise.all([
+    const [factSheet, trend, costCenters, projects] = await Promise.all([
       buildFactSheet({ periodType, year, index, asOf: today }),
       getRevenueTrend(),
       spendRollup(year),
+      // Projects are a standing position, not a period's flow — a job running
+      // from March to October is equally live in every month it spans, so it is
+      // read as it stands today rather than sliced to the selected period.
+      projectRollup(today),
     ]);
 
     const cur = factSheet.current;
@@ -247,12 +264,14 @@ router.get(
         total: round(cur.profitAndLoss.totals.totalCosts),
       },
       costCenters,
+      projects,
       trend,
       highlights: highlights({
         cur,
         prev,
         standing: factSheet.standing,
         costCenters,
+        projects,
         trend,
         comparedLabel: factSheet.comparedWith.label,
       }),

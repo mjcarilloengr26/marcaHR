@@ -8,13 +8,14 @@ const router = express.Router();
 const nowStamp = () => new Date().toISOString().slice(0, 19).replace("T", " ");
 
 const SELECT_BASE = `
-  SELECT i.*, o.order_number,
+  SELECT i.*, o.order_number, pr.code AS project_code, pr.name AS project_name,
     (c.first_name || ' ' || c.last_name) AS created_by_name,
     (s.first_name || ' ' || s.last_name) AS status_changed_by_name
   FROM invoices i
   LEFT JOIN orders o ON o.id = i.order_id
   LEFT JOIN employees c ON c.id = i.created_by
   LEFT JOIN employees s ON s.id = i.status_changed_by
+  LEFT JOIN projects pr ON pr.id = i.project_id
 `;
 
 // The remaining unbilled balance on an order: its total amount minus every
@@ -48,7 +49,7 @@ router.get("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req
 }));
 
 router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
-  const { invoice_number, order_id, customer_name, amount, status, issue_date, due_date, notes } = req.body || {};
+  const { invoice_number, order_id, customer_name, amount, status, issue_date, due_date, notes, project_id } = req.body || {};
   if (!invoice_number || !customer_name) {
     return res.status(400).json({ error: "invoice_number and customer_name are required" });
   }
@@ -65,8 +66,8 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
     const info = await db
       .prepare(
         `INSERT INTO invoices (invoice_number, order_id, customer_name, amount, status, issue_date, due_date, notes,
-                               created_by, status_changed_by, status_changed_at)
-         VALUES (?, ?, ?, ?, ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?, ?)`
+                               project_id, created_by, status_changed_by, status_changed_at)
+         VALUES (?, ?, ?, ?, ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?, ?, ?)`
       )
       .run(
         invoice_number,
@@ -77,6 +78,7 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
         issue_date || null,
         due_date || null,
         notes || null,
+        project_id || null,
         req.user.employee_id || null,
         req.user.employee_id || null,
         nowStamp()
@@ -108,10 +110,10 @@ router.post("/from-order/:orderId", requireAuth, requireRole("admin", "hr"), asy
   try {
     const insertResult = await db
       .prepare(
-        `INSERT INTO invoices (invoice_number, order_id, customer_name, amount, status, issue_date)
-         VALUES (?, ?, ?, ?, 'draft', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'))`
+        `INSERT INTO invoices (invoice_number, order_id, customer_name, amount, status, issue_date, project_id)
+         VALUES (?, ?, ?, ?, 'draft', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'), ?)`
       )
-      .run(invoiceNumber, order.id, order.customer_name, remaining);
+      .run(invoiceNumber, order.id, order.customer_name, remaining, order.project_id || null);
     res.status(201).json(await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(insertResult.lastInsertRowid));
   } catch (err) {
     res.status(400).json({ error: "An invoice with that number already exists" });
@@ -121,7 +123,7 @@ router.post("/from-order/:orderId", requireAuth, requireRole("admin", "hr"), asy
 router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
   const existing = await db.prepare("SELECT * FROM invoices WHERE id = ?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "Invoice not found" });
-  const { invoice_number, order_id, customer_name, amount, status, issue_date, due_date, notes } = req.body || {};
+  const { invoice_number, order_id, customer_name, amount, status, issue_date, due_date, notes, project_id } = req.body || {};
   if (status && !["draft", "sent", "paid", "overdue", "cancelled"].includes(status)) {
     return res.status(400).json({ error: "Invalid status" });
   }
@@ -149,7 +151,7 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
   try {
     await db.prepare(
       `UPDATE invoices SET invoice_number = ?, order_id = ?, customer_name = ?, amount = ?, status = ?,
-       issue_date = ?, due_date = ?, notes = ?, paid_date = ?,
+       issue_date = ?, due_date = ?, notes = ?, paid_date = ?, project_id = ?,
        status_changed_by = ?, status_changed_at = ? WHERE id = ?`
     ).run(
       invoice_number ?? existing.invoice_number,
@@ -161,6 +163,7 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
       due_date !== undefined ? due_date : existing.due_date,
       notes !== undefined ? notes : existing.notes,
       paid_date,
+      project_id !== undefined ? project_id || null : existing.project_id,
       // Only re-stamped when the status actually moves — the person who marked
       // an invoice paid should not be replaced by whoever later fixed a typo.
       invStatusMoved ? req.user.employee_id || null : existing.status_changed_by,

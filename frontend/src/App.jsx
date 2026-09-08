@@ -40,6 +40,8 @@ const PageAccess = lazy(() => import("./pages/PageAccess"));
 const MenuOrder = lazy(() => import("./pages/MenuOrder"));
 const CashAdvances = lazy(() => import("./pages/CashAdvances"));
 const CostCenters = lazy(() => import("./pages/CostCenters"));
+const Projects = lazy(() => import("./pages/Projects"));
+const Gantt = lazy(() => import("./pages/Gantt"));
 const LocalizationSettings = lazy(() => import("./pages/LocalizationSettings"));
 const ReviewSchedule = lazy(() => import("./pages/ReviewSchedule"));
 
@@ -75,6 +77,10 @@ export default function App() {
         <Route path="/sales" element={<Protected roles={["admin", "hr"]} pageKey="sales"><SalesDashboard /></Protected>} />
         <Route path="/deals" element={<Protected roles={["admin", "hr", "employee"]} pageKey="deals"><Deals /></Protected>} />
         <Route path="/orders" element={<Protected roles={["admin", "hr"]} pageKey="orders"><Orders /></Protected>} />
+        <Route path="/projects" element={<Protected roles={["admin", "hr"]} pageKey="projects"><Projects /></Protected>} />
+        {/* The chart is open to everyone: it carries no money, and the people
+            who keep a plan current are the ones the work is assigned to. */}
+        <Route path="/gantt" element={<Protected><Gantt /></Protected>} />
         <Route path="/work-orders" element={<Protected pageKey="work-orders"><WorkOrders /></Protected>} />
         <Route path="/billing" element={<Protected roles={["admin", "hr"]} pageKey="billing"><Billing /></Protected>} />
         <Route path="/purchase-orders" element={<Protected roles={["admin", "hr"]} pageKey="purchase-orders"><PurchaseOrders /></Protected>} />

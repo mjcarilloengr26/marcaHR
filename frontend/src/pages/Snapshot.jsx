@@ -322,6 +322,28 @@ export default function Snapshot() {
             },
           ]}
         />
+        {/* Guarded rather than assumed: the backend ships before the front end,
+            and a wall panel must not go blank for the minutes in between. */}
+        {data.projects && (
+          <MatrixCol
+            title="Projects"
+            note={`${data.projects.active} active · ${data.projects.onTrack} on track`}
+            rows={[
+              { label: "Contract value", value: moneyWhole(data.projects.contractValue) },
+              { label: "Spent", value: moneyWhole(data.projects.spent) },
+              {
+                label: "Margin",
+                value: moneyWhole(data.projects.margin),
+                tone: data.projects.margin < 0 ? "var(--danger)" : "var(--success)",
+              },
+              {
+                label: "Behind or overspent",
+                value: String(data.projects.atRisk),
+                tone: data.projects.atRisk > 0 ? "var(--danger)" : "var(--success)",
+              },
+            ]}
+          />
+        )}
       </div>
 
       {/* The wins, along the bottom. This screen is walked past by the whole

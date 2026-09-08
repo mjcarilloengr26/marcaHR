@@ -12,6 +12,7 @@ const emptyForm = {
   description: "",
   address: "",
   order_id: "",
+  project_id: "",
   assigned_to: "",
   priority: "medium",
   scheduled_date: "",
@@ -26,6 +27,7 @@ export default function WorkOrders() {
   const [workOrders, setWorkOrders] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [orders, setOrders] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -40,6 +42,7 @@ export default function WorkOrders() {
     if (isHr) {
       api.get("/employees").then(setEmployees).catch(() => {});
       api.get("/orders").then(setOrders).catch(() => {});
+      api.get("/projects/options").then(setProjects).catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -59,6 +62,7 @@ export default function WorkOrders() {
       description: wo.description || "",
       address: wo.address || "",
       order_id: wo.order_id || "",
+      project_id: wo.project_id || "",
       assigned_to: wo.assigned_to || "",
       priority: wo.priority,
       scheduled_date: wo.scheduled_date || "",
@@ -72,7 +76,12 @@ export default function WorkOrders() {
     setSaving(true);
     setError("");
     try {
-      const payload = { ...form, order_id: form.order_id || null, assigned_to: form.assigned_to || null };
+      const payload = {
+        ...form,
+        order_id: form.order_id || null,
+        assigned_to: form.assigned_to || null,
+        project_id: form.project_id || null,
+      };
       if (editingId) {
         await api.put(`/work-orders/${editingId}`, payload);
       } else {
@@ -223,6 +232,20 @@ export default function WorkOrders() {
                   ))}
                 </select>
               </div>
+              {projects.length > 0 && (
+                <div className="form-row">
+                  <label>Project</label>
+                  <select value={form.project_id} onChange={(e) => setForm({ ...form, project_id: e.target.value })}>
+                    <option value="">Not project work</option>
+                    {projects.map((pr) => (
+                      <option key={pr.id} value={pr.id}>{pr.code} — {pr.name}</option>
+                    ))}
+                  </select>
+                  <span className="subtitle" style={{ fontSize: 12 }}>
+                    Which job this belongs to. Leave blank for work that belongs to none.
+                  </span>
+                </div>
+              )}
               <div className="form-row">
                 <label>Assigned to</label>
                 <select value={form.assigned_to} onChange={(e) => setForm({ ...form, assigned_to: e.target.value })}>

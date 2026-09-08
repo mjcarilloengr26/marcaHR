@@ -813,6 +813,72 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+
+-- A project is the thing a contract is won for and delivered against: it has a
+-- start, an end it is meant to hit, a value it was sold at, and a cost it
+-- actually ran up. Before it existed the only handle on project work was the
+-- "Project" cost centre and the "Project Expenses" type, which is one bucket
+-- holding every job at once — enough to say what projects cost in total, never
+-- enough to say which one lost money.
+--
+-- Kept separate from cost centres rather than folded into them. A cost centre
+-- is a standing part of the company that gets a yearly allocation; a project
+-- starts, finishes and goes away, and is measured against its own contract
+-- value rather than a calendar year. A project may still be booked to one, so
+-- the link is here and optional.
+CREATE TABLE IF NOT EXISTS projects (
+  id SERIAL PRIMARY KEY,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  client_name TEXT,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'planned'
+    CHECK(status IN ('planned','active','on_hold','completed','cancelled')),
+  start_date TEXT,
+  -- What was promised, and what actually happened. Both are kept: overwriting
+  -- the target with the real finish date destroys the only evidence that a
+  -- project ran late, which is the question the next estimate turns on.
+  target_end_date TEXT,
+  actual_end_date TEXT,
+  contract_value NUMERIC(14,2) NOT NULL DEFAULT 0,
+  owner_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  cost_center_id INTEGER REFERENCES cost_centers(id) ON DELETE SET NULL,
+  notes TEXT,
+  created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_code ON projects(LOWER(TRIM(code)));
+
+-- The scheduled work inside a project: one row per bar on the Gantt. Distinct
+-- from board_cards on purpose. The Task Board is for ad-hoc work that has a due
+-- date and a column; a Gantt task has a span, a position in a plan and a
+-- progress figure, and forcing one table to be both would give the board
+-- columns it does not use and the chart dates it does not have.
+--
+-- parent_id groups tasks into phases. A parent's dates are derived from its
+-- children rather than stored, so a phase can never claim to end before the
+-- work inside it does.
+CREATE TABLE IF NOT EXISTS project_tasks (
+  id SERIAL PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  parent_id INTEGER REFERENCES project_tasks(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  percent_complete INTEGER NOT NULL DEFAULT 0 CHECK (percent_complete BETWEEN 0 AND 100),
+  assignee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  -- A milestone is a date, not a span: a handover, an inspection, a payment
+  -- point. Stored with equal start and end so every query can treat it as a
+  -- task, and drawn as a marker rather than a bar.
+  is_milestone BOOLEAN NOT NULL DEFAULT false,
+  position INTEGER NOT NULL DEFAULT 0,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+  CHECK (end_date >= start_date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_tasks_project ON project_tasks(project_id, position);
 `;
 
 // One-time correction from the original 3 ad-hoc demo leave types to the 5
@@ -1116,6 +1182,22 @@ async function ensureExpenseType() {
   await pool.query("ALTER TABLE expense_reports ADD COLUMN IF NOT EXISTS expense_type TEXT");
 }
 
+// Everything a project's money and delivery is measured from. These tables all
+// predate projects, and CREATE TABLE IF NOT EXISTS will not add a column to a
+// table that already exists, so the link has to be added explicitly here.
+//
+// Nullable everywhere, with no backfill: most records genuinely do not belong
+// to a project, and guessing which of the old ones did would put invented
+// figures into a project P&L that is supposed to be the reliable one.
+async function ensureProjectLinks() {
+  for (const table of ["expense_reports", "purchase_orders", "invoices", "work_orders", "orders"]) {
+    await pool.query(
+      `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL`
+    );
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_${table}_project ON ${table}(project_id)`);
+  }
+}
+
 // Regular/overtime shift windows and the night shift differential multiplier
 // predate this column set — existing deployed payroll_settings rows need
 // these added explicitly with the same defaults the fresh-install schema
@@ -1291,6 +1373,7 @@ db.migrate = function () {
       .then(() => widenRealColumns())
       .then(() => ensurePurchaseOrderWorkOrder())
       .then(() => ensureExpenseType())
+      .then(() => ensureProjectLinks())
       .then(() => ensurePayrollTimeSettings())
       .then(() => ensurePayrollNightDifferential())
       .then(() => ensurePayrollDeductionBreakdown())

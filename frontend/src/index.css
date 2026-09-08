@@ -627,6 +627,25 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .col-actions .btn { white-space: nowrap; }
 
+/* Row actions pinned to the right edge of a table that scrolls sideways.
+   Projects carries eleven columns of dates and figures, so on any normal screen
+   Edit and Delete sat off the right edge — present, working, and invisible
+   unless you thought to scroll. A button nobody can find is a button that does
+   not exist. Backgrounds are repeated per row state because a sticky cell
+   floats over the cells passing under it and would otherwise be transparent. */
+.col-actions-sticky {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--surface);
+  box-shadow: inset 1px 0 0 var(--border);
+}
+tbody tr:hover > .col-actions-sticky { background: var(--row-hover); }
+tbody tr.row-selected > .col-actions-sticky { background: var(--hover-bg); }
+/* The top-right corner cell is stuck on both axes, so it has to sit above the
+   docked header (z-index 2) as well as the rows. */
+.sticky-head thead th.col-actions-sticky { z-index: 3; }
+
 
 .btn {
   border: none;
@@ -1363,7 +1382,7 @@ input[type="date"]::-webkit-datetime-edit-year-field {
 .snap-chart-slot > div:first-child { justify-content: flex-end; }
 
 /* Band 2 — the matrix of supporting figures. */
-.snap-matrix { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--snap-gap); }
+.snap-matrix { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--snap-gap); }
 @media (max-width: 1180px) { .snap-matrix { grid-template-columns: 1fr; } }
 .snap-matrix > .snap-card { min-height: 0; }
 .snap-matrix-rows {
@@ -1420,4 +1439,207 @@ body.snapshot-tv .content {
     radial-gradient(80% 60% at 12% -10%, rgba(52, 84, 209, 0.1), transparent 70%),
     radial-gradient(70% 55% at 100% 0%, rgba(124, 92, 240, 0.08), transparent 68%),
     var(--bg);
+}
+
+/* ------------------------------------------------------------------ Gantt
+   A timeline of scheduled project work. Built out of absolutely positioned
+   divs on a pixels-per-day scale rather than a table, because a bar has to
+   start and end on a date, not in a cell — a table can only put a bar in the
+   column it mostly overlaps, which is how weekly Gantt charts end up showing
+   a five-day task as a full week.
+
+   The label column is sticky inside the horizontal scroller. Scrolling to
+   November therefore never leaves a screen of unlabelled bars, which is the
+   thing that makes most long plans unreadable. */
+.gantt-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.gantt-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.gantt-key { width: 16px; height: 9px; border-radius: 3px; display: inline-block; }
+.gantt-key-active { background: var(--primary); }
+.gantt-key-planned { background: var(--text-muted); opacity: 0.5; }
+.gantt-key-done { background: var(--success); }
+.gantt-key-overdue { background: var(--danger); }
+.gantt-key-milestone {
+  width: 10px; height: 10px; border-radius: 2px;
+  background: var(--primary-dark); transform: rotate(45deg);
+}
+.gantt-key-today { width: 2px; height: 14px; border-radius: 0; background: var(--text-muted); }
+
+.gantt-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.gantt-inner { position: relative; }
+
+.gantt-head {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.gantt-head-label { font-weight: 600; font-size: 12px; color: var(--text-muted); }
+
+.gantt-label {
+  flex: 0 0 240px;
+  width: 240px;
+  /* Sticky against the horizontal scroll, not the page: the row it belongs to
+     scrolls with the chart, the name stays put. */
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+.gantt-label > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gantt-label strong { font-size: 13px; line-height: 1.25; }
+.gantt-label-sub { font-size: 11px; line-height: 1.3; color: var(--text-muted); }
+.gantt-label-task { padding-left: 24px; font-size: 13px; line-height: 1.25; }
+/* A phase and the work inside it. Without the step, a child task sits at the
+   same indent as a top-level one and the grouping the plan was built with is
+   invisible on the chart that is supposed to show it. */
+.gantt-label-task.is-phase span:first-child { font-weight: 600; }
+.gantt-label-task.is-child { padding-left: 42px; }
+
+.gantt-track { position: relative; flex: 0 0 auto; }
+.gantt-head .gantt-track { height: 30px; }
+
+.gantt-month {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+.gantt-month span { padding-left: 6px; white-space: nowrap; }
+
+.gantt-body { position: relative; }
+.gantt-row {
+  display: flex;
+  align-items: stretch;
+  /* Tall enough for the two lines the label holds — a task name and who it is
+     assigned to. At 32px the second line was clipped just enough to look like
+     a rendering fault rather than a tight row. */
+  height: 38px;
+  border-bottom: 1px solid var(--border);
+}
+.gantt-row:last-child { border-bottom: none; }
+.gantt-row:hover .gantt-label,
+.gantt-row:hover .gantt-track { background: var(--row-hover); }
+.gantt-row-project .gantt-label,
+.gantt-row-project .gantt-track { background: var(--hover-bg); }
+.gantt-row-project { height: 38px; }
+
+.gantt-gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px solid var(--border);
+  opacity: 0.55;
+}
+
+.gantt-today-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed var(--text-muted);
+  z-index: 1;
+  pointer-events: none;
+}
+
+/* One accent per state, and the state is what the colour says — never how far
+   along the work is. Progress is already the fill width, and encoding it twice
+   makes a task that is 60% done look like a different kind of thing from one
+   that is late, when they are the same kind in different states. */
+.gantt-bar {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 14px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bar-soft);
+  box-shadow: inset 0 0 0 1px var(--border);
+  cursor: pointer;
+  --bar: var(--primary);
+  --bar-soft: var(--primary-light);
+}
+.gantt-bar.is-active { --bar: var(--primary); --bar-soft: var(--primary-light); }
+.gantt-bar.is-planned { --bar: var(--text-muted); --bar-soft: var(--badge-neutral-bg); }
+.gantt-bar.is-done { --bar: var(--success); --bar-soft: var(--badge-success-bg); }
+.gantt-bar.is-overdue { --bar: var(--danger); --bar-soft: var(--badge-danger-bg); }
+.gantt-bar-fill { height: 100%; background: var(--bar); border-radius: 4px 0 0 4px; }
+.gantt-bar-fill[style*="100%"] { border-radius: 4px; }
+
+/* The project's own span, drawn thinner than its tasks so the eye reads it as
+   the container rather than as another piece of work. */
+.gantt-bar-summary {
+  height: 9px;
+  cursor: default;
+  --bar: var(--primary-dark);
+  --bar-soft: var(--primary-light);
+}
+.gantt-bar-summary.is-bad { --bar: var(--danger); --bar-soft: var(--badge-danger-bg); }
+
+.gantt-milestone {
+  position: absolute;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  margin-left: -5px;
+  border-radius: 2px;
+  background: var(--primary-dark);
+  transform: translateY(-50%) rotate(45deg);
+  cursor: pointer;
+}
+.gantt-milestone.is-done { background: var(--success); }
+.gantt-milestone.is-overdue { background: var(--danger); }
+
+/* Where the project was promised for, whether or not the plan still fits
+   inside it. */
+.gantt-target {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 0;
+  border-left: 2px solid var(--warning);
+}
+
+.gantt-pct {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.gantt-nodates {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  white-space: nowrap;
 }
