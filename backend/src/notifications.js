@@ -60,6 +60,66 @@ const notifyLeaveStatusChanged = guarded(async ({ employee_id, leave_type_name, 
   });
 });
 
+// Somebody needs time off and has nothing left to take it as — not the paid
+// allowance, and not the unpaid one either. At that point the app can only
+// refuse, so the refusal is worth more than a message on a screen: HR is the
+// only party who can unblock it, and they cannot act on a rejection they never
+// saw.
+//
+// Throttled to one message per person, per leave type, per day. Somebody who
+// really needs the time will try more than once, and turning that into a
+// mailbox full of identical requests is how a notification stops being read.
+const exhaustedSent = new Map();
+function alreadyToldToday(key) {
+  const today = new Date().toISOString().slice(0, 10);
+  if (exhaustedSent.get(key) === today) return true;
+  // Bounded: one entry per person per type, cleared out when the day turns.
+  if (exhaustedSent.size > 500) exhaustedSent.clear();
+  exhaustedSent.set(key, today);
+  return false;
+}
+
+const notifyLeaveAllowanceExhausted = guarded(
+  async ({ employee_id, leave_type_name, year, days, position, unpaid_type_name, unpaid_remaining }) => {
+    const emp = await getEmployee(employee_id);
+    if (!emp) return;
+    if (alreadyToldToday(`${employee_id}:${leave_type_name}:${year}`)) return;
+
+    const company = await companyName();
+    const unpaid = unpaid_type_name
+      ? `${unpaid_type_name} is also spent — ${unpaid_remaining} day(s) left of what was allocated.`
+      : "There is no unpaid leave type set up to fall back on.";
+
+    // To HR, because they are the only ones who can raise it.
+    sendMail({
+      to: await getHrEmails(),
+      subject: `Leave allocation exhausted — ${fullName(emp)}`,
+      text:
+        `${fullName(emp)} tried to file ${days} day(s) of ${leave_type_name} for ${year} and was refused: ` +
+        `${position.allocated} day(s) allocated, ${position.used} used` +
+        (position.pending > 0 ? `, ${position.pending} awaiting approval` : "") +
+        `.\n\n${unpaid}\n\n` +
+        `They cannot file this leave at all until an allocation is raised. If the time off is genuine, ` +
+        `increase their ${unpaid_type_name || "unpaid leave"} allocation for ${year} in ${company} — ` +
+        `Leave > Leave Balances — and ask them to file it again.\n\n` +
+        `This is sent once per person per leave type per day.`,
+    });
+
+    // And to the employee, so they know the ball is with HR rather than
+    // assuming the app is broken.
+    sendMail({
+      to: emp.email,
+      subject: `Your ${leave_type_name} request could not be filed`,
+      text:
+        `Hi ${emp.first_name},\n\n` +
+        `Your request for ${days} day(s) of ${leave_type_name} could not be filed: the ${year} allocation is used up ` +
+        `and there is no unpaid leave left to take it as either.\n\n` +
+        `HR has been notified and can raise your allocation. Please contact them directly if the time off is urgent.\n\n` +
+        `${company}`,
+    });
+  }
+);
+
 const notifyExpenseSubmitted = guarded(async ({ employee_id, title }) => {
   const emp = await getEmployee(employee_id);
   if (!emp) return;
@@ -257,6 +317,7 @@ const notifyStaleDeals = guarded(async ({ deals, thresholdDays, companyLabel }) 
 module.exports = {
   notifyLeaveSubmitted,
   notifyLeaveStatusChanged,
+  notifyLeaveAllowanceExhausted,
   notifyExpenseSubmitted,
   notifyExpenseStatusChanged,
   notifyCardAssigned,

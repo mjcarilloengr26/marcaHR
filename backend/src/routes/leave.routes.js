@@ -1,7 +1,11 @@
 const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole, requireSelfOrRole } = require("../middleware/auth");
-const { notifyLeaveSubmitted, notifyLeaveStatusChanged } = require("../notifications");
+const {
+  notifyLeaveSubmitted,
+  notifyLeaveStatusChanged,
+  notifyLeaveAllowanceExhausted,
+} = require("../notifications");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
 
@@ -178,7 +182,9 @@ function shortfallMessage(typeName, year, days, pos, fallback) {
   } else if (fallback && fallback.remaining > 0) {
     msg += ` ${fallback.name} has ${fallback.remaining} day${fallback.remaining === 1 ? "" : "s"} left, which is not enough for this either.`;
   } else if (fallback) {
-    msg += ` ${fallback.name} is used up too, so HR has to raise an allocation.`;
+    msg += ` ${fallback.name} is used up too. HR has been notified and can raise your allocation — contact them if this is urgent.`;
+  } else {
+    msg += " There is no unpaid leave type to fall back on. HR has been notified and can raise your allocation.";
   }
   return msg;
 }
@@ -281,6 +287,19 @@ router.post(
     const position = await leavePosition(employee_id, leave_type_id, year);
     if (days > position.remaining) {
       const fallback = await noPayFallback(employee_id, year, leave_type_id);
+      // Stuck: neither this allowance nor the unpaid one can take it. Only HR
+      // can unblock that, and they cannot act on a refusal they never saw.
+      if (!fallback || fallback.remaining < days) {
+        notifyLeaveAllowanceExhausted({
+          employee_id,
+          leave_type_name: leaveTypeRow.name,
+          year,
+          days,
+          position,
+          unpaid_type_name: fallback?.name || null,
+          unpaid_remaining: fallback?.remaining ?? 0,
+        });
+      }
       return res.status(400).json({
         error: shortfallMessage(leaveTypeRow.name, year, days, position, fallback),
         balance: position,
@@ -423,6 +442,17 @@ router.put(
     const position = await leavePosition(request.employee_id, typeId, year, { excludeRequestId: request.id });
     if (days > position.remaining) {
       const fallback = await noPayFallback(request.employee_id, year, typeId);
+      if (!fallback || fallback.remaining < days) {
+        notifyLeaveAllowanceExhausted({
+          employee_id: request.employee_id,
+          leave_type_name: type.name,
+          year,
+          days,
+          position,
+          unpaid_type_name: fallback?.name || null,
+          unpaid_remaining: fallback?.remaining ?? 0,
+        });
+      }
       return res.status(400).json({
         error: shortfallMessage(type.name, year, days, position, fallback),
         balance: position,

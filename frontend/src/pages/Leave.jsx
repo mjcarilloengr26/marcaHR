@@ -581,7 +581,14 @@ export default function Leave() {
                           instead — {noPayLeft} day{noPayLeft === 1 ? "" : "s"} left there.
                         </>
                       ) : (
-                        " HR has to raise the allocation before this can be filed."
+                        <>
+                          {" "}
+                          {noPayType && String(noPayType.id) !== String(form.leave_type_id)
+                            ? `${noPayType.name} is used up too, so there is nowhere left to file this.`
+                            : "There is nothing left to file this against."}{" "}
+                          Contact HR to have your allocation raised — they are notified automatically when a
+                          request is refused this way.
+                        </>
                       )}
                     </>
                   )}
