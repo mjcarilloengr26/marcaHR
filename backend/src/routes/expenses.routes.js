@@ -6,8 +6,90 @@ const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
 const { advancePositions } = require("../services/advancePosition");
 const { resolveCostCenter } = require("../services/costCenterName");
+const { COUNTED_SQL } = require("../services/expenseScope");
+
+// Two decimal places, the same rounding every money figure in this app uses.
+const money = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
 const router = express.Router();
+
+// What is left on one advance, and where the rest could go.
+//
+// Spending past an advance is allowed on purpose: somebody who genuinely paid
+// more than they were given is owed the excess, and refusing that would leave
+// them unable to claim their own money back. What is not sensible is doing it
+// while another released advance sits untouched — the overspend then reads as
+// a debt to the employee at the same moment the company is still holding cash
+// with them, and the two references have to be unpicked by hand later.
+//
+// So the refusal is conditional: only when there is somewhere else the excess
+// could have gone. `excludeReportId` leaves the report being edited out of the
+// tally, so its own existing lines are not counted twice.
+async function advanceRoom(advanceId, excludeReportId = null) {
+  const row = await db
+    .prepare(
+      `SELECT a.amount, a.returned_amount,
+              COALESCE((SELECT SUM(i.amount)
+                        FROM expense_reports r JOIN expense_items i ON i.report_id = r.id
+                        WHERE r.cash_advance_id = a.id AND r.status IN ${COUNTED_SQL}
+                          AND r.id <> ?), 0) AS liquidated
+       FROM cash_advances a WHERE a.id = ?`
+    )
+    .get(excludeReportId || 0, advanceId);
+  if (!row) return 0;
+  return money(Number(row.amount) - Number(row.returned_amount) - Number(row.liquidated));
+}
+
+// Other advances of the same employee that are released and still have money
+// on them. Only 'open' counts: 'pending' has been asked for, not handed over,
+// and telling somebody to split onto cash they have not received would be
+// worse than saying nothing.
+async function otherAdvancesWithRoom(employeeId, exceptAdvanceId) {
+  const rows = await db
+    .prepare(
+      `SELECT a.id, a.reference,
+              a.amount - a.returned_amount - COALESCE((SELECT SUM(i.amount)
+                 FROM expense_reports r JOIN expense_items i ON i.report_id = r.id
+                 WHERE r.cash_advance_id = a.id AND r.status IN ${COUNTED_SQL}), 0) AS remaining
+       FROM cash_advances a
+       WHERE a.employee_id = ? AND a.status = 'open' AND a.id <> ?`
+    )
+    .all(employeeId, exceptAdvanceId || 0);
+  return rows.filter((r) => money(r.remaining) > 0).map((r) => ({ ...r, remaining: money(r.remaining) }));
+}
+
+// Would this report, once the change lands, spend past its advance while the
+// employee still holds another? Returns the refusal text, or null to allow.
+//
+// `delta` is what the report's total becomes, so the caller works out the new
+// figure and this only judges it.
+async function splitRefusal(report, newTotal) {
+  if (!report.cash_advance_id) return null;
+  const advance = await db.prepare("SELECT id, reference FROM cash_advances WHERE id = ?").get(report.cash_advance_id);
+  if (!advance) return null;
+  const left = await advanceRoom(advance.id, report.id);
+  if (money(newTotal) <= left) return null;
+  const others = await otherAdvancesWithRoom(report.employee_id, advance.id);
+  if (others.length === 0) return null;
+  return splitMessage(advance.reference, left, money(newTotal), others);
+}
+
+// The refusal, when there is genuinely a better way to file it.
+function splitMessage(reference, left, total, others) {
+  const over = money(total - left);
+  // Named biggest-first and only the two largest: somebody holding five
+  // advances does not need all five recited back, they need to know where the
+  // excess will actually fit.
+  const ranked = [...others].sort((a, z) => z.remaining - a.remaining);
+  const named = ranked.slice(0, 2).map((o) => `${o.reference} (${o.remaining} left)`).join(" or ");
+  const rest = ranked.length - 2;
+  const where = rest > 0 ? `${named}, or ${rest} other advance${rest === 1 ? "" : "s"}` : named;
+  return (
+    `This comes to ${total} but only ${left} is left on ${reference} — ${over} more than the advance covers. ` +
+    `You still hold ${where}, so split it: claim ${left} against ${reference} and file the remaining ${over} against the other advance. ` +
+    `File it all here only if you paid the excess yourself, which means settling the other advance first.`
+  );
+}
 
 const { EXPENSE_TYPES, TITLES, CATEGORIES, resolveChoice } = require("../services/expenseOptions");
 
@@ -388,6 +470,22 @@ router.post(
     }
     const advanceId = advance ? advance.id : null;
 
+    // Checked before anything is written, so a refusal leaves nothing behind.
+    if (advance && lines.length > 0) {
+      const total = money(lines.reduce((n, l) => n + (Number(l.amount) || 0), 0));
+      const left = await advanceRoom(advance.id);
+      if (total > left) {
+        const others = await otherAdvancesWithRoom(employee_id, advance.id);
+        if (others.length > 0) {
+          return res.status(400).json({
+            error: splitMessage(advance.reference, left, total, others),
+            advance: { reference: advance.reference, remaining: left },
+            others,
+          });
+        }
+      }
+    }
+
     // One transaction: a report that exists with none of its lines is the
     // phantom draft the merged dialog is meant to stop creating.
     let reportId;
@@ -522,6 +620,13 @@ router.post(
     if (!expense_date || amount === undefined) {
       return res.status(400).json({ error: "expense_date and amount are required" });
     }
+    // What the report would come to with this line on it.
+    const current = await db
+      .prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM expense_items WHERE report_id = ?")
+      .get(req.expenseReport.id);
+    const refusal = await splitRefusal(req.expenseReport, Number(current.total) + Number(amount));
+    if (refusal) return res.status(400).json({ error: refusal });
+
     const receipt = parseReceipt(body);
     const info = await db
       .prepare(
@@ -613,6 +718,14 @@ router.put(
       const t = typeof v === "string" ? v.trim() : v == null ? "" : String(v).trim();
       return t === "" ? null : t;
     };
+
+    // This route loads the report itself rather than going through
+    // loadEditableReport, so the local copy is what the guard is given.
+    const currentTotal = await db
+      .prepare("SELECT COALESCE(SUM(amount), 0) AS total FROM expense_items WHERE report_id = ?")
+      .get(report.id);
+    const refusal = await splitRefusal(report, Number(currentTotal.total) - Number(item.amount) + amount);
+    if (refusal) return res.status(400).json({ error: refusal });
 
     // A new file replaces the old one; sending nothing keeps whatever is
     // already attached. Replacing a receipt is the common reason for editing a

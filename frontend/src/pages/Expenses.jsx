@@ -354,6 +354,17 @@ export default function Expenses() {
   // "left" and the only one this report can be measured against.
   const advanceLeft = selectedAdvance ? Number(selectedAdvance.dueToCompany) || 0 : 0;
 
+  // The other advances this person still holds money on. Overspending one while
+  // another sits untouched is the case the server refuses, so the form says so
+  // before the Save button is reached rather than after.
+  const otherAdvances = selectedAdvance
+    ? openAdvances
+        .filter((a) => String(a.id) !== String(selectedAdvance.id) && (Number(a.dueToCompany) || 0) > 0)
+        // Biggest first, so the two the message names are the two most likely
+        // to swallow the whole excess.
+        .sort((a, z) => (Number(z.dueToCompany) || 0) - (Number(a.dueToCompany) || 0))
+    : [];
+
   const openForm = () => {
     setForm(EMPTY_FORM);
     setLines([blankLine()]);
@@ -854,13 +865,28 @@ export default function Expenses() {
                     original amount — other reports may already have drawn on
                     it, and comparing to the gross figure told somebody they
                     were inside an advance that had nothing left in it. */}
-                <div className="subtitle" style={{ margin: 0, fontSize: 12 }}>
+                <div
+                  className="subtitle"
+                  style={{
+                    margin: 0,
+                    fontSize: 12,
+                    color: selectedAdvance && lineTotal > advanceLeft && otherAdvances.length > 0 ? "var(--danger)" : undefined,
+                  }}
+                >
                   {lines.length} line{lines.length === 1 ? "" : "s"}
-                  {selectedAdvance
-                    ? lineTotal <= advanceLeft
+                  {!selectedAdvance
+                    ? " · claimed back from the company"
+                    : lineTotal <= advanceLeft
                       ? ` · ${money(advanceLeft - lineTotal)} would remain unspent on ${selectedAdvance.reference}`
-                      : ` · ${money(lineTotal - advanceLeft)} more than is left on ${selectedAdvance.reference}, due back to you`
-                    : " · claimed back from the company"}
+                      : otherAdvances.length > 0
+                        ? // Spending past one advance while holding another has to be
+                          // split, or the overspend reads as a debt to the employee at
+                          // the same moment the company still has cash out with them.
+                          ` · ${money(lineTotal - advanceLeft)} more than is left on ${selectedAdvance.reference}. Split it — claim ${money(advanceLeft)} here and file the rest against ${otherAdvances
+                            .slice(0, 2)
+                            .map((a) => `${a.reference} (${money(Number(a.dueToCompany) || 0)} left)`)
+                            .join(" or ")}${otherAdvances.length > 2 ? `, or ${otherAdvances.length - 2} other advances` : ""}.`
+                        : ` · ${money(lineTotal - advanceLeft)} more than is left on ${selectedAdvance.reference}, due back to you`}
                 </div>
               </div>
             </div>
