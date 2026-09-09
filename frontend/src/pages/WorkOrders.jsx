@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import CustomerPicker from "../components/CustomerPicker";
 import SuggestInput from "../components/SuggestInput";
 import { useAuth } from "../context/AuthContext";
 import { useSort } from "../hooks/useSort";
@@ -8,7 +9,7 @@ import SortTh from "../components/SortTh";
 const emptyForm = {
   work_order_number: "",
   title: "",
-  customer_name: "",
+  customer_name: "", customer_id: "",
   description: "",
   address: "",
   order_id: "",
@@ -59,6 +60,7 @@ export default function WorkOrders() {
       work_order_number: wo.work_order_number,
       title: wo.title,
       customer_name: wo.customer_name,
+      customer_id: wo.customer_id ?? "",
       description: wo.description || "",
       address: wo.address || "",
       order_id: wo.order_id || "",
@@ -219,10 +221,10 @@ export default function WorkOrders() {
                 <label>Title</label>
                 <SuggestInput field="project_title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
               </div>
-              <div className="form-row">
-                <label>Customer</label>
-                <SuggestInput field="customer_name" value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} required />
-              </div>
+              <CustomerPicker
+                value={form.customer_id}
+                onChange={(id) => setForm({ ...form, customer_id: id })}
+              />
               <div className="form-row">
                 <label>Related order</label>
                 <select value={form.order_id} onChange={(e) => setForm({ ...form, order_id: e.target.value })}>

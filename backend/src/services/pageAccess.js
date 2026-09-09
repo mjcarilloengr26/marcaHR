@@ -31,6 +31,10 @@ const GRANTABLE_PAGES = [
   { key: "payroll", label: "Payroll", route: "/payroll", apiPrefix: "/api/payroll" },
   { key: "orders", label: "Orders", route: "/orders", apiPrefix: "/api/orders" },
   { key: "billing", label: "Billing", route: "/billing", apiPrefix: "/api/invoices" },
+  // Grantable because opportunities, orders and work orders all now pick their
+  // customer from this list: somebody raising those needs to be able to add a
+  // customer that is not on it yet, without being made an administrator.
+  { key: "customers", label: "Customers", route: "/customers", apiPrefix: "/api/customers" },
   { key: "purchase-orders", label: "Purchase Orders", route: "/purchase-orders", apiPrefix: "/api/purchase-orders" },
   { key: "work-orders", label: "Work Orders", route: "/work-orders", apiPrefix: "/api/work-orders" },
   { key: "projects", label: "Projects & Gantt", route: "/projects", apiPrefix: "/api/projects" },

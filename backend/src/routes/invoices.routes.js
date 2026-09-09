@@ -5,6 +5,7 @@ const asyncHandler = require("../middleware/asyncHandler");
 const { invoiceForPdf, renderInvoicePdf } = require("../services/invoicePdf");
 const { sendReadiness, sendInvoiceEmail } = require("../services/invoiceSend");
 const { logRequestEvent } = require("../services/auditLog");
+const { resolveCustomer, resolveCustomerForUpdate } = require("../services/customerRef");
 
 const router = express.Router();
 
@@ -169,14 +170,18 @@ router.get("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req
 }));
 
 router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
-  const {
-    invoice_number, order_id, customer_name, amount, status, issue_date, due_date, notes, project_id, customer_id,
-  } = req.body || {};
+  const { invoice_number, order_id, amount, status, issue_date, due_date, notes, project_id } = req.body || {};
   const { error: curError, currency } = validateCurrency(req.body?.currency);
   if (curError) return res.status(400).json({ error: curError });
-  if (!invoice_number || !customer_name) {
-    return res.status(400).json({ error: "invoice_number and customer_name are required" });
+  if (!invoice_number) {
+    return res.status(400).json({ error: "Give the statement a number" });
   }
+
+  // Chosen from the customer list, not typed. A statement whose customer does
+  // not resolve to a record cannot be emailed at all — this is where that is
+  // caught, rather than at the moment somebody presses Send.
+  const { error: custError, customer } = await resolveCustomer(req.body?.customer_id);
+  if (custError) return res.status(400).json({ error: custError });
   if (order_id) {
     const info = await remainingForOrder(order_id, 0);
     if (!info) return res.status(400).json({ error: "Related order not found" });
@@ -196,8 +201,8 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
       .run(
         invoice_number,
         order_id || null,
-        customer_name,
-        await resolveCustomerId(customer_id, customer_name),
+        customer.name,
+        customer.id,
         amount || 0,
         status || "draft",
         currency || "PHP",
@@ -471,9 +476,10 @@ router.put("/:id/items", requireAuth, requireRole("admin", "hr"), asyncHandler(a
 router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
   const existing = await db.prepare("SELECT * FROM invoices WHERE id = ?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "Invoice not found" });
-  const {
-    invoice_number, order_id, customer_name, amount, status, issue_date, due_date, notes, project_id, customer_id, vat_rate,
-  } = req.body || {};
+  const { invoice_number, order_id, amount, status, issue_date, due_date, notes, project_id, vat_rate } = req.body || {};
+
+  const { error: custError, customerId, customerName } = await resolveCustomerForUpdate(req.body || {}, existing);
+  if (custError) return res.status(400).json({ error: custError });
   if (status && !["draft", "approved", "sent", "paid", "overdue", "cancelled"].includes(status)) {
     return res.status(400).json({ error: "Invalid status" });
   }
@@ -524,12 +530,8 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
     ).run(
       invoice_number ?? existing.invoice_number,
       order_id !== undefined ? order_id || null : existing.order_id,
-      customer_name ?? existing.customer_name,
-      // Re-resolved whenever the name or the link is touched, so correcting a
-      // misspelled customer on an invoice actually re-points it.
-      customer_id !== undefined || customer_name !== undefined
-        ? await resolveCustomerId(customer_id, customer_name ?? existing.customer_name)
-        : existing.customer_id,
+      customerName,
+      customerId,
       amount !== undefined ? amount : existing.amount,
       status || existing.status,
       rate !== undefined ? rate : existing.vat_rate,

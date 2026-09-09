@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { api, downloadFile, getToken } from "../api/client";
+import CustomerPicker from "../components/CustomerPicker";
 import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
 
-const emptyForm = { invoice_number: "", order_id: "", customer_name: "", amount: "", status: "draft", issue_date: "", due_date: "", notes: "", project_id: "" };
+const emptyForm = { invoice_number: "", order_id: "", customer_name: "", customer_id: "", amount: "", status: "draft", issue_date: "", due_date: "", notes: "", project_id: "" };
 const STATUSES = ["draft", "approved", "sent", "paid", "overdue", "cancelled"];
 
 export default function Billing() {
@@ -171,6 +172,7 @@ export default function Billing() {
       order_id: inv.order_id || "",
       project_id: inv.project_id || "",
       customer_name: inv.customer_name,
+      customer_id: inv.customer_id ?? "",
       amount: inv.amount,
       status: inv.status,
       issue_date: inv.issue_date || "",
@@ -479,10 +481,10 @@ export default function Billing() {
                 <label>Invoice number</label>
                 <input value={form.invoice_number} onChange={(e) => setForm({ ...form, invoice_number: e.target.value })} required />
               </div>
-              <div className="form-row">
-                <label>Customer</label>
-                <SuggestInput field="customer_name" value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} required />
-              </div>
+              <CustomerPicker
+                value={form.customer_id}
+                onChange={(id) => setForm({ ...form, customer_id: id })}
+              />
               <div className="form-row">
                 <label>Related order</label>
                 <select value={form.order_id} onChange={(e) => setForm({ ...form, order_id: e.target.value })}>

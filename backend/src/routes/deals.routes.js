@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
+const { resolveCustomer, resolveCustomerForUpdate } = require("../services/customerRef");
 const { logRequestEvent } = require("../services/auditLog");
 const { AGING_COLUMNS, agingSummary, staleDeals } = require("../services/dealAging");
 
@@ -15,12 +16,13 @@ async function autoCreateOrderForWonDeal(deal) {
   if (alreadyLinked) return null;
   const info = await db
     .prepare(
-      `INSERT INTO orders (order_number, customer_name, amount, status, owner_id, deal_id, order_date, notes)
-       VALUES (?, ?, ?, 'placed', ?, ?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'), ?)`
+      `INSERT INTO orders (order_number, customer_name, customer_id, amount, status, owner_id, deal_id, order_date, notes)
+       VALUES (?, ?, ?, ?, 'placed', ?, ?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'), ?)`
     )
     .run(
       `ORD-OPP-${deal.id}`,
       deal.customer_name,
+      deal.customer_id,
       deal.value,
       deal.owner_id,
       deal.id,
@@ -91,18 +93,21 @@ router.post(
     const isSales = await isSalesEmployee(req);
     if (!isHr && !isSales) return res.status(403).json({ error: "Insufficient permissions" });
 
-    const { title, customer_name, value, stage, expected_close_date, notes, competitor } = req.body || {};
-    if (!title || !customer_name) return res.status(400).json({ error: "title and customer_name are required" });
+    const { title, value, stage, expected_close_date, notes, competitor } = req.body || {};
+    if (!title) return res.status(400).json({ error: "Give the opportunity a title" });
+
+    const { error: custError, customer } = await resolveCustomer(req.body?.customer_id);
+    if (custError) return res.status(400).json({ error: custError });
     // A sales rep can only ever create opportunities under their own name —
     // owner_id from the request body is only honored for HR/admin.
     const owner_id = isHr ? req.body?.owner_id || null : req.user.employee_id;
 
     const info = await db
       .prepare(
-        `INSERT INTO deals (title, customer_name, value, stage, owner_id, expected_close_date, notes, competitor)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO deals (title, customer_name, customer_id, value, stage, owner_id, expected_close_date, notes, competitor)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run(title, customer_name, value || 0, stage || "lead", owner_id, expected_close_date || null, notes || null, competitor?.trim() || null);
+      .run(title, customer.name, customer.id, value || 0, stage || "lead", owner_id, expected_close_date || null, notes || null, competitor?.trim() || null);
 
     const created = await db.prepare("SELECT * FROM deals WHERE id = ?").get(info.lastInsertRowid);
     // An opportunity can be entered as already-won (e.g. logging a deal closed
@@ -130,7 +135,10 @@ router.put(
       }
     }
 
-    const { title, customer_name, value, stage, expected_close_date, notes, competitor } = req.body || {};
+    const { title, value, stage, expected_close_date, notes, competitor } = req.body || {};
+
+    const { error: custError, customerId, customerName } = await resolveCustomerForUpdate(req.body || {}, existing);
+    if (custError) return res.status(400).json({ error: custError });
     if (stage && !["lead", "qualified", "proposal", "negotiation", "won", "lost"].includes(stage)) {
       return res.status(400).json({ error: "Invalid stage" });
     }
@@ -145,13 +153,14 @@ router.put(
 
     await db
       .prepare(
-        `UPDATE deals SET title = ?, customer_name = ?, value = ?, stage = ?, owner_id = ?, expected_close_date = ?, notes = ?, competitor = ?,
+        `UPDATE deals SET title = ?, customer_name = ?, customer_id = ?, value = ?, stage = ?, owner_id = ?, expected_close_date = ?, notes = ?, competitor = ?,
             stage_changed_at = CASE WHEN ? THEN to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') ELSE stage_changed_at END
      WHERE id = ?`
       )
       .run(
         title ?? existing.title,
-        customer_name ?? existing.customer_name,
+        customerName,
+        customerId,
         value !== undefined ? value : existing.value,
         stage || existing.stage,
         owner_id,

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import CustomerPicker from "../components/CustomerPicker";
 import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
@@ -7,7 +8,7 @@ import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
 import { Link } from "react-router-dom";
 
-const emptyForm = { order_number: "", customer_name: "", amount: "", status: "placed", owner_id: "", order_date: "", notes: "", project_id: "" };
+const emptyForm = { order_number: "", customer_name: "", customer_id: "", amount: "", status: "placed", owner_id: "", order_date: "", notes: "", project_id: "" };
 const STATUSES = ["placed", "processing", "shipped", "delivered", "cancelled"];
 
 export default function Orders() {
@@ -43,6 +44,7 @@ export default function Orders() {
     setForm({
       order_number: order.order_number,
       customer_name: order.customer_name,
+      customer_id: order.customer_id ?? "",
       amount: order.amount,
       status: order.status,
       owner_id: order.owner_id || "",
@@ -204,10 +206,10 @@ export default function Orders() {
                 <label>Order number</label>
                 <input value={form.order_number} onChange={(e) => setForm({ ...form, order_number: e.target.value })} required />
               </div>
-              <div className="form-row">
-                <label>Customer</label>
-                <SuggestInput field="customer_name" value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} required />
-              </div>
+              <CustomerPicker
+                value={form.customer_id}
+                onChange={(id) => setForm({ ...form, customer_id: id })}
+              />
               <div className="form-row">
                 <label>Amount</label>
                 <DecimalInput value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} />

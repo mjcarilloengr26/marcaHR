@@ -3,6 +3,7 @@ const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { onOrderDelivered } = require("../services/billingTriggers");
+const { resolveCustomer, resolveCustomerForUpdate } = require("../services/customerRef");
 
 const router = express.Router();
 
@@ -59,18 +60,22 @@ router.post(
   requireAuth,
   requireRole("admin", "hr"),
   asyncHandler(async (req, res) => {
-    const { order_number, customer_name, amount, status, owner_id, order_date, notes, project_id } = req.body || {};
-    if (!order_number || !customer_name) return res.status(400).json({ error: "order_number and customer_name are required" });
+    const { order_number, amount, status, owner_id, order_date, notes, project_id } = req.body || {};
+    if (!order_number) return res.status(400).json({ error: "Give the order a number" });
+
+    const { error: custError, customer } = await resolveCustomer(req.body?.customer_id);
+    if (custError) return res.status(400).json({ error: custError });
     try {
       const info = await db
         .prepare(
-          `INSERT INTO orders (order_number, customer_name, amount, status, owner_id, order_date, notes,
+          `INSERT INTO orders (order_number, customer_name, customer_id, amount, status, owner_id, order_date, notes,
                               project_id, created_by, status_changed_by, status_changed_at)
-         VALUES (?, ?, ?, ?, ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?, ?)`
         )
         .run(
           order_number,
-          customer_name,
+          customer.name,
+          customer.id,
           amount || 0,
           status || "placed",
           owner_id || null,
@@ -98,7 +103,10 @@ router.put(
   asyncHandler(async (req, res) => {
     const existing = await db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
     if (!existing) return res.status(404).json({ error: "Order not found" });
-    const { order_number, customer_name, amount, status, owner_id, order_date, notes, project_id } = req.body || {};
+    const { order_number, amount, status, owner_id, order_date, notes, project_id } = req.body || {};
+
+    const { error: custError, customerId, customerName } = await resolveCustomerForUpdate(req.body || {}, existing);
+    if (custError) return res.status(400).json({ error: custError });
     if (status && !["placed", "processing", "shipped", "delivered", "cancelled"].includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
     }
@@ -108,13 +116,14 @@ router.put(
     try {
       await db
         .prepare(
-          `UPDATE orders SET order_number = ?, customer_name = ?, amount = ?, status = ?, owner_id = ?, order_date = ?, notes = ?,
+          `UPDATE orders SET order_number = ?, customer_name = ?, customer_id = ?, amount = ?, status = ?, owner_id = ?, order_date = ?, notes = ?,
             project_id = ?, status_changed_by = ?, status_changed_at = ?
        WHERE id = ?`
         )
         .run(
           order_number ?? existing.order_number,
-          customer_name ?? existing.customer_name,
+          customerName,
+          customerId,
           amount !== undefined ? amount : existing.amount,
           nextStatus,
           owner_id !== undefined ? owner_id || null : existing.owner_id,

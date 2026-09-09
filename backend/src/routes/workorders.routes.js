@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 const { notifyWorkOrderAssigned } = require("../notifications");
 const asyncHandler = require("../middleware/asyncHandler");
 const { onWorkOrderCompleted } = require("../services/billingTriggers");
+const { resolveCustomer, resolveCustomerForUpdate } = require("../services/customerRef");
 
 const router = express.Router();
 
@@ -47,23 +48,27 @@ router.get("/", requireAuth, asyncHandler(async (req, res) => {
 }));
 
 router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
-  const { work_order_number, title, customer_name, description, address, order_id, assigned_to, priority, scheduled_date, notes, project_id } =
+  const { work_order_number, title, description, address, order_id, assigned_to, priority, scheduled_date, notes, project_id } =
     req.body || {};
-  if (!work_order_number || !title || !customer_name) {
-    return res.status(400).json({ error: "work_order_number, title and customer_name are required" });
+  if (!work_order_number || !title) {
+    return res.status(400).json({ error: "A work order needs a number and a title" });
   }
+
+  const { error: custError, customer } = await resolveCustomer(req.body?.customer_id);
+  if (custError) return res.status(400).json({ error: custError });
   const status = assigned_to ? "assigned" : "open";
   try {
     const info = await db
       .prepare(
-        `INSERT INTO work_orders (work_order_number, title, customer_name, description, address, order_id, assigned_to, priority, status, scheduled_date, notes,
+        `INSERT INTO work_orders (work_order_number, title, customer_name, customer_id, description, address, order_id, assigned_to, priority, status, scheduled_date, notes,
                                   project_id, created_by, status_changed_by, status_changed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         work_order_number,
         title,
-        customer_name,
+        customer.name,
+        customer.id,
         description || null,
         address || null,
         order_id || null,
@@ -101,7 +106,12 @@ router.put("/:id", requireAuth, asyncHandler(async (req, res) => {
   }
 
   const title = isHr ? body.title ?? existing.title : existing.title;
-  const customer_name = isHr ? body.customer_name ?? existing.customer_name : existing.customer_name;
+  const custRef = isHr
+    ? await resolveCustomerForUpdate(body, existing)
+    : { customerId: existing.customer_id, customerName: existing.customer_name };
+  if (custRef.error) return res.status(400).json({ error: custRef.error });
+  const customer_name = custRef.customerName;
+  const customer_id = custRef.customerId;
   const description = isHr ? (body.description !== undefined ? body.description : existing.description) : existing.description;
   const address = isHr ? (body.address !== undefined ? body.address : existing.address) : existing.address;
   const order_id = isHr ? (body.order_id !== undefined ? body.order_id || null : existing.order_id) : existing.order_id;
@@ -118,11 +128,11 @@ router.put("/:id", requireAuth, asyncHandler(async (req, res) => {
   const statusMoved = status !== existing.status;
 
   await db.prepare(
-    `UPDATE work_orders SET title = ?, customer_name = ?, description = ?, address = ?, order_id = ?, assigned_to = ?,
+    `UPDATE work_orders SET title = ?, customer_name = ?, customer_id = ?, description = ?, address = ?, order_id = ?, assigned_to = ?,
      priority = ?, status = ?, scheduled_date = ?, notes = ?, completed_at = ?, project_id = ?,
      status_changed_by = ?, status_changed_at = ? WHERE id = ?`
   ).run(
-    title, customer_name, description, address, order_id, assigned_to, priority, status, scheduled_date, notes, completed_at, project_id,
+    title, customer_name, customer_id, description, address, order_id, assigned_to, priority, status, scheduled_date, notes, completed_at, project_id,
     statusMoved ? req.user.employee_id || null : existing.status_changed_by,
     statusMoved ? nowStamp() : existing.status_changed_at,
     req.params.id

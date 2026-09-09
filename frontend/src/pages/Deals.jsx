@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import CustomerPicker from "../components/CustomerPicker";
 import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
@@ -7,7 +8,7 @@ import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
 
-const emptyForm = { title: "", customer_name: "", value: "", stage: "lead", owner_id: "", expected_close_date: "", notes: "", competitor: "" };
+const emptyForm = { title: "", customer_name: "", customer_id: "", value: "", stage: "lead", owner_id: "", expected_close_date: "", notes: "", competitor: "" };
 const STAGES = ["lead", "qualified", "proposal", "negotiation", "won", "lost"];
 
 // Days in the current stage is the number a pipeline review acts on; total age
@@ -74,6 +75,7 @@ export default function Deals() {
     setForm({
       title: deal.title,
       customer_name: deal.customer_name,
+      customer_id: deal.customer_id ?? "",
       competitor: deal.competitor || "",
       value: deal.value,
       stage: deal.stage,
@@ -251,10 +253,10 @@ export default function Deals() {
               <SuggestInput field="project_title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
             </div>
             <div className="grid grid-2">
-              <div className="form-row">
-                <label>Customer</label>
-                <SuggestInput field="customer_name" value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} required />
-              </div>
+              <CustomerPicker
+                value={form.customer_id}
+                onChange={(id) => setForm({ ...form, customer_id: id })}
+              />
               <div className="form-row">
                 <label>Competitor</label>
                 <SuggestInput
