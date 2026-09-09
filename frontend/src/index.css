@@ -29,6 +29,8 @@
   --overlay: rgba(15, 18, 25, 0.45);
   --error-banner-bg: #fde3e3;
   --error-banner-text: #8a2323;
+  --warning-banner-bg: #fdf1d8;
+  --warning-banner-text: #7a5405;
   color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
@@ -63,6 +65,8 @@
   --overlay: rgba(0, 0, 0, 0.6);
   --error-banner-bg: rgba(239, 99, 99, 0.16);
   --error-banner-text: #ff9a9a;
+  --warning-banner-bg: rgba(224, 171, 60, 0.16);
+  --warning-banner-text: #e8c377;
   color-scheme: dark;
 }
 
@@ -747,6 +751,21 @@ input[type="date"]::-webkit-datetime-edit-year-field {
   margin-bottom: 16px;
   font-size: 14px;
 }
+
+/* Something worth acting on that hasn't broken anything yet — a payroll month
+   holding two schedules, say. Deliberately not the red treatment: nothing has
+   failed, so it must not read as a failure. */
+.warning-banner {
+  background: var(--warning-banner-bg);
+  color: var(--warning-banner-text);
+  padding: 10px 14px;
+  border-radius: 6px;
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+.warning-banner strong { display: block; margin-bottom: 4px; }
+.warning-banner ul { margin: 6px 0 0; padding-left: 18px; }
+.warning-banner li { margin-bottom: 2px; }
 
 /* Horizontal scroller for charts whose categories outgrow their container.
    The scrollbar is styled to always show rather than auto-hide, since an

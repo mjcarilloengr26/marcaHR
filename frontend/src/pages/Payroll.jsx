@@ -33,12 +33,28 @@ export default function Payroll() {
   const [editingSettings, setEditingSettings] = useState(false);
   const [settingsForm, setSettingsForm] = useState(null);
   const [search, setSearch] = useState("");
+  const [conflicts, setConflicts] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkBusy, setBulkBusy] = useState(false);
 
   const isMonthly = settings?.pay_frequency === "monthly";
 
-  const load = () => api.get("/payroll").then(setRecords).catch((err) => setError(err.message));
+  const loadConflicts = () => {
+    if (!isHr) return;
+    api.get("/payroll/schedule-conflicts").then(setConflicts).catch(() => {});
+  };
+
+  // Every caller of load() has just changed a payroll record, which is exactly
+  // when a duplicated month can appear or be cleared, so the banner refreshes
+  // with the table rather than going stale behind it.
+  const load = () =>
+    api
+      .get("/payroll")
+      .then((rows) => {
+        setRecords(rows);
+        loadConflicts();
+      })
+      .catch((err) => setError(err.message));
 
   useEffect(() => {
     load();
@@ -236,6 +252,30 @@ export default function Payroll() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+
+      {/* Someone whose pay schedule changed keeps their old finalized and paid
+          rows in the half they used to be paid in, so the month ends up holding
+          a record from each schedule. Generation leaves history alone by
+          design; without this nobody is told, and the first sign is the money. */}
+      {conflicts.length > 0 && (
+        <div className="warning-banner">
+          <strong>
+            {conflicts.length === 1 ? "A month holds" : `${conflicts.length} months hold`} records from two different
+            pay schedules
+          </strong>
+          This happens when someone's pay schedule changes after a run has been finalized. Check whether they are
+          being paid twice for the period.
+          <ul>
+            {conflicts.map((c) => (
+              <li key={`${c.employee_id}-${c.period_year}-${c.period_month}`}>
+                {c.employee_name} — {MONTH_NAMES[c.period_month]} {c.period_year}: {c.record_count} records totalling{" "}
+                {money(c.total_net)}
+                {c.any_paid ? ` (${money(c.paid_net)} already paid)` : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {isHr && (
         <div className="card form-inline" style={{ marginBottom: 16 }}>

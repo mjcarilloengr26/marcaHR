@@ -134,6 +134,42 @@ router.get(
   })
 );
 
+// Changing someone's pay schedule leaves their finalized and paid rows behind
+// in the half they used to be paid in. Generation is right not to touch those
+// — they are history — but the silence is the problem: the month now holds a
+// record from each schedule, and nobody finds out until they notice the money.
+// Edward Soldao was paid twice for August 2026 that way, a month before anyone
+// spotted it.
+//
+// Declared above /:id, which would otherwise swallow this path.
+router.get(
+  "/schedule-conflicts",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    res.json(
+      await db
+        .prepare(
+          `SELECT e.id AS employee_id,
+                  (e.first_name || ' ' || e.last_name) AS employee_name,
+                  e.salary_basis,
+                  p.period_month,
+                  p.period_year,
+                  COUNT(*)::int AS record_count,
+                  SUM(p.net_pay) AS total_net,
+                  SUM(CASE WHEN p.status = 'paid' THEN p.net_pay ELSE 0 END) AS paid_net,
+                  BOOL_OR(p.status = 'paid') AS any_paid
+           FROM payroll_records p
+           JOIN employees e ON e.id = p.employee_id
+           GROUP BY e.id, e.first_name, e.last_name, e.salary_basis, p.period_month, p.period_year
+           HAVING BOOL_OR(p.period_half = 0) AND BOOL_OR(p.period_half <> 0)
+           ORDER BY p.period_year DESC, p.period_month DESC, e.last_name`
+        )
+        .all()
+    );
+  })
+);
+
 router.get(
   "/:id",
   requireAuth,
