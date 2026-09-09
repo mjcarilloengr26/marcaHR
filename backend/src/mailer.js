@@ -9,7 +9,28 @@ let warnedMissingConfig = false;
 // instead, which uses port 443 like every other outbound request this app makes.
 const RESEND_API_URL = "https://api.resend.com/emails";
 
-async function sendOne(recipient, subject, text, html) {
+// Resend takes attachments as base64 in the JSON body. Kept to a sane ceiling
+// because the whole request is held in memory and most mailboxes reject large
+// messages anyway — a rejected invoice email is worse than a link.
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+
+function encodeAttachments(attachments) {
+  if (!Array.isArray(attachments) || attachments.length === 0) return null;
+  const out = [];
+  let total = 0;
+  for (const a of attachments) {
+    if (!a?.content || !a?.filename) continue;
+    const buf = Buffer.isBuffer(a.content) ? a.content : Buffer.from(a.content);
+    total += buf.length;
+    if (total > MAX_ATTACHMENT_BYTES) {
+      throw new Error(`Attachments exceed ${Math.round(MAX_ATTACHMENT_BYTES / 1024 / 1024)}MB`);
+    }
+    out.push({ filename: a.filename, content: buf.toString("base64") });
+  }
+  return out.length ? out : null;
+}
+
+async function sendOne(recipient, subject, text, html, attachments) {
   const { RESEND_API_KEY, RESEND_FROM } = process.env;
   try {
     const res = await fetch(RESEND_API_URL, {
@@ -26,6 +47,7 @@ async function sendOne(recipient, subject, text, html) {
         // text-only reader is never left with nothing.
         text,
         ...(html ? { html } : {}),
+        ...(attachments ? { attachments } : {}),
       }),
     });
 
@@ -35,7 +57,15 @@ async function sendOne(recipient, subject, text, html) {
     }
 
     console.log(`[mailer] Sent "${subject}" to ${recipient}`);
-    await logEvent({ action: "email_sent", entityType: "email", details: { to: recipient, subject } });
+    await logEvent({
+      action: "email_sent",
+      entityType: "email",
+      details: {
+        to: recipient,
+        subject,
+        ...(attachments ? { attachments: attachments.map((a) => a.filename).join(", ") } : {}),
+      },
+    });
   } catch (err) {
     console.error(`[mailer] Failed to send "${subject}" to ${recipient}:`, err.message);
     await logEvent({ action: "email_failed", entityType: "email", details: { to: recipient, subject, error: err.message } });
@@ -47,9 +77,21 @@ async function sendOne(recipient, subject, text, html) {
 // user) must not let one bad/blocklisted address (Resend rejects reserved domains like
 // example.com) sink delivery to everyone else, and it keeps recipients from seeing each other's
 // addresses in a shared To: header.
-async function sendMail({ to, subject, text, html }) {
+async function sendMail({ to, subject, text, html, attachments }) {
   const recipients = Array.isArray(to) ? to.filter(Boolean) : [to].filter(Boolean);
   if (recipients.length === 0) return;
+
+  let encoded = null;
+  try {
+    encoded = encodeAttachments(attachments);
+  } catch (err) {
+    // Silently dropping the attachment would send an invoice email with no
+    // invoice on it, which reads as a mistake to the customer and is worse
+    // than not sending at all.
+    console.error(`[mailer] Not sending "${subject}": ${err.message}`);
+    await logEvent({ action: "email_failed", entityType: "email", details: { to: recipients.join(", "), subject, error: err.message } });
+    return;
+  }
 
   const { RESEND_API_KEY } = process.env;
   if (!RESEND_API_KEY) {
@@ -58,11 +100,20 @@ async function sendMail({ to, subject, text, html }) {
       warnedMissingConfig = true;
     }
     console.log(`[mailer] Skipped "${subject}" to ${recipients.join(", ")}`);
-    await logEvent({ action: "email_skipped", entityType: "email", details: { to: recipients.join(", "), subject, reason: "Resend not configured" } });
+    await logEvent({
+      action: "email_skipped",
+      entityType: "email",
+      details: {
+        to: recipients.join(", "),
+        subject,
+        reason: "Resend not configured",
+        ...(encoded ? { attachments: encoded.map((a) => a.filename).join(", ") } : {}),
+      },
+    });
     return;
   }
 
-  await Promise.all(recipients.map((r) => sendOne(r, subject, text, html)));
+  await Promise.all(recipients.map((r) => sendOne(r, subject, text, html, encoded)));
 }
 
 module.exports = { sendMail };

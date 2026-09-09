@@ -383,6 +383,37 @@ CREATE TABLE IF NOT EXISTS expense_items (
   receipt_data TEXT
 );
 
+-- The customer as a record rather than a string. Before this, the name was
+-- retyped on every deal, order, work order, invoice and project, so the same
+-- company existed several times over under slightly different spellings and
+-- there was nowhere to keep an email, a TIN or payment terms. Billing needs
+-- all three, and "what have we invoiced this customer" needs the identity.
+CREATE TABLE IF NOT EXISTS customers (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  -- Where invoices go. Nullable because a customer can exist long before
+  -- anyone has an address for them, and refusing to record the customer until
+  -- someone does would just push the name back into free text.
+  email TEXT,
+  -- Everyone else who should receive a copy: accounts payable, the project
+  -- manager, a shared mailbox. Kept separate from the primary rather than as
+  -- one list, because an invoice is addressed TO somebody — that is who is
+  -- being asked to pay — and the rest are copied.
+  cc_emails TEXT[] NOT NULL DEFAULT '{}',
+  contact_person TEXT,
+  phone TEXT,
+  billing_address TEXT,
+  -- Required on a Philippine sales invoice, so it belongs on the customer
+  -- rather than being retyped per invoice.
+  tin TEXT,
+  -- Drives the invoice due date instead of it being guessed each time.
+  payment_terms_days INTEGER NOT NULL DEFAULT 30,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','inactive')),
+  notes TEXT,
+  created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+);
+
 CREATE TABLE IF NOT EXISTS deals (
   id SERIAL PRIMARY KEY,
   title TEXT NOT NULL,
@@ -454,6 +485,11 @@ CREATE TABLE IF NOT EXISTS invoices (
   customer_name TEXT NOT NULL,
   amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'draft' CHECK(status IN ('draft','sent','paid','overdue','cancelled')),
+  -- Amounts here are VAT-inclusive, matching how orders are quoted. The rate
+  -- is stored per invoice rather than read from a setting, so an invoice
+  -- issued today still shows the VAT that was actually charged if the rate
+  -- ever changes. Zero-rated and exempt sales use 0.
+  vat_rate NUMERIC(5,2) NOT NULL DEFAULT 12,
   created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   status_changed_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   status_changed_at TEXT,
@@ -463,6 +499,31 @@ CREATE TABLE IF NOT EXISTS invoices (
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
 );
+
+-- What the invoice is actually charging for. Until now an invoice was a single
+-- amount with no breakdown, which is fine for an internal record and useless
+-- as a document to send a customer.
+--
+-- Items are optional: the sixteen invoices that predate this have none, and an
+-- invoice with no items keeps the amount that was typed on it. Where items do
+-- exist they are the source of truth and the invoice total is recalculated
+-- from them, so the two can never disagree.
+CREATE TABLE IF NOT EXISTS invoice_items (
+  id SERIAL PRIMARY KEY,
+  invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+  description TEXT NOT NULL,
+  quantity NUMERIC(14,2) NOT NULL DEFAULT 1,
+  -- "lot", "pc", "m", "day" — whatever the trade uses. Free text on purpose.
+  unit TEXT,
+  unit_price NUMERIC(14,2) NOT NULL DEFAULT 0,
+  -- Stored rather than derived on read, so exports and totals agree to the
+  -- centavo with what the customer was shown. Always computed server-side.
+  amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS invoice_items_invoice_idx ON invoice_items(invoice_id);
 
 CREATE TABLE IF NOT EXISTS purchase_orders (
   id SERIAL PRIMARY KEY,
@@ -1327,6 +1388,127 @@ async function ensurePayrollDeductionBreakdown() {
 // Conditions / Data Privacy / Cybersecurity acknowledgment — both columns
 // come in NULL for them, which is exactly what should make every existing
 // user see the acceptance gate once on their next login.
+// Points the five tables that carry a customer name at the customers table,
+// and folds the names already in the data into real records.
+//
+// The name stays on each row. It is what was actually written on that order or
+// invoice at the time, and rewriting history to match a customer later renamed
+// would quietly change documents that have already gone out. customer_id is
+// the identity; customer_name is the historical record.
+async function ensureCustomerLinks() {
+  const CARRIERS = [
+    ["deals", "customer_name"],
+    ["orders", "customer_name"],
+    ["work_orders", "customer_name"],
+    ["invoices", "customer_name"],
+    ["projects", "client_name"],
+  ];
+
+  // The customers table predates cc_emails, so existing installs need the
+  // column added — CREATE TABLE IF NOT EXISTS will not do it.
+  await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS cc_emails TEXT[] NOT NULL DEFAULT '{}'`);
+  // Existing invoices were raised VAT-inclusive at the standard rate, so 12 is
+  // the right default for them as well as for new ones.
+  await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS vat_rate NUMERIC(5,2) NOT NULL DEFAULT 12`);
+  // Peso unless someone says otherwise. Stored on the invoice rather than read
+  // from the app-wide currency setting, because both kinds are raised side by
+  // side and an invoice's currency must not change when a setting does.
+  await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'PHP'`);
+
+  // An invoice is reviewed before it goes out. "approved" is the state between
+  // a draft anyone can edit and a document that has reached the customer:
+  // signed off, frozen, but not yet sent. Nothing sends without passing
+  // through it.
+  await pool.query(`
+    ALTER TABLE invoices DROP CONSTRAINT IF EXISTS invoices_status_check;
+    ALTER TABLE invoices ADD CONSTRAINT invoices_status_check
+      CHECK (status IN ('draft','approved','sent','paid','overdue','cancelled'));
+  `);
+  await pool.query(`
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS approved_by INTEGER REFERENCES employees(id) ON DELETE SET NULL;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS approved_at TEXT;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sent_by INTEGER REFERENCES employees(id) ON DELETE SET NULL;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sent_at TEXT;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sent_to TEXT;
+  `);
+  await pool.query(`
+    DO $$ BEGIN
+      ALTER TABLE invoices ADD CONSTRAINT invoices_currency_check CHECK (currency IN ('PHP','USD'));
+    EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+  `);
+
+  // The letterhead. An invoice is a document that leaves the building, so the
+  // company's own details have to be recorded somewhere an admin controls
+  // rather than hard-coded into a template.
+  await pool.query(`
+    -- The invoicing entity, kept apart from the application's own name and
+    -- mark. The sign-in screen is reachable by anyone with the URL and serves
+    -- its branding unauthenticated; the company that issues the invoices does
+    -- not have to be the identity on that page. Both fall back to the app's
+    -- when unset, so an install that wants one identity still gets one.
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS invoice_company_name TEXT;
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS invoice_logo_data TEXT;
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS company_address TEXT;
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS company_tin TEXT;
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS company_phone TEXT;
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS company_email TEXT;
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS company_website TEXT;
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS payment_instructions TEXT;
+    -- A separate foreign-currency account rather than more free text in the
+    -- peso one: an overseas client paying the wrong account is an expensive
+    -- mistake, and the two need to be visibly distinct on the document.
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS payment_instructions_usd TEXT;
+    -- Its own field because SWIFT/BIC is a structured identifier a bank will
+    -- reject if it is wrong, not a line of prose.
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS swift_code TEXT;
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS invoice_footer TEXT;
+    -- The covering email. Editable because the right tone for a customer is a
+    -- business decision, not a developer's — and because the wording that
+    -- suits a construction client differs from one chasing a retainer.
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS invoice_email_subject TEXT;
+    ALTER TABLE branding_settings ADD COLUMN IF NOT EXISTS invoice_email_body TEXT;
+  `);
+
+  // Sent as three statements rather than twenty-five. Every round trip to a
+  // hosted database is ~270ms and a chance for the connection to drop, which
+  // is exactly how this step failed the first time it ran.
+  await pool.query(
+    CARRIERS.map(
+      ([t]) => `ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS customer_id INTEGER REFERENCES customers(id) ON DELETE SET NULL;`
+    ).join("\n")
+  );
+
+  const everyName = CARRIERS.map(
+    ([t, c]) => `SELECT ${c} AS name FROM ${t} WHERE ${c} IS NOT NULL AND btrim(${c}) <> ''`
+  ).join(" UNION ALL ");
+
+  // One record per distinct name, matched case- and whitespace-insensitively
+  // so "ABC Corp", "abc corp " and "ABC  Corp" become one customer rather than
+  // three. The spelling used most often across the data wins, since that is
+  // the one staff actually recognise.
+  await pool.query(
+    `INSERT INTO customers (name)
+     SELECT (array_agg(btrim(name) ORDER BY n DESC, spelling))[1]
+     FROM (SELECT name, btrim(name) AS spelling, COUNT(*) AS n
+           FROM (${everyName}) every_name
+           GROUP BY name) counted
+     GROUP BY lower(btrim(name))
+     ON CONFLICT (name) DO NOTHING`
+  );
+
+  // Link every row whose name matches a customer, ignoring case and padding.
+  // Only fills blanks, so a link someone has since corrected by hand is never
+  // overwritten by a re-run.
+  await pool.query(
+    CARRIERS.map(
+      ([t, c]) => `UPDATE ${t} t SET customer_id = c.id
+       FROM customers c
+       WHERE t.customer_id IS NULL AND t.${c} IS NOT NULL
+         AND lower(btrim(t.${c})) = lower(btrim(c.name));`
+    ).join("\n")
+  );
+}
+
 async function ensureUserTermsAcceptance() {
   await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_version TEXT");
   await pool.query("ALTER TABLE users ADD COLUMN IF NOT EXISTS terms_accepted_at TEXT");
@@ -1463,6 +1645,7 @@ db.migrate = function () {
       .then(() => ensurePayrollDeductionBreakdown())
       .then(() => ensureEmployeeStandingDeductions())
       .then(() => ensureUserTermsAcceptance())
+      .then(() => ensureCustomerLinks())
       .then(() => ensureLoginNotice());
   }
   return migrated;

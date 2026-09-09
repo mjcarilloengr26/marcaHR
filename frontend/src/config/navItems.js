@@ -28,6 +28,7 @@ export const NAV_ITEMS = [
   { section: "Sales", icon: "💹", roles: ["admin", "hr", "employee"], salesOnly: true },
   { to: "/sales", label: "Dashboard", icon: "📊", roles: ["admin", "hr"], pageKey: "sales" },
   { to: "/deals", label: "Opportunities", icon: "🎯", roles: ["admin", "hr", "employee"], salesOnly: true, pageKey: "deals" },
+  { to: "/customers", label: "Customers", icon: "🏢", roles: ["admin", "hr"], pageKey: "customers" },
   { to: "/billing", label: "Billing", icon: "💳", roles: ["admin", "hr"], pageKey: "billing" },
   { to: "/orders", label: "Orders", icon: "🛍️", roles: ["admin", "hr"], pageKey: "orders" },
 

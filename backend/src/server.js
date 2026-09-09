@@ -103,6 +103,7 @@ app.use("/api/deals", dealsRoutes);
 app.use("/api/orders", ordersRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/work-orders", workOrdersRoutes);
+app.use("/api/customers", require("./routes/customers.routes"));
 app.use("/api/invoices", invoicesRoutes);
 app.use("/api/purchase-orders", purchaseOrdersRoutes);
 app.use("/api/inventory", inventoryRoutes);

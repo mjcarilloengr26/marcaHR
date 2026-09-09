@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api/client";
+import { api, downloadFile, getToken } from "../api/client";
 import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
@@ -7,7 +7,7 @@ import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
 
 const emptyForm = { invoice_number: "", order_id: "", customer_name: "", amount: "", status: "draft", issue_date: "", due_date: "", notes: "", project_id: "" };
-const STATUSES = ["draft", "sent", "paid", "overdue", "cancelled"];
+const STATUSES = ["draft", "approved", "sent", "paid", "overdue", "cancelled"];
 
 export default function Billing() {
   const { money } = useAppSettings();
@@ -20,6 +20,13 @@ export default function Billing() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
+  const [lines, setLines] = useState(null);
+  const [linesBusy, setLinesBusy] = useState(false);
+  const [linesError, setLinesError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [preview, setPreview] = useState(null);
+  const [sendFor, setSendFor] = useState(null);
+  const [sendBusy, setSendBusy] = useState(false);
 
   const load = () => api.get("/invoices").then(setInvoices).catch((err) => setError(err.message));
 
@@ -33,6 +40,121 @@ export default function Billing() {
     setEditingId(null);
     setForm(emptyForm);
     setShowForm(true);
+  };
+
+  const approve = async (inv) => {
+    setError("");
+    try {
+      await api.post(`/invoices/${inv.id}/approve`);
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const unapprove = async (inv) => {
+    setError("");
+    try {
+      await api.post(`/invoices/${inv.id}/unapprove`);
+      load();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  // Asks the server what would happen before offering the button, so the
+  // dialog can say who it is about to email rather than finding out on failure.
+  const openSend = async (inv) => {
+    setError("");
+    setSendFor({ invoice: inv, check: null });
+    try {
+      setSendFor({ invoice: inv, check: await api.get(`/invoices/${inv.id}/send-check`) });
+    } catch (err) {
+      setError(err.message);
+      setSendFor(null);
+    }
+  };
+
+  const confirmSend = async () => {
+    setSendBusy(true);
+    setError("");
+    try {
+      const sent = await api.post(`/invoices/${sendFor.invoice.id}/send`);
+      setSendFor(null);
+      setNotice(
+        `${sent.invoice_number} ${sent.resent ? "re-sent" : "sent"} to ${sent.sent_to_list.join(", ")}.`
+      );
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSendBusy(false);
+    }
+  };
+
+  const openPreview = async (inv) => {
+    setError("");
+    try {
+      const res = await fetch(`/api/invoices/${inv.id}/pdf`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      if (!res.ok) throw new Error(`Could not build the PDF (${res.status})`);
+      // Wrapped in a File rather than used as a bare Blob: the object URL is
+      // otherwise a bare UUID, and that is the name the browser's own PDF
+      // viewer offers when someone saves from it.
+      const file = new File([await res.blob()], `${inv.invoice_number}.pdf`, { type: "application/pdf" });
+      setPreview({ invoice: inv, url: URL.createObjectURL(file) });
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const closePreview = () => {
+    if (preview?.url) URL.revokeObjectURL(preview.url);
+    setPreview(null);
+  };
+
+  const openLines = async (inv) => {
+    setLinesError("");
+    setLinesBusy(true);
+    setLines({ invoice: inv, rows: [] });
+    try {
+      const full = await api.get(`/invoices/${inv.id}`);
+      setLines({ invoice: full, rows: full.items || [] });
+    } catch (err) {
+      setLinesError(err.message);
+    } finally {
+      setLinesBusy(false);
+    }
+  };
+
+  const lineTotal = (r) => (Number(r.quantity) || 0) * (Number(r.unit_price) || 0);
+
+  const inCurrency = (n, currency) =>
+    `${currency || "PHP"} ` +
+    (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const saveLines = async () => {
+    setLinesBusy(true);
+    setLinesError("");
+    try {
+      const saved = await api.put(`/invoices/${lines.invoice.id}/items`, {
+        vat_rate: lines.invoice.vat_rate,
+        currency: lines.invoice.currency,
+        items: lines.rows.map((r) => ({
+          description: r.description,
+          quantity: r.quantity,
+          unit: r.unit,
+          unit_price: r.unit_price,
+        })),
+      });
+      setLines({ invoice: saved, rows: saved.items || [] });
+      load();
+    } catch (err) {
+      setLinesError(err.message);
+    } finally {
+      setLinesBusy(false);
+    }
   };
 
   const openEdit = (inv) => {
@@ -164,6 +286,12 @@ export default function Billing() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+      {notice && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          {notice}{" "}
+          <button className="btn btn-sm btn-secondary" onClick={() => setNotice("")}>Dismiss</button>
+        </div>
+      )}
 
       {unbilledOrders.length > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
@@ -230,7 +358,7 @@ export default function Billing() {
                 <td>{inv.invoice_number}</td>
                 <td>{inv.order_number || "—"}</td>
                 <td>{inv.customer_name}</td>
-                <td>{money(inv.amount)}</td>
+                <td>{inv.currency && inv.currency !== "PHP" ? inCurrency(inv.amount, inv.currency) : money(inv.amount)}</td>
                 <td>{inv.issue_date}</td>
                 <td>{inv.due_date || "—"}</td>
                 <td>
@@ -256,6 +384,20 @@ export default function Billing() {
                   )}
                 </td>
                 <td style={{ display: "flex", gap: 6 }}>
+                  <button className="btn btn-sm btn-secondary" onClick={() => openPreview(inv)}>PDF</button>
+                  {inv.status === "draft" && (
+                    <button className="btn btn-sm" onClick={() => approve(inv)}>Approve</button>
+                  )}
+                  {inv.status === "approved" && (
+                    <>
+                      <button className="btn btn-sm" onClick={() => openSend(inv)}>Send</button>
+                      <button className="btn btn-sm btn-secondary" onClick={() => unapprove(inv)}>Unapprove</button>
+                    </>
+                  )}
+                  {["sent", "overdue"].includes(inv.status) && (
+                    <button className="btn btn-sm btn-secondary" onClick={() => openSend(inv)}>Resend</button>
+                  )}
+                  <button className="btn btn-sm btn-secondary" onClick={() => openLines(inv)}>Lines</button>
                   <button className="btn btn-sm btn-secondary" onClick={() => openEdit(inv)}>Edit</button>
                   <button className="btn btn-sm btn-danger" onClick={() => handleDelete(inv.id)}>Delete</button>
                 </td>
@@ -329,6 +471,290 @@ export default function Billing() {
               <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : editingId ? "Save changes" : "Create invoice"}</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {lines && (
+        <div className="modal-backdrop" onClick={() => setLines(null)}>
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+            <h2>Lines — {lines.invoice.invoice_number}</h2>
+            <p className="subtitle">{lines.invoice.customer_name}</p>
+
+            {linesError && <div className="error-banner">{linesError}</div>}
+
+            {lines.invoice.status !== "draft" && (
+              <div className="card" style={{ marginBottom: 12 }}>
+                This invoice is <strong>{lines.invoice.status}</strong>, so its lines are fixed. Cancel it and raise a
+                new one if the charges need to change.
+              </div>
+            )}
+
+            <table className="sticky-head">
+              <thead>
+                <tr>
+                  <th style={{ minWidth: 200 }}>Description</th>
+                  <th style={{ width: 90 }}>Qty</th>
+                  <th style={{ width: 80 }}>Unit</th>
+                  <th style={{ width: 130 }}>Unit price</th>
+                  <th style={{ width: 120 }}>Amount</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.rows.map((r, i) => (
+                  <tr key={i}>
+                    <td>
+                      <input
+                        value={r.description || ""}
+                        placeholder="What is being charged for"
+                        disabled={lines.invoice.status !== "draft"}
+                        onChange={(e) => {
+                          const rows = [...lines.rows];
+                          rows[i] = { ...rows[i], description: e.target.value };
+                          setLines({ ...lines, rows });
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <DecimalInput
+                        value={r.quantity ?? 1}
+                        disabled={lines.invoice.status !== "draft"}
+                        onChange={(e) => {
+                          const rows = [...lines.rows];
+                          rows[i] = { ...rows[i], quantity: e.target.value };
+                          setLines({ ...lines, rows });
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        value={r.unit || ""}
+                        placeholder="lot"
+                        disabled={lines.invoice.status !== "draft"}
+                        onChange={(e) => {
+                          const rows = [...lines.rows];
+                          rows[i] = { ...rows[i], unit: e.target.value };
+                          setLines({ ...lines, rows });
+                        }}
+                      />
+                    </td>
+                    <td>
+                      <DecimalInput
+                        value={r.unit_price ?? 0}
+                        disabled={lines.invoice.status !== "draft"}
+                        onChange={(e) => {
+                          const rows = [...lines.rows];
+                          rows[i] = { ...rows[i], unit_price: e.target.value };
+                          setLines({ ...lines, rows });
+                        }}
+                      />
+                    </td>
+                    <td>{inCurrency(lineTotal(r), lines.invoice.currency)}</td>
+                    <td>
+                      {lines.invoice.status === "draft" && (
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-danger"
+                          onClick={() => setLines({ ...lines, rows: lines.rows.filter((_, j) => j !== i) })}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {(() => {
+                  // Amounts are VAT-inclusive, so the gross is what the lines
+                  // already come to and VAT is taken back out of it — never
+                  // added on top, which would overstate what is owed.
+                  const gross =
+                    lines.rows.length > 0
+                      ? lines.rows.reduce((n, r) => n + lineTotal(r), 0)
+                      : Number(lines.invoice.amount) || 0;
+                  const rate = Number(lines.invoice.vat_rate ?? 12);
+                  const vatable = rate > 0 ? Math.round((gross / (1 + rate / 100)) * 100) / 100 : gross;
+                  const vat = Math.round((gross - vatable) * 100) / 100;
+                  return (
+                    <>
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: "right" }}>
+                          Currency
+                          <select
+                            value={lines.invoice.currency || "PHP"}
+                            disabled={lines.invoice.status !== "draft"}
+                            style={{ width: 90, marginLeft: 8 }}
+                            onChange={(e) =>
+                              setLines({ ...lines, invoice: { ...lines.invoice, currency: e.target.value } })
+                            }
+                          >
+                            <option value="PHP">PHP</option>
+                            <option value="USD">USD</option>
+                          </select>
+                        </td>
+                        <td></td>
+                        <td></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: "right" }}>VATable sales</td>
+                        <td>{inCurrency(vatable, lines.invoice.currency)}</td>
+                        <td></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: "right" }}>
+                          VAT
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={lines.invoice.vat_rate ?? 12}
+                            disabled={lines.invoice.status !== "draft"}
+                            style={{ width: 70, marginLeft: 8, marginRight: 4 }}
+                            onChange={(e) =>
+                              setLines({ ...lines, invoice: { ...lines.invoice, vat_rate: e.target.value } })
+                            }
+                          />
+                          %
+                        </td>
+                        <td>{inCurrency(vat, lines.invoice.currency)}</td>
+                        <td></td>
+                      </tr>
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: "right" }}><strong>Total amount due</strong></td>
+                        <td><strong>{inCurrency(gross, lines.invoice.currency)}</strong></td>
+                        <td></td>
+                      </tr>
+                    </>
+                  );
+                })()}
+              </tbody>
+            </table>
+
+            {lines.rows.length === 0 && !linesBusy && (
+              <div className="empty-state">
+                No breakdown yet. This invoice is billed as a single amount of {money(lines.invoice.amount)}.
+              </div>
+            )}
+            {linesBusy && <div className="empty-state">Working…</div>}
+
+            {lines.invoice.status === "draft" && (
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                onClick={() =>
+                  setLines({ ...lines, rows: [...lines.rows, { description: "", quantity: 1, unit: "", unit_price: 0 }] })
+                }
+              >
+                + Add line
+              </button>
+            )}
+
+            <p className="subtitle" style={{ marginTop: 10 }}>
+              Prices are VAT-inclusive, so VAT is taken out of the total rather than added on top. Set the rate to 0 for
+              a zero-rated or exempt sale. The PDF prints the{" "}
+              {(lines.invoice.currency || "PHP") === "USD" ? "US dollar account and SWIFT code" : "peso account"} to
+              match this currency.
+            </p>
+
+            <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+              <strong style={{ fontSize: 12 }}>References printed under the lines</strong>
+              {lines.invoice.order_notes ? (
+                <p style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{lines.invoice.order_notes}</p>
+              ) : (
+                <p className="subtitle" style={{ marginTop: 6 }}>
+                  {lines.invoice.order_number
+                    ? `Nothing yet. Add the PO number, quotation number and any other references to the Notes on order ${lines.invoice.order_number} and they will print here.`
+                    : "This invoice is not linked to an order, so there are no references to print."}
+                </p>
+              )}
+            </div>
+
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setLines(null)}>Close</button>
+              {lines.invoice.status === "draft" && (
+                <button type="button" className="btn" disabled={linesBusy} onClick={saveLines}>
+                  {linesBusy ? "Saving…" : "Save lines"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {preview && (
+        <div className="modal-backdrop" onClick={closePreview}>
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+            <h2>{preview.invoice.invoice_number}</h2>
+            <p className="subtitle">{preview.invoice.customer_name}</p>
+
+            <iframe
+              title={`Invoice ${preview.invoice.invoice_number}`}
+              src={preview.url}
+              style={{ width: "100%", height: "65vh", border: "1px solid var(--border)", borderRadius: 6 }}
+            />
+
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={closePreview}>Close</button>
+              <button
+                type="button"
+                className="btn"
+                onClick={() =>
+                  // Goes through downloadFile rather than the preview blob: it
+                  // reads the filename off the response so the saved file is
+                  // named for the invoice, not a random blob id.
+                  downloadFile(`/invoices/${preview.invoice.id}/pdf`, `${preview.invoice.invoice_number}.pdf`).catch((err) =>
+                    setError(err.message)
+                  )
+                }
+              >
+                Download PDF
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sendFor && (
+        <div className="modal-backdrop" onClick={() => setSendFor(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Send {sendFor.invoice.invoice_number}</h2>
+            {!sendFor.check && <div className="empty-state">Checking…</div>}
+
+            {sendFor.check && !sendFor.check.ready && (
+              <>
+                <div className="error-banner">{sendFor.check.reason}</div>
+                <div className="modal-actions">
+                  <button type="button" className="btn btn-secondary" onClick={() => setSendFor(null)}>Close</button>
+                </div>
+              </>
+            )}
+
+            {sendFor.check?.ready && (
+              <>
+                <p>
+                  This will email the invoice as a PDF attachment to{" "}
+                  <strong>{sendFor.check.to}</strong>
+                  {sendFor.check.cc.length > 0 && (
+                    <>
+                      , copying <strong>{sendFor.check.cc.join(", ")}</strong>
+                    </>
+                  )}
+                  .
+                </p>
+                <p className="subtitle">
+                  {["sent", "overdue"].includes(sendFor.invoice.status)
+                    ? "This invoice has already been sent — this sends another copy."
+                    : "Nothing has been emailed to this customer yet."}
+                </p>
+                <div className="modal-actions">
+                  <button type="button" className="btn btn-secondary" onClick={() => setSendFor(null)}>Cancel</button>
+                  <button type="button" className="btn" disabled={sendBusy} onClick={confirmSend}>
+                    {sendBusy ? "Sending…" : "Send to customer"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -26,6 +26,7 @@ const SalesDashboard = lazy(() => import("./pages/SalesDashboard"));
 const Deals = lazy(() => import("./pages/Deals"));
 const Orders = lazy(() => import("./pages/Orders"));
 const WorkOrders = lazy(() => import("./pages/WorkOrders"));
+const Customers = lazy(() => import("./pages/Customers"));
 const Billing = lazy(() => import("./pages/Billing"));
 const PurchaseOrders = lazy(() => import("./pages/PurchaseOrders"));
 const Inventory = lazy(() => import("./pages/Inventory"));
@@ -82,6 +83,7 @@ export default function App() {
             who keep a plan current are the ones the work is assigned to. */}
         <Route path="/gantt" element={<Protected><Gantt /></Protected>} />
         <Route path="/work-orders" element={<Protected pageKey="work-orders"><WorkOrders /></Protected>} />
+        <Route path="/customers" element={<Protected roles={["admin", "hr"]} pageKey="customers"><Customers /></Protected>} />
         <Route path="/billing" element={<Protected roles={["admin", "hr"]} pageKey="billing"><Billing /></Protected>} />
         <Route path="/purchase-orders" element={<Protected roles={["admin", "hr"]} pageKey="purchase-orders"><PurchaseOrders /></Protected>} />
         <Route path="/inventory" element={<Protected roles={["admin", "hr"]} pageKey="inventory"><Inventory /></Protected>} />
