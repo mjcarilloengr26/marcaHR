@@ -24,11 +24,18 @@ export default function Billing() {
   const [linesBusy, setLinesBusy] = useState(false);
   const [linesError, setLinesError] = useState("");
   const [notice, setNotice] = useState("");
+  const [autoDrafts, setAutoDrafts] = useState([]);
   const [preview, setPreview] = useState(null);
   const [sendFor, setSendFor] = useState(null);
   const [sendBusy, setSendBusy] = useState(false);
 
-  const load = () => api.get("/invoices").then(setInvoices).catch((err) => setError(err.message));
+  const load = () => {
+    api.get("/invoices").then(setInvoices).catch((err) => setError(err.message));
+    // Statements the app raised on its own. They have had no human eyes on
+    // them yet, so they get their own section rather than being mixed into the
+    // list where they would be indistinguishable from a reviewed draft.
+    api.get("/invoices/pending-review").then(setAutoDrafts).catch(() => {});
+  };
 
   useEffect(() => {
     load();
@@ -327,6 +334,60 @@ export default function Billing() {
         </div>
       )}
 
+
+      {autoDrafts.length > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>
+            Raised automatically — {autoDrafts.length} awaiting review
+          </h2>
+          <p className="subtitle">
+            The app created these from something that happened: an order delivered, a job completed, a milestone
+            reached, or a recurring schedule falling due. Nothing has been sent. Check the amount and the lines, then
+            approve.
+          </p>
+          <table className="sticky-head">
+            <thead>
+              <tr>
+                <th>Statement #</th>
+                <th>Customer</th>
+                <th>Amount</th>
+                <th>Raised by</th>
+                <th>Reference</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {autoDrafts.map((inv) => (
+                <tr key={inv.id}>
+                  <td>{inv.invoice_number}</td>
+                  <td>{inv.customer_name}</td>
+                  <td>
+                    {Number(inv.amount) > 0 ? (
+                      inCurrency(inv.amount, inv.currency)
+                    ) : (
+                      <span className="badge badge-pending">needs pricing</span>
+                    )}
+                  </td>
+                  <td>{inv.auto_source}</td>
+                  <td className="subtitle" style={{ margin: 0 }}>{inv.auto_source_ref || "—"}</td>
+                  <td style={{ display: "flex", gap: 6 }}>
+                    <button className="btn btn-sm btn-secondary" onClick={() => openLines(inv)}>Lines</button>
+                    <button className="btn btn-sm btn-secondary" onClick={() => openPreview(inv)}>PDF</button>
+                    <button
+                      className="btn btn-sm"
+                      disabled={Number(inv.amount) <= 0}
+                      title={Number(inv.amount) <= 0 ? "Add an amount before approving" : ""}
+                      onClick={() => approve(inv)}
+                    >
+                      Approve
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
       <div className="card" style={{ marginBottom: 16 }}>
         <input
           type="text"

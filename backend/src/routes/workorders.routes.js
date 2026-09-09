@@ -3,6 +3,7 @@ const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { notifyWorkOrderAssigned } = require("../notifications");
 const asyncHandler = require("../middleware/asyncHandler");
+const { onWorkOrderCompleted } = require("../services/billingTriggers");
 
 const router = express.Router();
 
@@ -129,6 +130,13 @@ router.put("/:id", requireAuth, asyncHandler(async (req, res) => {
 
   if (assigned_to && assigned_to !== existing.assigned_to) {
     notifyWorkOrderAssigned({ employee_id: assigned_to, title });
+  }
+
+  // A completed job is a billable job. Raised as a draft so a standalone work
+  // order — which carries no price of its own — reaches somebody to price
+  // rather than being quietly forgotten.
+  if (statusMoved && status === "completed") {
+    await onWorkOrderCompleted(req.params.id);
   }
 
   res.json(await db.prepare(`${SELECT_BASE} WHERE w.id = ?`).get(req.params.id));

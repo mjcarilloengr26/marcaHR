@@ -25,6 +25,7 @@ const EMPTY_TASK = {
   assignee_id: "",
   parent_id: "",
   is_milestone: false,
+  billable_amount: "",
   notes: "",
   // [{ id, lag_days }] — what has to finish before this can start.
   predecessors: [],
@@ -111,6 +112,7 @@ export default function Gantt() {
       assignee_id: task.assignee_id || "",
       parent_id: task.parent_id || "",
       is_milestone: task.is_milestone,
+      billable_amount: task.billable_amount ?? "",
       notes: task.notes || "",
       predecessors: (data.dependencies || [])
         .filter((d) => d.task_id === task.id)
@@ -588,6 +590,25 @@ export default function Gantt() {
                   </span>
                 </div>
               </div>
+
+              {canEditSchedule && (
+                <div className="form-row">
+                  <label>Billable on completion</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Leave blank — most tasks are not payment points"
+                    value={form.billable_amount}
+                    onChange={(e) => setForm({ ...form, billable_amount: e.target.value })}
+                  />
+                  <span className="subtitle" style={{ fontSize: 12 }}>
+                    {Number(form.billable_amount) > 0
+                      ? "Reaching 100% raises a draft statement for this amount, once. It is not sent until somebody approves it."
+                      : "Set an amount to make this a payment point. Leave blank for ordinary work."}
+                  </span>
+                </div>
+              )}
 
               {editingTask?.updated_at && (
                 <p className="subtitle" style={{ margin: "0 0 12px", fontSize: 12 }}>

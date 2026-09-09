@@ -255,6 +255,17 @@ router.post("/from-order/:orderId", requireAuth, requireRole("admin", "hr"), asy
 
 
 
+// Statements the app raised by itself that no one has looked at yet. These
+// have had no human eyes on them: they may be priced at zero, or carry a line
+// that should not have repeated. Surfaced as a queue rather than emailed —
+// the review has to happen in the app anyway.
+router.get("/pending-review", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
+  const rows = await db
+    .prepare(`${SELECT_BASE} WHERE i.auto_source IS NOT NULL AND i.status = 'draft' ORDER BY i.created_at DESC`)
+    .all();
+  res.json(rows.map(withVat));
+}));
+
 // Sign-off. Nothing reaches a customer without a person putting their name to
 // it, so this is a deliberate step of its own rather than a side effect of
 // sending. Approving also freezes the lines — see PUT /:id/items.

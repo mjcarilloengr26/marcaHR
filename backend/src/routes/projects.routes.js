@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
+const { onProjectMilestoneComplete } = require("../services/billingTriggers");
 const { logRequestEvent } = require("../services/auditLog");
 const { withRollup, money } = require("../services/projectRollup");
 const { appTimezone } = require("../services/timezone");
@@ -472,11 +473,25 @@ function validateTask(body, existing = {}, cal) {
     return { error: "Progress must be between 0 and 100" };
   }
 
+  // What completing this task is worth billing. Null for the vast majority —
+  // most tasks are work, not payment points — and refused if negative, since a
+  // milestone that credits the customer is a mistake, not a discount.
+  const rawBillable = pick("billable_amount");
+  let billable = null;
+  if (rawBillable !== undefined && rawBillable !== null && String(rawBillable).trim() !== "") {
+    billable = Math.round(Number(rawBillable) * 100) / 100;
+    if (!Number.isFinite(billable) || billable < 0) {
+      return { error: "A milestone's billable amount cannot be negative" };
+    }
+    if (billable === 0) billable = null;
+  }
+
   return {
     name,
     start_date: start,
     end_date: end,
     percent_complete: percent,
+    billable_amount: billable,
     assignee_id: pick("assignee_id") || null,
     parent_id: pick("parent_id") || null,
     is_milestone: milestone,
@@ -592,12 +607,12 @@ router.post(
       const info = await db
         .prepare(
           `INSERT INTO project_tasks (project_id, parent_id, name, start_date, end_date, percent_complete,
-                                      assignee_id, is_milestone, position, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                                      assignee_id, is_milestone, position, notes, billable_amount)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           req.params.id, v.parent_id, v.name, v.start_date, v.end_date, v.percent_complete,
-          v.assignee_id, v.is_milestone, v.position || next.n, v.notes
+          v.assignee_id, v.is_milestone, v.position || next.n, v.notes, v.billable_amount
         );
       taskId = info.lastInsertRowid;
 
@@ -670,11 +685,11 @@ router.put(
     const scheduleTouched = datesChanged || preds !== null;
 
     const setTask = `UPDATE project_tasks SET parent_id = ?, name = ?, start_date = ?, end_date = ?,
-       percent_complete = ?, assignee_id = ?, is_milestone = ?, position = ?, notes = ?,
+       percent_complete = ?, assignee_id = ?, is_milestone = ?, position = ?, notes = ?, billable_amount = ?,
        updated_at = ?, updated_by = ? WHERE id = ? RETURNING *`;
     const setArgs = [
       v.parent_id, v.name, v.start_date, v.end_date, v.percent_complete,
-      v.assignee_id, v.is_milestone, v.position, v.notes,
+      v.assignee_id, v.is_milestone, v.position, v.notes, v.billable_amount,
       nowStamp(), req.user.employee_id || null, req.params.taskId,
     ];
 
@@ -719,6 +734,13 @@ router.put(
     }
 
     if (linkError) return res.status(400).json({ error: linkError });
+
+    // A billable milestone reaching 100% is a payment point falling due. Only
+    // on the crossing, and only once — the task records which statement billed
+    // it, so re-opening and re-completing cannot charge the customer twice.
+    if (Number(updated.percent_complete) === 100 && Number(existing.percent_complete) !== 100) {
+      await onProjectMilestoneComplete(Number(req.params.taskId));
+    }
 
     res.json({
       ...withDuration([updated], cal)[0],

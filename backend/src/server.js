@@ -5,6 +5,7 @@ const cors = require("cors");
 const db = require("./db");
 const { scheduleStaleDealDigest } = require("./services/staleDealDigest");
 const { scheduleBusinessReviews } = require("./services/businessReviewSchedule");
+const { scheduleRecurringBilling } = require("./services/billingTriggers");
 const { firstRunSetup } = require("./firstRun");
 
 const authRoutes = require("./routes/auth.routes");
@@ -104,6 +105,7 @@ app.use("/api/orders", ordersRoutes);
 app.use("/api/sales", salesRoutes);
 app.use("/api/work-orders", workOrdersRoutes);
 app.use("/api/customers", require("./routes/customers.routes"));
+app.use("/api/billing-schedules", require("./routes/billingschedules.routes"));
 app.use("/api/invoices", invoicesRoutes);
 app.use("/api/purchase-orders", purchaseOrdersRoutes);
 app.use("/api/inventory", inventoryRoutes);
@@ -156,6 +158,7 @@ async function start() {
   keepWarm();
   scheduleStaleDealDigest();
   scheduleBusinessReviews();
+  scheduleRecurringBilling();
 }
 
 // Render's free plan stops the instance after ~15 minutes with no inbound

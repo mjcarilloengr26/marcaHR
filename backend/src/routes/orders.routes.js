@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
+const { onOrderDelivered } = require("../services/billingTriggers");
 
 const router = express.Router();
 
@@ -130,6 +131,13 @@ router.put(
     } catch (err) {
       return res.status(400).json({ error: "An order with that order number already exists" });
     }
+    // Delivered means the work is done and the money is owed. Raising the
+    // draft here means nobody has to remember to; it is a draft, so nothing
+    // reaches the customer until a person approves and sends it.
+    if (statusMoved && nextStatus === "delivered") {
+      await onOrderDelivered(req.params.id);
+    }
+
     res.json(await db.prepare(ONE).get(req.params.id));
   })
 );

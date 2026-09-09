@@ -1430,7 +1430,49 @@ async function ensureCustomerLinks() {
     ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sent_by INTEGER REFERENCES employees(id) ON DELETE SET NULL;
     ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sent_at TEXT;
     ALTER TABLE invoices ADD COLUMN IF NOT EXISTS sent_to TEXT;
+    -- What raised this statement, when it was not a person: "order delivered",
+    -- "project milestone", and so on. NULL means somebody created it by hand.
+    -- Drives the review queue: an automatically raised draft has had no human
+    -- eyes on it yet, and needs to be told apart from one that has.
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS auto_source TEXT;
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS auto_source_ref TEXT;
   `);
+
+  // Billing that repeats: retainers, maintenance contracts, anything charged
+  // every period regardless of what happened. A schedule is created FROM a
+  // statement already raised by hand — "bill this again every month" — which
+  // is both how people think about it and how each run knows what to charge.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS billing_schedules (
+      id SERIAL PRIMARY KEY,
+      customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+      description TEXT NOT NULL,
+      -- The statement each run copies its lines from. Repointed to the newest
+      -- one after every run, so edits made at review carry forward.
+      source_invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+      cadence TEXT NOT NULL DEFAULT 'monthly'
+        CHECK(cadence IN ('weekly','fortnightly','monthly','quarterly','yearly')),
+      next_run_date TEXT NOT NULL,
+      -- Stops on its own at the end of a fixed-term contract rather than
+      -- billing a customer forever because nobody remembered to switch it off.
+      end_date TEXT,
+      active BOOLEAN NOT NULL DEFAULT true,
+      last_run_at TEXT,
+      last_invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL,
+      created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+    );
+    CREATE INDEX IF NOT EXISTS billing_schedules_due_idx ON billing_schedules(active, next_run_date);
+  `);
+
+  // What a project task is worth billing when it completes. Nullable on
+  // purpose: most tasks are work, not milestones, and forcing a figure onto
+  // every one would produce noise rather than a billing plan.
+  await pool.query(`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS billable_amount NUMERIC(14,2)`);
+  // Set once a milestone has raised its statement, so re-opening and
+  // re-completing a task cannot bill the customer twice for it.
+  await pool.query(`ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS billed_invoice_id INTEGER REFERENCES invoices(id) ON DELETE SET NULL`);
   await pool.query(`
     DO $$ BEGIN
       ALTER TABLE invoices ADD CONSTRAINT invoices_currency_check CHECK (currency IN ('PHP','USD'));
