@@ -6,18 +6,20 @@
 // Kept deliberately plain. It is a business letter: it says what is attached,
 // what is owed, when it is due, and how to raise a query. No marketing, no
 // exclamation marks, and no instruction the recipient has to act on twice.
-const DEFAULT_SUBJECT = "Invoice {invoice_number} from {company}";
+// "Statement of Account", not "Invoice": a Sales Invoice is a BIR-registered
+// document in the Philippines, and this system is not accredited to issue one.
+const DEFAULT_SUBJECT = "Statement of Account {invoice_number} from {company}";
 
 const DEFAULT_BODY = [
   "Dear {contact},",
   "",
-  "Please find attached invoice {invoice_number} in the amount of {amount} for your account.",
+  "Please find attached Statement of Account {invoice_number} in the amount of {amount} for your account.",
   "",
-  "{due_sentence} Our payment details are set out on the invoice. Kindly quote the invoice number when remitting so that we can apply your payment promptly.",
+  "{due_sentence} Our payment details are set out on the statement. Kindly quote the statement number when remitting so that we can apply your payment promptly.",
   "",
   // Invoices and payments cross in the post constantly, and a customer who has
   // already paid should not be left wondering whether they are being chased.
-  "If any part of this invoice requires clarification, please reply to this email and we will attend to it. Should the invoice already have been settled, please disregard this notice and accept our thanks.",
+  "If any part of this statement requires clarification, please reply to this email and we will attend to it. Should the account already have been settled, please disregard this notice and accept our thanks.",
   "",
   "Thank you for your continued business.",
   "",
@@ -31,7 +33,7 @@ const PLACEHOLDERS = [
   ["{company}", "Your invoicing company name"],
   ["{customer}", "The customer's name"],
   ["{contact}", "The contact person, or the customer's name if none is set"],
-  ["{invoice_number}", "e.g. INV-ORD-OPP-66-4"],
+  ["{invoice_number}", "The statement's reference number, e.g. INV-ORD-OPP-66-4"],
   ["{amount}", "The total due, with its currency"],
   ["{due_date}", "The due date, or blank if none is set"],
   ["{due_sentence}", "A full sentence: the due date if there is one, otherwise \"Payment is due upon receipt.\""],

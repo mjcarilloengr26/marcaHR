@@ -8,8 +8,19 @@ const db = require("../db");
 
 const PAGE_MARGIN = 48;
 
-// Printed at the foot of every invoice.
-const SYSTEM_REMARK = "This is a computer-generated invoice and does not require a signature.";
+// What the outgoing document is called. Deliberately NOT "Invoice": in the
+// Philippines a Sales Invoice is a BIR-registered document, and a system that
+// has not been accredited to issue one may not print that word at the top of
+// a page it sends a customer. A Statement of Account is a billing document,
+// not a tax document, and is what this is.
+const DOC_TITLE = "STATEMENT OF ACCOUNT";
+
+// Printed at the foot of every statement. The second sentence is the point of
+// the first: it says plainly what this document is not, so nobody files it as
+// a Sales Invoice or an Official Receipt.
+const SYSTEM_REMARK =
+  "This Statement of Account is computer-generated and does not require a signature. " +
+  "It is not a BIR-registered Sales Invoice or Official Receipt.";
 const COL = { desc: 48, qty: 300, unit: 350, price: 400, amount: 490 };
 const RIGHT_EDGE = 547; // A4 width (595) less the right margin
 
@@ -74,8 +85,8 @@ function drawLetterhead(doc, branding) {
   ].filter(Boolean);
   for (const line of lines) doc.text(line, textLeft, doc.y + 1, { width: 330 });
 
-  doc.fontSize(20).font("Helvetica-Bold").fillColor("#111111");
-  doc.text("INVOICE", 380, PAGE_MARGIN, { width: RIGHT_EDGE - 380, align: "right" });
+  doc.font("Helvetica-Bold").fillColor("#111111");
+  doc.fontSize(15).text(DOC_TITLE, 340, PAGE_MARGIN, { width: RIGHT_EDGE - 340, align: "right" });
 
   return Math.max(doc.y, PAGE_MARGIN + 70) + 14;
 }
@@ -102,7 +113,7 @@ function drawParties(doc, invoice, customer, top) {
   // The facts a customer checks first, kept as a label/value pair so the
   // values line up whatever length the labels are.
   const rows = [
-    ["Invoice no.", invoice.invoice_number],
+    ["Statement no.", invoice.invoice_number],
     ["Issue date", invoice.issue_date || "—"],
     ["Due date", invoice.due_date || "—"],
     invoice.order_number ? ["Order", invoice.order_number] : null,

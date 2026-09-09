@@ -218,7 +218,8 @@ export default function BrandingSettings() {
       <div className="card">
         <h2>Company details for invoices</h2>
         <p className="subtitle">
-          The identity your customers see. Nothing here is shown on the sign-in screen, which is reachable by anyone
+          Customers are sent a <strong>Statement of Account</strong>, not a Sales Invoice — a system that is not
+          BIR-accredited may not issue one. The identity your customers see. Nothing here is shown on the sign-in screen, which is reachable by anyone
           with the address — so the company that issues your invoices need not be the name on that page. Leave a field
           blank to keep it off the document.
         </p>
@@ -231,7 +232,7 @@ export default function BrandingSettings() {
             onChange={(e) => setCompany({ ...company, invoice_company_name: e.target.value })}
           />
           <span className="subtitle" style={{ fontSize: 12, display: "block" }}>
-            Printed at the top of every invoice and used to sign the emails that carry them. Leave blank to reuse the
+            Printed at the top of every Statement of Account and used to sign the emails that carry them. Leave blank to reuse the
             application name above.
           </span>
         </div>
@@ -287,7 +288,7 @@ export default function BrandingSettings() {
             )}
           </div>
           <span className="subtitle" style={{ fontSize: 12, display: "block" }}>
-            PNG or JPG. Appears on the invoice PDF only. Falls back to the application logo when none is set.
+            PNG or JPG. Appears on the Statement of Account PDF only. Falls back to the application logo when none is set.
           </span>
           <input
             ref={invoiceFileRef}
@@ -350,7 +351,7 @@ export default function BrandingSettings() {
             onChange={(e) => setCompany({ ...company, payment_instructions: e.target.value })}
           />
           <span className="subtitle" style={{ fontSize: 12 }}>
-            Printed on every invoice so local customers know where to pay.
+            Printed on every statement so local customers know where to pay.
           </span>
         </div>
 
@@ -379,7 +380,7 @@ export default function BrandingSettings() {
         </div>
 
         <div className="form-row">
-          <label>Invoice footer</label>
+          <label>Statement footer</label>
           <input
             value={company.invoice_footer}
             placeholder="Thank you for your business."
@@ -389,7 +390,7 @@ export default function BrandingSettings() {
 
 
         <div className="form-row" style={{ marginTop: 18, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
-          <label>Invoice email subject</label>
+          <label>Statement email subject</label>
           <input
             value={company.invoice_email_subject}
             placeholder={emailDefaults?.subject || ""}
@@ -398,7 +399,7 @@ export default function BrandingSettings() {
         </div>
 
         <div className="form-row">
-          <label>Invoice email message</label>
+          <label>Statement email message</label>
           <textarea
             rows={14}
             value={company.invoice_email_body}
@@ -407,7 +408,7 @@ export default function BrandingSettings() {
             onChange={(e) => setCompany({ ...company, invoice_email_body: e.target.value })}
           />
           <span className="subtitle" style={{ fontSize: 12, display: "block" }}>
-            The covering note the invoice PDF is attached to. Leave either field blank to use the standard wording shown
+            The covering note the statement PDF is attached to. Leave either field blank to use the standard wording shown
             in grey.
           </span>
         </div>

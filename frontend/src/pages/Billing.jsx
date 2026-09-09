@@ -732,7 +732,7 @@ export default function Billing() {
             {sendFor.check?.ready && (
               <>
                 <p>
-                  This will email the invoice as a PDF attachment to{" "}
+                  This will email the Statement of Account as a PDF attachment to{" "}
                   <strong>{sendFor.check.to}</strong>
                   {sendFor.check.cc.length > 0 && (
                     <>
@@ -743,7 +743,7 @@ export default function Billing() {
                 </p>
                 <p className="subtitle">
                   {["sent", "overdue"].includes(sendFor.invoice.status)
-                    ? "This invoice has already been sent — this sends another copy."
+                    ? "This has already been sent — this sends another copy."
                     : "Nothing has been emailed to this customer yet."}
                 </p>
                 <div className="modal-actions">
