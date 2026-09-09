@@ -1197,6 +1197,188 @@ router.get(
 // stands right now (a stock level has no meaning "for last March"), while
 // "Stock Movements" covers what actually moved during the chosen period.
 router.get(
+  "/customers-export",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!(await isAdminHrOrFinance(req))) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+
+    // Everything held about a customer, so the file stands on its own as a
+    // record rather than a summary that has to be read next to the app.
+    const customers = await db
+      .prepare(
+        `SELECT c.*,
+                (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.status <> 'cancelled')::int AS invoice_count,
+                (SELECT COALESCE(SUM(i.amount), 0) FROM invoices i WHERE i.customer_id = c.id AND i.status <> 'cancelled') AS total_billed,
+                (SELECT COALESCE(SUM(i.amount), 0) FROM invoices i WHERE i.customer_id = c.id AND i.status IN ('sent','overdue')) AS outstanding,
+                (SELECT COALESCE(SUM(i.amount), 0) FROM invoices i WHERE i.customer_id = c.id AND i.status = 'paid') AS total_paid,
+                (SELECT MAX(i.issue_date) FROM invoices i WHERE i.customer_id = c.id) AS last_billed,
+                (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id)::int AS order_count,
+                (SELECT COUNT(*) FROM projects p WHERE p.customer_id = c.id)::int AS project_count,
+                (SELECT COUNT(*) FROM work_orders w WHERE w.customer_id = c.id)::int AS work_order_count,
+                (SELECT COUNT(*) FROM deals d WHERE d.customer_id = c.id)::int AS deal_count,
+                (e.first_name || ' ' || e.last_name) AS created_by_name
+         FROM customers c
+         LEFT JOIN employees e ON e.id = c.created_by
+         ORDER BY c.name`
+      )
+      .all();
+
+    const statements = await db
+      .prepare(
+        `SELECT c.name AS customer_name, i.invoice_number, i.issue_date, i.due_date, i.currency,
+                i.amount, i.vat_rate, i.status, i.paid_date, i.sent_to, i.sent_at,
+                o.order_number, pr.code AS project_code
+         FROM invoices i
+         JOIN customers c ON c.id = i.customer_id
+         LEFT JOIN orders o ON o.id = i.order_id
+         LEFT JOIN projects pr ON pr.id = i.project_id
+         ORDER BY c.name, i.issue_date DESC, i.id DESC`
+      )
+      .all();
+
+    const schedules = await db
+      .prepare(
+        `SELECT c.name AS customer_name, s.description, s.cadence, s.next_run_date, s.end_date,
+                s.active, s.last_run_at, last.invoice_number AS last_statement
+         FROM billing_schedules s
+         JOIN customers c ON c.id = s.customer_id
+         LEFT JOIN invoices last ON last.id = s.last_invoice_id
+         ORDER BY c.name`
+      )
+      .all();
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = await companyName();
+    workbook.created = new Date();
+
+    const sheet = workbook.addWorksheet("Customers");
+    sheet.columns = [
+      { header: "Customer", key: "name", width: 38 },
+      { header: "Status", key: "status", width: 10 },
+      { header: "Contact Person", key: "contact_person", width: 22 },
+      { header: "Email", key: "email", width: 30 },
+      { header: "Copy To", key: "cc", width: 34 },
+      { header: "Phone", key: "phone", width: 18 },
+      { header: "TIN", key: "tin", width: 18 },
+      { header: "Billing Address", key: "billing_address", width: 40 },
+      { header: "Payment Terms (days)", key: "payment_terms_days", width: 20 },
+      { header: "Statements", key: "invoice_count", width: 12 },
+      { header: "Total Billed", key: "total_billed", width: 16 },
+      { header: "Paid", key: "total_paid", width: 16 },
+      { header: "Outstanding", key: "outstanding", width: 16 },
+      { header: "Last Billed", key: "last_billed", width: 14 },
+      { header: "Orders", key: "order_count", width: 10 },
+      { header: "Projects", key: "project_count", width: 10 },
+      { header: "Work Orders", key: "work_order_count", width: 13 },
+      { header: "Opportunities", key: "deal_count", width: 14 },
+      { header: "Notes", key: "notes", width: 40 },
+      { header: "Added By", key: "created_by_name", width: 22 },
+      { header: "Added On", key: "created_at", width: 20 },
+    ];
+    sheet.addRows(
+      customers.map((c) => ({
+        ...c,
+        cc: (c.cc_emails || []).join(", ") || "—",
+        email: c.email || "—",
+        contact_person: c.contact_person || "—",
+        phone: c.phone || "—",
+        tin: c.tin || "—",
+        billing_address: c.billing_address || "—",
+        last_billed: c.last_billed || "—",
+        notes: c.notes || "—",
+        created_by_name: c.created_by_name || "—",
+      }))
+    );
+    sheet.getRow(1).font = { bold: true };
+
+    // A customer with no email cannot be sent anything, which is the one gap
+    // in this file worth spotting at a glance rather than by reading down.
+    sheet.eachRow((row, n) => {
+      if (n === 1) return;
+      if (row.getCell("email").value === "—") {
+        row.getCell("email").font = { bold: true, color: { argb: "FF9C4221" } };
+      }
+    });
+
+    const stSheet = workbook.addWorksheet("Statements");
+    stSheet.columns = [
+      { header: "Customer", key: "customer_name", width: 38 },
+      { header: "Statement #", key: "invoice_number", width: 26 },
+      { header: "Issued", key: "issue_date", width: 13 },
+      { header: "Due", key: "due_date", width: 13 },
+      { header: "Currency", key: "currency", width: 10 },
+      { header: "Amount", key: "amount", width: 16 },
+      { header: "VAT %", key: "vat_rate", width: 9 },
+      { header: "VATable Sales", key: "vatable", width: 16 },
+      { header: "VAT", key: "vat", width: 14 },
+      { header: "Status", key: "status", width: 12 },
+      { header: "Paid On", key: "paid_date", width: 13 },
+      { header: "Sent To", key: "sent_to", width: 34 },
+      { header: "Sent On", key: "sent_at", width: 20 },
+      { header: "Order", key: "order_number", width: 18 },
+      { header: "Project", key: "project_code", width: 16 },
+    ];
+    stSheet.addRows(
+      statements.map((i) => {
+        // Backed out of the total the same way the statement itself does, so
+        // the spreadsheet and the document a customer holds always agree.
+        const gross = Math.round((Number(i.amount) || 0) * 100) / 100;
+        const rate = Number(i.vat_rate) || 0;
+        const vatable = rate > 0 ? Math.round((gross / (1 + rate / 100)) * 100) / 100 : gross;
+        return {
+          ...i,
+          vatable,
+          vat: Math.round((gross - vatable) * 100) / 100,
+          due_date: i.due_date || "—",
+          paid_date: i.paid_date || "—",
+          sent_to: i.sent_to || "—",
+          sent_at: i.sent_at || "—",
+          order_number: i.order_number || "—",
+          project_code: i.project_code || "—",
+        };
+      })
+    );
+    stSheet.getRow(1).font = { bold: true };
+
+    const schSheet = workbook.addWorksheet("Recurring Billing");
+    schSheet.columns = [
+      { header: "Customer", key: "customer_name", width: 38 },
+      { header: "Description", key: "description", width: 36 },
+      { header: "Cadence", key: "cadence", width: 14 },
+      { header: "Next Run", key: "next_run_date", width: 14 },
+      { header: "Ends", key: "end_date", width: 14 },
+      { header: "Active", key: "active", width: 10 },
+      { header: "Last Run", key: "last_run_at", width: 20 },
+      { header: "Last Statement", key: "last_statement", width: 26 },
+    ];
+    schSheet.addRows(
+      schedules.map((s) => ({
+        ...s,
+        end_date: s.end_date || "—",
+        active: s.active ? "yes" : "no",
+        last_run_at: s.last_run_at || "—",
+        last_statement: s.last_statement || "—",
+      }))
+    );
+    schSheet.getRow(1).font = { bold: true };
+    if (schedules.length === 0) schSheet.addRow({ customer_name: "No recurring billing set up." });
+
+    await logRequestEvent(req, "export_excel", {
+      entityType: "report",
+      details: { report: "customers", customers: customers.length, statements: statements.length },
+    });
+
+    const filename = `marca-group-customers-${new Date().toISOString().slice(0, 10)}.xlsx`;
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    await workbook.xlsx.write(res);
+    res.end();
+  })
+);
+
+router.get(
   "/inventory-export",
   requireAuth,
   asyncHandler(async (req, res) => {

@@ -26,6 +26,7 @@ export default function Reports() {
   const [projectsIncludeClosed, setProjectsIncludeClosed] = useState(false);
   const [spendIncludeClosed, setSpendIncludeClosed] = useState(false);
   const [exportingSpend, setExportingSpend] = useState(false);
+  const [exportingCustomers, setExportingCustomers] = useState(false);
 
   const [expPeriodType, setExpPeriodType] = useState("monthly");
   const [expPeriodIndex, setExpPeriodIndex] = useState(now.getMonth() + 1);
@@ -53,8 +54,9 @@ export default function Reports() {
   const canExportExpenses = ["admin", "hr"].includes(user?.role) || isFinance;
   const canExportInventory = ["admin", "hr"].includes(user?.role) || isFinance;
   const canExportAssets = ["admin", "hr"].includes(user?.role) || isFinance;
+  const canExportCustomers = ["admin", "hr"].includes(user?.role) || isFinance;
   const canSeePage =
-    canExportSalesFinance || canExportPurchaseOrders || canExportPayroll || canExportExpenses || canExportInventory || canExportAssets;
+    canExportSalesFinance || canExportPurchaseOrders || canExportPayroll || canExportExpenses || canExportInventory || canExportAssets || canExportCustomers;
 
   const changePeriodType = (type) => {
     setPeriodType(type);
@@ -119,6 +121,18 @@ export default function Reports() {
       setError(err.message);
     } finally {
       setExportingProjects(false);
+    }
+  };
+
+  const exportCustomers = async () => {
+    setExportingCustomers(true);
+    setError("");
+    try {
+      await downloadFile("/reports/customers-export", "marca-group-customers.xlsx");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setExportingCustomers(false);
     }
   };
 
@@ -327,6 +341,22 @@ export default function Reports() {
           </div>
           <button type="button" className="btn" onClick={exportPurchaseOrders} disabled={exportingPurchaseOrders}>
             {exportingPurchaseOrders ? "Exporting…" : "Export to Excel"}
+          </button>
+        </div>
+      )}
+
+      {canExportCustomers && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <h2>Customers</h2>
+          <p className="subtitle" style={{ margin: "0 0 12px" }}>
+            Every customer record with its contact and billing details, and what has been billed
+            against each — a file that stands on its own, so the information survives independently
+            of the app. Three sheets: the customers themselves, every statement raised with its VAT
+            broken out, and any recurring billing set up. Customers with no email address are marked
+            in red, since nothing can be sent to them until one is added.
+          </p>
+          <button className="btn" onClick={exportCustomers} disabled={exportingCustomers}>
+            {exportingCustomers ? "Building…" : "Download Excel"}
           </button>
         </div>
       )}
