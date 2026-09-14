@@ -426,7 +426,7 @@ export default function Payroll() {
                     salary, their pay schedule and the attendance for this
                     period. Editing it here would desync the payroll from the
                     employee record and quietly break the formula. */}
-                <input type="number" value={editForm.base_salary} readOnly disabled />
+                <DecimalInput value={editForm.base_salary} onChange={() => {}} readOnly disabled />
                 <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12 }}>
                   Set by the employee's base salary and pay schedule. Change it on the employee's page.
                 </p>
@@ -512,9 +512,7 @@ export default function Payroll() {
             </p>
             <div className="form-row">
               <label>Final pay override (optional)</label>
-              <input
-                type="number"
-                step="0.01"
+              <DecimalInput
                 placeholder={`Leave blank to auto-calculate (${money(
                   (Number(editForm.base_salary) || 0) +
                   (Number(editForm.bonuses) || 0) +
