@@ -4,12 +4,28 @@ const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { logRequestEvent } = require("../services/auditLog");
+const {
+  notifyCashAdvanceRequested,
+  notifyCashAdvanceReleased,
+  notifyCashAdvanceDecision,
+} = require("../notifications");
 const { resolveCostCenter } = require("../services/costCenterName");
 
 const router = express.Router();
 
 const isHr = (req) => ["admin", "hr"].includes(req.user.role);
 const money = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+// Who did it, for the email. Named rather than left anonymous: "released by
+// Mark" answers the question the recipient actually has. Falls back to nothing
+// rather than guessing, since an admin account need not have an employee row.
+async function actorName(req) {
+  if (!req.user?.employee_id) return null;
+  const row = await db
+    .prepare("SELECT first_name, last_name FROM employees WHERE id = ?")
+    .get(req.user.employee_id);
+  return row ? `${row.first_name} ${row.last_name}`.trim() : null;
+}
 const nowStamp = () => new Date().toISOString().slice(0, 19).replace("T", " ");
 
 // Liquidated is the sum of every linked report's items, and rejected reports
@@ -174,6 +190,24 @@ router.post(
       entityId: info.lastInsertRowid,
       details: { reference, employee_id: v.employee_id, amount: money(v.amount), status },
     });
+    if (status === "pending") {
+      notifyCashAdvanceRequested({
+        employee_id: v.employee_id,
+        reference,
+        amount: money(v.amount),
+        purpose: v.purpose,
+        date_released: v.date_released,
+      });
+    } else {
+      notifyCashAdvanceReleased({
+        employee_id: v.employee_id,
+        reference,
+        amount: money(v.amount),
+        purpose: v.purpose,
+        released_by_name: await actorName(req),
+      });
+    }
+
     res.status(201).json(withBalance(await db.prepare(`${SELECT} WHERE a.id = ?`).get(info.lastInsertRowid)));
   })
 );
@@ -218,6 +252,15 @@ router.put(
       entityId: Number(req.params.id),
       details: { reference: existing.reference, decision, amount: existing.amount },
     });
+    notifyCashAdvanceDecision({
+      employee_id: existing.employee_id,
+      reference: existing.reference,
+      amount: existing.amount,
+      decision,
+      decision_note: (decision_note || "").trim() || null,
+      decided_by_name: await actorName(req),
+    });
+
     res.json(withBalance(await db.prepare(`${SELECT} WHERE a.id = ?`).get(req.params.id)));
   })
 );

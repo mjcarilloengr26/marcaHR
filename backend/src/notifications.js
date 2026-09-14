@@ -260,6 +260,90 @@ const notifyAssetReturnDecision = guarded(async (ret) => {
 
 const money = (n) => Number(n || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// The currency the app is configured in, so an amount in an email is never
+// ambiguous about what it is denominated in.
+async function currencyCode() {
+  try {
+    const row = await db.prepare("SELECT currency_code FROM app_settings WHERE id = 1").get();
+    return row?.currency_code || "PHP";
+  } catch {
+    return "PHP";
+  }
+}
+
+const amountText = async (n) => `${await currencyCode()} ${money(n)}`;
+
+// Cash advances move real money before anyone has spent it, and a request that
+// nobody sees is a request nobody answers. Every other queue in the app tells
+// HR when something lands in it; this one did not, so requests simply sat
+// there until somebody happened to open the page.
+const notifyCashAdvanceRequested = guarded(async ({ employee_id, reference, amount, purpose, date_released }) => {
+  const emp = await getEmployee(employee_id);
+  if (!emp) return;
+  const shown = await amountText(amount);
+  sendMail({
+    to: await getHrEmails(),
+    subject: `Cash advance request — ${fullName(emp)} (${shown})`,
+    text:
+      `${fullName(emp)} has requested a cash advance.\n\n` +
+      `Reference: ${reference}\n` +
+      `Amount: ${shown}\n` +
+      `Needed by: ${date_released || "not stated"}\n` +
+      `Purpose: ${purpose || "not stated"}\n\n` +
+      `It is waiting for a decision in ${await companyName()} — Cash Advances. ` +
+      `Nothing is released until somebody approves it.`,
+  });
+});
+
+// HR raising one directly is the handover actually happening: money is out,
+// recorded against this person, and they are the one who will have to
+// liquidate it. They are told because it is their liability, not because they
+// asked for it.
+const notifyCashAdvanceReleased = guarded(async ({ employee_id, reference, amount, purpose, released_by_name }) => {
+  const emp = await getEmployee(employee_id);
+  if (!emp) return;
+  const shown = await amountText(amount);
+  sendMail({
+    to: emp.email,
+    subject: `Cash advance released to you — ${reference}`,
+    text:
+      `Hi ${emp.first_name},\n\n` +
+      `A cash advance of ${shown} has been released to you` +
+      (released_by_name ? ` by ${released_by_name}` : "") +
+      `.\n\n` +
+      `Reference: ${reference}\n` +
+      `Purpose: ${purpose || "not stated"}\n\n` +
+      `File your expenses against this reference so it can be liquidated. Anything unspent is returned.\n\n` +
+      `${await companyName()}`,
+  });
+});
+
+// The answer to a request, which is the other half that was missing: somebody
+// could approve an advance and the person who asked would never hear.
+const notifyCashAdvanceDecision = guarded(
+  async ({ employee_id, reference, amount, decision, decision_note, decided_by_name }) => {
+    const emp = await getEmployee(employee_id);
+    if (!emp) return;
+    const approved = decision === "approved";
+    const shown = await amountText(amount);
+    sendMail({
+      to: emp.email,
+      subject: `Your cash advance request was ${approved ? "approved" : "declined"} — ${reference}`,
+      text:
+        `Hi ${emp.first_name},\n\n` +
+        `Your cash advance request for ${shown} (${reference}) was ${approved ? "approved" : "declined"}` +
+        (decided_by_name ? ` by ${decided_by_name}` : "") +
+        `.\n\n` +
+        (decision_note ? `Note: ${decision_note}\n\n` : "") +
+        (approved
+          ? `The money has been released. File your expenses against ${reference} so it can be liquidated, and return anything unspent.`
+          : `Nothing has been released. Speak to HR if you need this reconsidered.`) +
+        `\n\n${await companyName()}`,
+    });
+  }
+);
+
+
 // One line per opportunity, ordered worst-first by the caller.
 function dealLines(deals) {
   return deals.map((d) => {
@@ -329,4 +413,7 @@ module.exports = {
   notifyAssetReturnFiled,
   notifyAssetReturnDecision,
   notifyStaleDeals,
+  notifyCashAdvanceRequested,
+  notifyCashAdvanceReleased,
+  notifyCashAdvanceDecision,
 };

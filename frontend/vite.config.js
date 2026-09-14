@@ -20,7 +20,12 @@ export default defineConfig({
   },
   plugins: [react()],
   server: {
-    port: 5173,
+    // Honours the port the harness assigns via PORT, falling back to Vite's
+    // usual one for a plain `npm run dev`. Hardcoding it meant two projects
+    // open at once fought over the same port. Nothing here needs a fixed port:
+    // the API is reached through the proxy below, so the browser only ever
+    // talks to this origin.
+    port: Number(process.env.PORT) || 5173,
     proxy: {
       "/api": {
         target: "http://localhost:4000",
