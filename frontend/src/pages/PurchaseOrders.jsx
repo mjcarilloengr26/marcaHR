@@ -7,7 +7,7 @@ import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
 import { Link } from "react-router-dom";
 
-const emptyForm = { po_number: "", vendor_name: "", description: "", amount: "", order_date: "", expected_delivery_date: "", notes: "", work_order_id: "", project_id: "" };
+const emptyForm = { po_number: "", vendor_name: "", quote_reference: "", description: "", amount: "", order_date: "", expected_delivery_date: "", notes: "", work_order_id: "", project_id: "" };
 const STATUSES = ["draft", "submitted", "approved", "received", "cancelled"];
 
 export default function PurchaseOrders() {
@@ -44,6 +44,7 @@ export default function PurchaseOrders() {
     setEditingId(po.id);
     setForm({
       po_number: po.po_number,
+      quote_reference: po.quote_reference || "",
       vendor_name: po.vendor_name,
       description: po.description || "",
       amount: po.amount,
@@ -98,7 +99,7 @@ export default function PurchaseOrders() {
   const filteredPos = pos.filter((po) => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
-    return [po.po_number, po.vendor_name, po.status].some((v) => (v || "").toLowerCase().includes(q));
+    return [po.po_number, po.vendor_name, po.quote_reference, po.status].some((v) => (v || "").toLowerCase().includes(q));
   });
   const { sorted, toggleSort, arrow } = useSort(filteredPos, "order_date", "desc");
 
@@ -129,6 +130,7 @@ export default function PurchaseOrders() {
             <tr>
               <SortTh label="PO #" sortKey="po_number" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Vendor" sortKey="vendor_name" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Quote ref." sortKey="quote_reference" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Amount" sortKey="amount" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Work order" sortKey="work_order_number" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Project" sortKey="project_code" toggleSort={toggleSort} arrow={arrow} />
@@ -145,6 +147,7 @@ export default function PurchaseOrders() {
               <tr key={po.id}>
                 <td>{po.po_number}</td>
                 <td>{po.vendor_name}</td>
+                <td>{po.quote_reference || <span className="subtitle" style={{ margin: 0 }}>—</span>}</td>
                 <td>{money(po.amount)}</td>
                 <td>
                   {po.work_order_number ? (
@@ -221,6 +224,14 @@ export default function PurchaseOrders() {
               <div className="form-row">
                 <label>Vendor</label>
                 <SuggestInput field="vendor_name" value={form.vendor_name} onChange={(e) => setForm({ ...form, vendor_name: e.target.value })} required />
+              </div>
+              <div className="form-row">
+                <label>Vendor quote ref.</label>
+                <input
+                  value={form.quote_reference}
+                  placeholder="As printed on their quotation"
+                  onChange={(e) => setForm({ ...form, quote_reference: e.target.value })}
+                />
               </div>
               <div className="form-row">
                 <label>Amount</label>

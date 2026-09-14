@@ -30,16 +30,18 @@ router.get("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req
 }));
 
 router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
-  const { po_number, vendor_name, description, amount, requested_by, order_date, expected_delivery_date, notes, work_order_id, project_id } =
-    req.body || {};
+  const {
+    po_number, vendor_name, description, amount, requested_by, order_date, expected_delivery_date, notes,
+    work_order_id, project_id, quote_reference,
+  } = req.body || {};
   if (!po_number || !vendor_name) {
     return res.status(400).json({ error: "po_number and vendor_name are required" });
   }
   try {
     const info = await db
       .prepare(
-        `INSERT INTO purchase_orders (po_number, vendor_name, description, amount, status, requested_by, order_date, expected_delivery_date, notes, work_order_id, project_id)
-         VALUES (?, ?, ?, ?, 'draft', ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?)`
+        `INSERT INTO purchase_orders (po_number, vendor_name, description, amount, status, requested_by, order_date, expected_delivery_date, notes, work_order_id, project_id, quote_reference)
+         VALUES (?, ?, ?, ?, 'draft', ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?, ?)`
       )
       .run(
         po_number,
@@ -51,7 +53,8 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
         expected_delivery_date || null,
         notes || null,
         work_order_id || null,
-        project_id || null
+        project_id || null,
+        (quote_reference || "").trim() || null
       );
     res.status(201).json(await db.prepare(`${SELECT_BASE} WHERE p.id = ?`).get(info.lastInsertRowid));
   } catch (err) {
@@ -71,11 +74,15 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
 router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
   const existing = await db.prepare("SELECT * FROM purchase_orders WHERE id = ?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "Purchase order not found" });
-  const { po_number, vendor_name, description, amount, order_date, expected_delivery_date, notes, work_order_id, project_id } = req.body || {};
+  const {
+    po_number, vendor_name, description, amount, order_date, expected_delivery_date, notes,
+    work_order_id, project_id, quote_reference,
+  } = req.body || {};
   try {
     await db.prepare(
       `UPDATE purchase_orders SET po_number = ?, vendor_name = ?, description = ?, amount = ?,
-       order_date = ?, expected_delivery_date = ?, notes = ?, work_order_id = ?, project_id = ? WHERE id = ?`
+       order_date = ?, expected_delivery_date = ?, notes = ?, work_order_id = ?, project_id = ?,
+       quote_reference = ? WHERE id = ?`
     ).run(
       po_number ?? existing.po_number,
       vendor_name ?? existing.vendor_name,
@@ -87,6 +94,7 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
       // An empty string clears the link; omitting the field leaves it alone.
       work_order_id !== undefined ? work_order_id || null : existing.work_order_id,
       project_id !== undefined ? project_id || null : existing.project_id,
+      quote_reference !== undefined ? (quote_reference || "").trim() || null : existing.quote_reference,
       req.params.id
     );
   } catch (err) {

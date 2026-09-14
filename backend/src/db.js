@@ -539,6 +539,10 @@ CREATE TABLE IF NOT EXISTS purchase_orders (
   -- overheads are real purchases with no job behind them, and forcing a link
   -- would only produce a fake one.
   work_order_id INTEGER REFERENCES work_orders(id) ON DELETE SET NULL,
+  -- The vendor's own quotation number, as printed on their quote. Ours is
+  -- po_number; theirs is this. Without it, matching a delivery or an invoice
+  -- back to what was actually quoted means digging through email.
+  quote_reference TEXT,
   -- Who signed the spend off, and when. requested_by above already records who
   -- raised it, so together they answer the two questions an audit asks of any
   -- purchase: who wanted this, and who agreed to pay for it.
@@ -1407,6 +1411,7 @@ async function ensureCustomerLinks() {
   // The customers table predates cc_emails, so existing installs need the
   // column added — CREATE TABLE IF NOT EXISTS will not do it.
   await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS cc_emails TEXT[] NOT NULL DEFAULT '{}'`);
+  await pool.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS quote_reference TEXT`);
   // Existing invoices were raised VAT-inclusive at the standard rate, so 12 is
   // the right default for them as well as for new ones.
   await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS vat_rate NUMERIC(5,2) NOT NULL DEFAULT 12`);

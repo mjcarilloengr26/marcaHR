@@ -819,7 +819,7 @@ router.get(
 
     const rows = await db
       .prepare(
-        `SELECT po.po_number, po.vendor_name, po.description, po.amount, po.status,
+        `SELECT po.po_number, po.vendor_name, po.quote_reference, po.description, po.amount, po.status,
                 po.order_date, po.expected_delivery_date, po.received_date,
                 po.approved_at,
                 (e.first_name || ' ' || e.last_name) AS requested_by_name,
@@ -841,6 +841,7 @@ router.get(
     sheet.columns = [
       { header: "PO #", key: "po_number", width: 14 },
       { header: "Vendor", key: "vendor_name", width: 22 },
+      { header: "Vendor Quote Ref.", key: "quote_reference", width: 20 },
       { header: "Description", key: "description", width: 28 },
       { header: "Amount", key: "amount", width: 14 },
       { header: "Work Order", key: "work_order_number", width: 16 },
