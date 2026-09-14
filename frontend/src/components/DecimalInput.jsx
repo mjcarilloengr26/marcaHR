@@ -38,10 +38,18 @@ export default function DecimalInput({
   }, [value]);
 
   const handle = (e) => {
-    // Numeric keypads in many locales send a comma for the decimal key. Taking
-    // it as a decimal point costs nothing and saves the person discovering that
-    // their keyboard's period key is the only one that works.
-    const raw = e.target.value.replace(",", ".");
+    // Commas are thousands separators here, not decimal points. The app writes
+    // every amount as PHP 1,234.56, so that is the shape people type and the
+    // shape they paste out of a spreadsheet — and reading the comma as a
+    // decimal point turned "133,566" into "133.566", which then failed the
+    // two-decimal test and silently refused the keystroke.
+    //
+    // Spaces and a currency symbol are stripped for the same reason: pasting
+    // "PHP 133,566.00" should work rather than being rejected character by
+    // character.
+    const raw = e.target.value
+      .replace(/[,\s]/g, "")
+      .replace(/^(?:php|PHP|Php)?\s*[₱$]?\s*/, "");
 
     // Digits, at most one decimal point, and a leading minus where allowed.
     const pattern = allowNegative
@@ -61,7 +69,7 @@ export default function DecimalInput({
     setDraft(raw);
     emitted.current = raw;
     // Keep the DOM in step when the sanitised text differs from what was typed
-    // (a comma became a point), since draft may be unchanged from React's view.
+    // (commas stripped), since draft may be unchanged from React's view.
     if (node.current && node.current.value !== raw) node.current.value = raw;
     // Call sites already written against a plain input keep working unchanged.
     onChange({ target: { value: raw } });
