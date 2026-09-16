@@ -232,11 +232,11 @@ router.post("/from-order/:orderId", requireAuth, requireRole("admin", "hr"), asy
   const { order, remaining } = info;
   if (remaining === 0) return res.status(400).json({ error: "This order is already fully billed" });
 
-  // The default invoice number is derived from the order number, so a second
-  // invoice on the same order needs a distinguishing suffix to avoid colliding
+  // The default statement number is derived from the order number, so a second
+  // statement on the same order needs a distinguishing suffix to avoid colliding
   // with the first (invoice_number is the column that's actually unique).
   const invoiceCount = (await db.prepare("SELECT COUNT(*) AS c FROM invoices WHERE order_id = ?").get(order.id)).c;
-  const invoiceNumber = invoiceCount === 0 ? `INV-${order.order_number}` : `INV-${order.order_number}-${invoiceCount + 1}`;
+  const invoiceNumber = invoiceCount === 0 ? `SOA-${order.order_number}` : `SOA-${order.order_number}-${invoiceCount + 1}`;
 
   try {
     const insertResult = await db

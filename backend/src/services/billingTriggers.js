@@ -96,7 +96,7 @@ async function onOrderDelivered(orderId) {
   if (remaining <= 0) return null;
 
   return createDraft({
-    number: `INV-${order.order_number}`,
+    number: `SOA-${order.order_number}`,
     customerName: order.customer_name,
     customerId: await customerIdFor(order.customer_name, order.customer_id),
     amount: remaining,
@@ -134,7 +134,7 @@ async function onWorkOrderCompleted(workOrderId) {
   // so it appears in the review queue for somebody to price. A job that is
   // never billed because nobody wrote it down is the worse failure.
   return createDraft({
-    number: `INV-${wo.work_order_number}`,
+    number: `SOA-${wo.work_order_number}`,
     customerName: wo.customer_name,
     customerId: await customerIdFor(wo.customer_name, wo.customer_id),
     amount: info ? info.remaining : 0,
@@ -165,7 +165,7 @@ async function onProjectMilestoneComplete(taskId) {
   if (!project) return null;
 
   const draft = await createDraft({
-    number: `INV-${project.code}-M${task.id}`,
+    number: `SOA-${project.code}-M${task.id}`,
     customerName: project.client_name || project.name,
     customerId: await customerIdFor(project.client_name, project.customer_id),
     amount: task.billable_amount,
@@ -221,7 +221,7 @@ async function runSchedule(schedule) {
   const source = sourceId ? await db.prepare("SELECT invoice_number, amount FROM invoices WHERE id = ?").get(sourceId) : null;
 
   const draft = await createDraft({
-    number: `INV-${customer.name.replace(/[^A-Za-z0-9]+/g, "").slice(0, 10).toUpperCase()}-${schedule.next_run_date}`,
+    number: `SOA-${customer.name.replace(/[^A-Za-z0-9]+/g, "").slice(0, 10).toUpperCase()}-${schedule.next_run_date}`,
     customerName: customer.name,
     customerId: customer.id,
     amount: lines.length ? 0 : Number(source?.amount || 0),

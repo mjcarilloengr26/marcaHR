@@ -33,7 +33,7 @@ const PLACEHOLDERS = [
   ["{company}", "Your invoicing company name"],
   ["{customer}", "The customer's name"],
   ["{contact}", "The contact person, or the customer's name if none is set"],
-  ["{invoice_number}", "The statement's reference number, e.g. INV-ORD-OPP-66-4"],
+  ["{invoice_number}", "The statement's reference number, e.g. SOA-ORD-OPP-66-4"],
   ["{amount}", "The total due, with its currency"],
   ["{due_date}", "The due date, or blank if none is set"],
   ["{due_sentence}", "A full sentence: the due date if there is one, otherwise \"Payment is due upon receipt.\""],

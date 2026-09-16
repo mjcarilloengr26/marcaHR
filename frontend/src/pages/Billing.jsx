@@ -238,7 +238,7 @@ export default function Billing() {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this invoice?")) return;
+    if (!confirm("Delete this statement?")) return;
     try {
       await api.del(`/invoices/${id}`);
       load();
@@ -289,9 +289,9 @@ export default function Billing() {
       <div className="page-header">
         <div>
           <h1>Billing</h1>
-          <p className="subtitle">Customer invoices, linked to orders</p>
+          <p className="subtitle">Statements of account, linked to orders</p>
         </div>
-        <button className="btn" onClick={openAdd}>+ Add invoice</button>
+        <button className="btn" onClick={openAdd}>+ Add statement</button>
       </div>
 
       {error && <div className="error-banner">{error}</div>}
@@ -393,7 +393,7 @@ export default function Billing() {
       <div className="card" style={{ marginBottom: 16 }}>
         <input
           type="text"
-          placeholder="Search by invoice #, order #, customer, status…"
+          placeholder="Search by statement #, order #, customer, status…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -403,7 +403,7 @@ export default function Billing() {
         <table className="sticky-head">
           <thead>
             <tr>
-              <SortTh label="Invoice #" sortKey="invoice_number" toggleSort={toggleSort} arrow={arrow} />
+              <SortTh label="Statement #" sortKey="invoice_number" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Order" sortKey="order_number" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Customer" sortKey="customer_name" toggleSort={toggleSort} arrow={arrow} />
               <SortTh label="Amount" sortKey="amount" toggleSort={toggleSort} arrow={arrow} />
@@ -475,10 +475,10 @@ export default function Billing() {
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
-            <h2>{editingId ? "Edit invoice" : "Add invoice"}</h2>
+            <h2>{editingId ? "Edit statement" : "Add statement"}</h2>
             <div className="grid grid-2">
               <div className="form-row">
-                <label>Invoice number</label>
+                <label>Statement number</label>
                 <input value={form.invoice_number} onChange={(e) => setForm({ ...form, invoice_number: e.target.value })} required />
               </div>
               <CustomerPicker
@@ -531,7 +531,7 @@ export default function Billing() {
             </div>
             <div className="modal-actions">
               <button type="button" className="btn btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
-              <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : editingId ? "Save changes" : "Create invoice"}</button>
+              <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : editingId ? "Save changes" : "Create statement"}</button>
             </div>
           </form>
         </div>
@@ -547,7 +547,7 @@ export default function Billing() {
 
             {lines.invoice.status !== "draft" && (
               <div className="card" style={{ marginBottom: 12 }}>
-                This invoice is <strong>{lines.invoice.status}</strong>, so its lines are fixed. Cancel it and raise a
+                This statement is <strong>{lines.invoice.status}</strong>, so its lines are fixed. Cancel it and raise a
                 new one if the charges need to change.
               </div>
             )}
@@ -727,7 +727,7 @@ export default function Billing() {
                 <p className="subtitle" style={{ marginTop: 6 }}>
                   {lines.invoice.order_number
                     ? `Nothing yet. Add the PO number, quotation number and any other references to the Notes on order ${lines.invoice.order_number} and they will print here.`
-                    : "This invoice is not linked to an order, so there are no references to print."}
+                    : "This statement is not linked to an order, so there are no references to print."}
                 </p>
               )}
             </div>
