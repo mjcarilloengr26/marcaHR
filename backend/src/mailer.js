@@ -30,7 +30,7 @@ function encodeAttachments(attachments) {
   return out.length ? out : null;
 }
 
-async function sendOne(recipient, subject, text, html, attachments) {
+async function sendOne(recipient, subject, text, html, attachments, replyTo) {
   const { RESEND_API_KEY, RESEND_FROM } = process.env;
   try {
     const res = await fetch(RESEND_API_URL, {
@@ -48,6 +48,10 @@ async function sendOne(recipient, subject, text, html, attachments) {
         text,
         ...(html ? { html } : {}),
         ...(attachments ? { attachments } : {}),
+        // Where a reply should actually land. The From address is a
+        // no-reply sender on a domain with no inbox, so without this a
+        // customer answering a statement would have their reply bounce.
+        ...(replyTo ? { reply_to: replyTo } : {}),
       }),
     });
 
@@ -77,7 +81,7 @@ async function sendOne(recipient, subject, text, html, attachments) {
 // user) must not let one bad/blocklisted address (Resend rejects reserved domains like
 // example.com) sink delivery to everyone else, and it keeps recipients from seeing each other's
 // addresses in a shared To: header.
-async function sendMail({ to, subject, text, html, attachments }) {
+async function sendMail({ to, subject, text, html, attachments, replyTo }) {
   const recipients = Array.isArray(to) ? to.filter(Boolean) : [to].filter(Boolean);
   if (recipients.length === 0) return;
 
@@ -113,7 +117,7 @@ async function sendMail({ to, subject, text, html, attachments }) {
     return;
   }
 
-  await Promise.all(recipients.map((r) => sendOne(r, subject, text, html, encoded)));
+  await Promise.all(recipients.map((r) => sendOne(r, subject, text, html, encoded, replyTo)));
 }
 
 module.exports = { sendMail };

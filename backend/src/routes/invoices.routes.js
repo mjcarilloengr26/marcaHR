@@ -345,7 +345,15 @@ router.get("/:id/send-check", requireAuth, requireRole("admin", "hr"), asyncHand
 // The only thing in the app that emails a customer, and it only ever runs
 // because somebody pressed the button.
 router.post("/:id/send", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
-  const result = await sendInvoiceEmail(req.params.id);
+  // Who pressed Send, so they get the copy too and the audit trail names them.
+  const sender = req.user.employee_id
+    ? await db.prepare("SELECT first_name, last_name, email FROM employees WHERE id = ?").get(req.user.employee_id)
+    : null;
+
+  const result = await sendInvoiceEmail(req.params.id, {
+    sentByName: sender ? `${sender.first_name} ${sender.last_name}`.trim() : null,
+    sentByEmail: req.user.email || sender?.email || null,
+  });
   if (result.error) return res.status(result.status || 400).json({ error: result.error });
 
   const alreadySent = result.invoice.status === "sent" || result.invoice.status === "overdue";
@@ -375,12 +383,13 @@ router.post("/:id/send", requireAuth, requireRole("admin", "hr"), asyncHandler(a
     details: {
       invoice_number: result.invoice.invoice_number,
       to: result.recipients.join(", "),
+      copied_to: (result.copiedTo || []).join(", "),
       attachment: result.filename,
     },
   });
 
   const updated = await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(result.invoice.id);
-  res.json({ ...withVat(updated), sent_to_list: result.recipients, resent: alreadySent });
+  res.json({ ...withVat(updated), sent_to_list: result.recipients, copied_to: result.copiedTo || [], resent: alreadySent });
 }));
 
 // The invoice as a document. Streamed rather than written to a file — Render's

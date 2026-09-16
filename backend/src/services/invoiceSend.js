@@ -4,6 +4,15 @@ const { sendMail } = require("../mailer");
 const { invoiceForPdf, renderInvoicePdf, invoiceIdentity } = require("./invoicePdf");
 const { renderInvoiceEmail } = require("./invoiceEmailTemplate");
 
+// Everyone who should hold proof the statement went out. The people who can
+// act on a query about it, plus whoever pressed Send.
+async function internalCopyList(senderEmail) {
+  const rows = await db.prepare("SELECT email FROM users WHERE role IN ('admin','hr')").all();
+  const set = new Set(rows.map((r) => r.email).filter(Boolean));
+  if (senderEmail) set.add(senderEmail);
+  return [...set];
+}
+
 // Renders the invoice PDF into memory. The mailer needs the bytes, and there
 // is nowhere to put a file — Render's disk does not survive a restart, and the
 // PDF is reproducible from the invoice whenever it is wanted again.
@@ -61,7 +70,7 @@ async function sendReadiness(invoiceId) {
 
 // Builds and sends the email. Returns who it went to so the caller can record
 // it — an invoice nobody can prove was sent is an invoice you cannot chase.
-async function sendInvoiceEmail(invoiceId, { sentByName } = {}) {
+async function sendInvoiceEmail(invoiceId, { sentByName, sentByEmail } = {}) {
   const ready = await sendReadiness(invoiceId);
   if (ready.error) return ready;
 
@@ -80,9 +89,43 @@ async function sendInvoiceEmail(invoiceId, { sentByName } = {}) {
     companyName: company,
   });
 
-  await sendMail({ to, subject, text, attachments: [{ filename, content: pdf }] });
+  // A reply must reach a person. The From address is a no-reply sender on a
+  // domain with no mailbox, so a customer answering a statement would
+  // otherwise have their reply bounce straight back at them.
+  const replyTo = (data.branding?.company_email || "").trim() || undefined;
 
-  return { invoice, customer, recipients: to, filename, bytes: pdf.length, sentByName };
+  await sendMail({ to, subject, text, replyTo, attachments: [{ filename, content: pdf }] });
+
+  // The internal copy: proof it went, to the people who would have to answer
+  // for it. Sent as its own message rather than by copying the customer's,
+  // so nobody in the office mistakes it for a statement addressed to them —
+  // and so the customer never sees a list of internal addresses.
+  const copies = await internalCopyList(sentByEmail);
+  if (copies.length) {
+    sendMail({
+      to: copies,
+      subject: `Copy — ${invoice.invoice_number} sent to ${customer.name}`,
+      replyTo,
+      text:
+        `${invoice.invoice_number} was emailed to ${customer.name} just now` +
+        (sentByName ? ` by ${sentByName}` : "") +
+        `.
+
+` +
+        `Sent to: ${to.join(", ")}
+` +
+        `Amount: ${amount(invoice.amount, invoice.currency)}
+` +
+        (invoice.due_date ? `Due: ${invoice.due_date}
+` : "") +
+        `
+The statement as the customer received it is attached. This copy is for your records — ` +
+        `the customer has not been shown these addresses.`,
+      attachments: [{ filename, content: pdf }],
+    });
+  }
+
+  return { invoice, customer, recipients: to, copiedTo: copies, filename, bytes: pdf.length, sentByName };
 }
 
 module.exports = { sendReadiness, sendInvoiceEmail, renderToBuffer };
