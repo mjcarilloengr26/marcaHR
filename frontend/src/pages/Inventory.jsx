@@ -679,7 +679,7 @@ export default function Inventory() {
         <div className="modal-backdrop" onClick={() => setHistoryItem(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h2>Movement history — {historyItem.name}</h2>
-            <table>
+            <table className="sticky-head" className="sticky-head">
               <thead>
                 <tr>
                   <th>Date</th>

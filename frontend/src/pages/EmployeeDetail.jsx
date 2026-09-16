@@ -240,6 +240,13 @@ export default function EmployeeDetail() {
               </select>
             </div>
             <div className="form-row">
+              <label>Hire date</label>
+              <input type="date" value={form.hire_date || ""} onChange={handleChange("hire_date")} />
+              <span className="subtitle" style={{ fontSize: 12, display: "block" }}>
+                Attendance and payroll are only meaningful from this date onwards.
+              </span>
+            </div>
+            <div className="form-row">
               <label>Base salary</label>
               <DecimalInput value={form.base_salary || ""} onChange={handleChange("base_salary")} />
             </div>
@@ -275,7 +282,7 @@ export default function EmployeeDetail() {
           {assets.length === 0 ? (
             <div className="empty-state">Nothing issued to this employee.</div>
           ) : (
-            <table>
+            <table className="sticky-head" className="sticky-head">
               <thead>
                 <tr>
                   <th>Asset</th>

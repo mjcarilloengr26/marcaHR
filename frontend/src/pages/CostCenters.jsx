@@ -255,7 +255,7 @@ export default function CostCenters() {
                 watching them. Adding a cost center with the same name adopts the spend.
               </p>
               <div className="table-scroll">
-                <table>
+                <table className="sticky-head" className="sticky-head">
                   <thead>
                     <tr>
                       <th className="th-plain">Name on the report</th>

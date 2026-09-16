@@ -1215,7 +1215,7 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
             )}
 
             <h2>Expense items</h2>
-            <table style={{ marginBottom: 12 }}>
+            <table className="sticky-head" style={{ marginBottom: 12 }}>
               <thead>
                 <tr>
                   <th>Date</th>

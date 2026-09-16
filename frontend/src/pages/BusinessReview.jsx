@@ -308,7 +308,7 @@ export default function BusinessReview() {
 
             <h3 style={{ fontSize: 14, margin: "20px 0 8px" }}>Where things stand today</h3>
             <div className="table-scroll">
-              <table>
+              <table className="sticky-head" className="sticky-head">
                 <tbody>
                   <tr><td>Open pipeline</td><td>{cur.sales.openPipelineCount} worth {money(cur.sales.openPipelineValue)}</td></tr>
                   <tr><td>Stalled {f.standing.staleThresholdDays}+ days</td><td>{f.standing.stalledOpportunities.count} worth {money(f.standing.stalledOpportunities.value)}</td></tr>
@@ -352,7 +352,7 @@ export default function BusinessReview() {
         <div className="card">
           <h2>Previously written</h2>
           <div className="table-scroll">
-            <table>
+            <table className="sticky-head" className="sticky-head">
               <thead>
                 <tr>
                   <th>Period</th>

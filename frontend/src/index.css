@@ -1044,6 +1044,9 @@ input[type="date"]::-webkit-datetime-edit-year-field {
   z-index: 50;
 }
 .modal {
+  /* Its own scroll container, so a docked table header inside one measures
+     against this padding rather than .content's. */
+  --content-pad: 22px;
   width: 480px;
   max-width: 90vw;
   max-height: 85vh;

@@ -661,7 +661,7 @@ export default function Assets() {
             <div className="empty-state">No request matches that search or status.</div>
           ) : (
             <div className="table-scroll">
-              <table>
+              <table className="sticky-head" className="sticky-head">
                 <thead>
                   <tr>
                     {isHr && (

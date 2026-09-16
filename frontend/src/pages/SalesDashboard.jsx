@@ -124,7 +124,7 @@ function CostCenterSpend({ money, moneyWhole }) {
           />
 
           <div className="table-scroll" style={{ marginTop: 14 }}>
-            <table>
+            <table className="sticky-head" className="sticky-head">
               <thead>
                 <tr>
                   <th className="th-plain">Cost center</th>
@@ -266,7 +266,7 @@ function PipelineAging({ aging, money, moneyWhole, isHr, thresholdDraft, setThre
 
       {byStage.length > 0 && (
         <div className="table-scroll" style={{ marginBottom: 16 }}>
-          <table>
+          <table className="sticky-head" className="sticky-head">
             <thead>
               <tr>
                 <th>Stage</th>
@@ -308,7 +308,7 @@ function PipelineAging({ aging, money, moneyWhole, isHr, thresholdDraft, setThre
             )}
           </h2>
           <div className="table-scroll">
-            <table>
+            <table className="sticky-head" className="sticky-head">
               <thead>
                 <tr>
                   <th>Opportunity</th>
