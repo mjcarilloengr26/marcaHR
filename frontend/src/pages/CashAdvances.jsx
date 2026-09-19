@@ -396,6 +396,18 @@ ${a.employee_name} will see this.`)
                       {a.decision_note && (
                         <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>{a.decision_note}</div>
                       )}
+                      {/* Who accounted for the money. A settled advance is a
+                          balance somebody brought to zero, and the name is the
+                          whole point of recording it — an advance that closed
+                          itself is the thing this is meant to rule out.
+                          Advances settled before this shipped have no name to
+                          show, which is honest: nobody recorded one. */}
+                      {a.settled_by_name && (
+                        <div className="subtitle" style={{ fontSize: 11, margin: 0 }} title={a.settled_at || ""}>
+                          {a.status === "settled" ? "settled by " : "last recorded by "}
+                          {a.settled_by_name}
+                        </div>
+                      )}
                     </td>
                     {isHr && (
                       <td>

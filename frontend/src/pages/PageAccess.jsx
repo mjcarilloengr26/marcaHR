@@ -88,11 +88,15 @@ export default function PageAccess() {
     }
   };
 
-  const revoke = async (id) => {
+  // Revoking keeps the record but cuts the access there and then, so the
+  // person loses the page mid-task without warning. That it is reversible by
+  // granting again is not a reason to do it on a stray click.
+  const revoke = async (g) => {
+    if (!confirm(`Revoke ${userLabel(g)}'s access to ${pageLabel(g.page_key)}? They lose it immediately.`)) return;
     setError("");
     setSaved("");
     try {
-      await api.del(`/page-access/${id}`);
+      await api.del(`/page-access/${g.id}`);
       setSaved("Access revoked.");
       await loadGrants();
     } catch (err) {
@@ -345,7 +349,7 @@ export default function PageAccess() {
                         its header. */}
                     <div className="col-actions">
                       {g.is_active && (
-                        <button className="btn btn-sm btn-secondary" onClick={() => revoke(g.id)}>
+                        <button className="btn btn-sm btn-secondary" onClick={() => revoke(g)}>
                           Revoke
                         </button>
                       )}

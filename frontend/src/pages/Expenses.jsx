@@ -1116,9 +1116,16 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
     }
   };
 
-  const removeItem = async (itemId) => {
+  // Remove sits directly beside Edit on every line, and a line carries its
+  // receipt image with it — the one copy of a document that may not exist
+  // anywhere else. The amount is named so a misclick on the wrong row is
+  // visible in the question itself.
+  const removeItem = async (it) => {
+    const what = it.description || it.category || "this line";
+    const receipt = it.has_receipt || it.receipt_ref ? " Its attached receipt goes with it." : "";
+    if (!confirm(`Remove "${what}" — ${money(it.amount)}?${receipt} This cannot be undone.`)) return;
     try {
-      await api.del(`/expenses/items/${itemId}`);
+      await api.del(`/expenses/items/${it.id}`);
       await load();
       onChanged();
     } catch (err) {
@@ -1271,7 +1278,7 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
                           <button className="link-btn" onClick={() => startEditItem(it)}>
                             {editingItemId === it.id ? "Editing…" : "Edit"}
                           </button>
-                          <button className="link-btn" onClick={() => removeItem(it.id)}>
+                          <button className="link-btn" onClick={() => removeItem(it)}>
                             Remove
                           </button>
                         </div>

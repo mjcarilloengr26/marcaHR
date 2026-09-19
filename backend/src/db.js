@@ -363,6 +363,12 @@ CREATE TABLE IF NOT EXISTS cash_advances (
   decided_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
   decided_at TEXT,
   decision_note TEXT,
+  -- Who squared the advance off, and when. Approving an advance and settling
+  -- it are different acts by different people at different times, so settling
+  -- gets its own name rather than sharing decided_by: the question asked of a
+  -- closed advance is who accounted for the money, not who allowed it.
+  settled_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+  settled_at TEXT,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
   created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL
@@ -1417,6 +1423,13 @@ async function ensureCustomerLinks() {
   // never be brought to zero: the company owed them and there was nowhere to
   // record paying it.
   await pool.query(`ALTER TABLE cash_advances ADD COLUMN IF NOT EXISTS reimbursed_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
+  // Settling moves real money and closes the record, so it needs a name
+  // against it. Advances settled before this shipped keep a null — inventing
+  // an actor for them would be worse than admitting nobody recorded one.
+  await pool.query(
+    `ALTER TABLE cash_advances ADD COLUMN IF NOT EXISTS settled_by INTEGER REFERENCES employees(id) ON DELETE SET NULL`
+  );
+  await pool.query(`ALTER TABLE cash_advances ADD COLUMN IF NOT EXISTS settled_at TEXT`);
   // Existing invoices were raised VAT-inclusive at the standard rate, so 12 is
   // the right default for them as well as for new ones.
   await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS vat_rate NUMERIC(5,2) NOT NULL DEFAULT 12`);

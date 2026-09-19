@@ -48,11 +48,13 @@ const SELECT = `
          COALESCE((
            SELECT COUNT(*) FROM expense_reports r WHERE r.cash_advance_id = a.id
          ), 0)::int AS report_count,
-         (dv.first_name || ' ' || dv.last_name) AS decided_by_name
+         (dv.first_name || ' ' || dv.last_name) AS decided_by_name,
+         (sv.first_name || ' ' || sv.last_name) AS settled_by_name
   FROM cash_advances a
   JOIN employees e ON e.id = a.employee_id
   LEFT JOIN departments d ON d.id = e.department_id
-  LEFT JOIN employees dv ON dv.id = a.decided_by`;
+  LEFT JOIN employees dv ON dv.id = a.decided_by
+  LEFT JOIN employees sv ON sv.id = a.settled_by`;
 
 // outstanding > 0 means the employee still holds company cash.
 // outstanding < 0 means they spent more than they were given, and that excess
@@ -346,11 +348,28 @@ router.put(
       costCenter = cc.name;
     }
 
+    // Who squared it off. Stamped when settlement money actually moves, and
+    // when the advance is closed — the two are usually one action, but an
+    // advance already at zero is settled without any figure changing, and an
+    // instalment is recorded without closing anything. Either way somebody did
+    // it, and the record should say who.
+    //
+    // Ordinary edits — a note, a cost centre — leave the stamp alone, so it
+    // keeps naming the person who handled the money rather than the last
+    // person to touch the row.
+    const moneyMoved =
+      money(returned) !== money(current.returned_amount) ||
+      money(reimbursed) !== money(current.reimbursed_amount || 0);
+    const justClosed = status === "settled" && current.status !== "settled";
+    const attributing = moneyMoved || justClosed;
+    const settledBy = attributing ? req.user?.employee_id || null : current.settled_by;
+    const settledAt = attributing ? nowStamp() : current.settled_at;
+
     const text = (v, fallback) => (v === undefined ? fallback : (String(v).trim() || null));
     await db
       .prepare(
         `UPDATE cash_advances SET amount = ?, returned_amount = ?, reimbursed_amount = ?, status = ?, purpose = ?, cost_center = ?,
-                notes = ?, date_released = ?
+                notes = ?, date_released = ?, settled_by = ?, settled_at = ?
          WHERE id = ?`
       )
       .run(
@@ -362,6 +381,8 @@ router.put(
         costCenter,
         text(b.notes, current.notes),
         b.date_released === undefined ? current.date_released : b.date_released,
+        settledBy,
+        settledAt,
         req.params.id
       );
 
@@ -373,7 +394,10 @@ router.put(
         amount: money(amount),
         returned_amount: money(returned),
         previous_returned: current.returned_amount,
+        reimbursed_amount: money(reimbursed),
+        previous_reimbursed: money(current.reimbursed_amount || 0),
         status,
+        settled_by: attributing ? await actorName(req) : undefined,
       },
     });
     res.json(withBalance(await db.prepare(`${SELECT} WHERE a.id = ?`).get(req.params.id)));

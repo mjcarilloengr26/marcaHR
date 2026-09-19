@@ -148,9 +148,14 @@ export default function Board() {
     }
   };
 
-  const deleteCard = async (id) => {
+  // Named in the question rather than "this card": the board shows a dozen at
+  // once and Remove sits next to View and Edit, so the click is easy to land
+  // on the wrong one. A card that goes takes its comments and checklist with
+  // it, and there is no undo.
+  const deleteCard = async (card) => {
+    if (!confirm(`Remove "${card.title}" from the board? This cannot be undone.`)) return;
     try {
-      await api.del(`/board/cards/${id}`);
+      await api.del(`/board/cards/${card.id}`);
       load();
     } catch (err) {
       setError(err.message);
@@ -281,7 +286,7 @@ export default function Board() {
                       Edit
                     </button>
                   )}
-                  <button className="link-btn board-card-delete" onClick={() => deleteCard(card.id)}>
+                  <button className="link-btn board-card-delete" onClick={() => deleteCard(card)}>
                     Remove
                   </button>
                 </div>
