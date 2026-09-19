@@ -142,6 +142,21 @@ export default function Billing() {
 
   const lineTotal = (r) => (Number(r.quantity) || 0) * (Number(r.unit_price) || 0);
 
+  // Remove sits at the end of every line, one column over from the price
+  // field. A line with nothing in it yet goes without asking — there is
+  // nothing to lose — but one that has been filled in names itself first,
+  // because on a statement of a dozen lines the wrong row is an easy hit and
+  // the only way back is to type it again.
+  const dropLine = (i) => {
+    const r = lines.rows[i] || {};
+    const filled = String(r.description || "").trim() || Number(r.unit_price) || Number(r.quantity) > 1;
+    if (filled) {
+      const what = String(r.description || "").trim() || `line ${i + 1}`;
+      if (!confirm(`Remove "${what}" — ${inCurrency(lineTotal(r), lines.invoice.currency)} — from this statement?`)) return;
+    }
+    setLines({ ...lines, rows: lines.rows.filter((_, j) => j !== i) });
+  };
+
   const inCurrency = (n, currency) =>
     `${currency || "PHP"} ` +
     (Number(n) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -624,7 +639,7 @@ export default function Billing() {
                         <button
                           type="button"
                           className="btn btn-sm btn-danger"
-                          onClick={() => setLines({ ...lines, rows: lines.rows.filter((_, j) => j !== i) })}
+                          onClick={() => dropLine(i)}
                         >
                           Remove
                         </button>

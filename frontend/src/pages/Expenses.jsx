@@ -100,7 +100,28 @@ export default function Expenses() {
   const addLine = () => setLines((ls) => [...ls, blankLine()]);
   // Never removes the last one: a report with no lines is the empty draft this
   // dialog exists to stop creating.
-  const dropLine = (key) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.key !== key) : ls));
+  //
+  // A line still blank goes without a word — a fresh one is created with the
+  // date already in it, so the date alone does not count as filled. One with a
+  // figure or a description on it is asked about first: the lines stack, each
+  // with its own Remove, and re-keying a receipt by hand is the cost of a
+  // misclick.
+  const dropLine = (key) => {
+    const l = lines.find((x) => x.key === key);
+    const filled =
+      l &&
+      (String(l.description || "").trim() ||
+        String(l.amount || "").trim() ||
+        String(l.category || "").trim() ||
+        String(l.supplier_name || "").trim() ||
+        l.receipt);
+    if (filled) {
+      const what = String(l.description || "").trim() || String(l.category || "").trim() || "this line";
+      const amount = String(l.amount || "").trim();
+      if (!confirm(`Remove "${what}"${amount ? ` — ${amount}` : ""} from the report?`)) return;
+    }
+    setLines((ls) => (ls.length > 1 ? ls.filter((x) => x.key !== key) : ls));
+  };
   // Suppliers already used, with the address and TIN last recorded for each.
   // Picking a known name fills the rest of the line in, which is the point: the
   // live data already held one company under two spellings with its TIN retyped

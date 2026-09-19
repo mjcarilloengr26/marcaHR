@@ -616,7 +616,17 @@ export default function Leave() {
                   <span className="subtitle" style={{ maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     📎 {attachment.name}
                   </span>
-                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setAttachment(null)}>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-secondary"
+                    // The file has been chosen but not sent anywhere yet, so
+                    // dropping it loses the pick silently — and a medical
+                    // certificate is not always to hand twice.
+                    onClick={() => {
+                      if (!confirm(`Remove ${attachment.name}? You will need to choose the file again.`)) return;
+                      setAttachment(null);
+                    }}
+                  >
                     Remove
                   </button>
                 </div>

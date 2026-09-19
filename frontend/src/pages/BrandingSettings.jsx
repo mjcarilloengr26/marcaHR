@@ -204,7 +204,18 @@ export default function BrandingSettings() {
                   {saving ? "Uploading…" : "Upload logo"}
                 </button>
                 {logoData && (
-                  <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => save(null)}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={saving}
+                    // Saved on the click. The app falls back to its plain
+                    // wordmark everywhere until a new file is uploaded, and
+                    // the original is only on whoever uploaded it's machine.
+                    onClick={() => {
+                      if (!confirm("Remove the application logo? It disappears from every page until a new one is uploaded.")) return;
+                      save(null);
+                    }}
+                  >
                     Remove logo
                   </button>
                 )}
@@ -270,6 +281,18 @@ export default function BrandingSettings() {
                 type="button"
                 className="btn btn-sm btn-secondary"
                 onClick={async () => {
+                  // Saved the moment it is clicked, and the image itself is
+                  // gone — the file it came from is on somebody's machine, not
+                  // in the app. Statements raised afterwards fall back to the
+                  // application logo, which is the thing this was set up to
+                  // avoid, so it is worth a question.
+                  if (
+                    !confirm(
+                      "Remove the invoice logo? Statements will fall back to the application logo until a new one is uploaded."
+                    )
+                  ) {
+                    return;
+                  }
                   setError("");
                   try {
                     const data = await api.put("/branding", {

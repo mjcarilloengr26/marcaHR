@@ -186,7 +186,18 @@ export default function EmployeeDetail() {
                 <input type="file" accept="image/*" onChange={handlePhotoPick} style={{ display: "none" }} />
               </label>
               {form.photo && (
-                <button type="button" className="btn btn-sm btn-secondary" onClick={() => setForm((f) => ({ ...f, photo: "" }))}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  // Sits beside Replace photo, and the two are a click apart.
+                  // The photo on screen may be the one already on file rather
+                  // than one just picked, in which case saving afterwards is
+                  // what actually loses it.
+                  onClick={() => {
+                    if (!confirm("Remove this photo? It goes when the record is saved.")) return;
+                    setForm((f) => ({ ...f, photo: "" }));
+                  }}
+                >
                   Remove
                 </button>
               )}

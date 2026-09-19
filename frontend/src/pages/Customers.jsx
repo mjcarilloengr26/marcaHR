@@ -237,7 +237,14 @@ export default function Customers() {
                     <button
                       type="button"
                       className="btn btn-sm btn-secondary"
-                      onClick={() => setForm({ ...form, cc_emails: (form.cc_emails || []).filter((_, j) => j !== i) })}
+                      // An empty row is scaffolding and goes without a word.
+                      // One with an address in it is something somebody typed,
+                      // and these rows sit stacked with a Remove on each.
+                      onClick={() => {
+                        const addr = String((form.cc_emails || [])[i] || "").trim();
+                        if (addr && !confirm(`Remove ${addr} from the copy list?`)) return;
+                        setForm({ ...form, cc_emails: (form.cc_emails || []).filter((_, j) => j !== i) });
+                      }}
                     >
                       Remove
                     </button>
