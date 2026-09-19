@@ -14,6 +14,8 @@ export default function CashAdvances() {
   const { user } = useAuth();
   const { moneyPrecise: money } = useAppSettings();
   const isHr = user.role === "admin" || user.role === "hr";
+  // Destroying a record is an administrator's act — see the delete routes.
+  const isAdmin = user?.role === "admin";
 
   const [advances, setAdvances] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -96,16 +98,31 @@ export default function CashAdvances() {
   // Handing unspent cash back is what actually closes an advance out. Prefilled
   // with the whole outstanding amount, which is the common case — a partial
   // hand-back just means typing a smaller figure.
-  const openReturn = (a) => {
+  // Settling is where an advance is squared off, so it asks for the money that
+  // squares it rather than waving the imbalance through. Which way it runs
+  // depends on who is out of pocket: the employee still holding cash hands it
+  // back, and an employee who spent their own money gets paid.
+  const openSettle = (a) => {
     setError("");
-    setReturning({ advance: a, amount: String(a.dueToCompany || 0) });
+    if (a.outstanding === 0) {
+      setStatus(a, "settled");
+      return;
+    }
+    setReturning({
+      advance: a,
+      amount: String(a.dueToCompany > 0 ? a.dueToCompany : a.reimbursementDue),
+      direction: a.dueToCompany > 0 ? "return" : "reimburse",
+    });
   };
 
   // Whether handing back this much leaves nothing outstanding. Rounded to the
   // centavo before comparing, since a float subtraction of two exact amounts
   // can land a hair off zero and would then never count as closed.
-  const closesOut = (advance, totalReturned) => {
-    const left = Math.round((Number(advance.amount) - totalReturned - Number(advance.liquidated)) * 100) / 100;
+  const closesOut = (advance, total, direction = "return") => {
+    const returned = direction === "return" ? total : Number(advance.returned_amount || 0);
+    const reimbursed = direction === "reimburse" ? total : Number(advance.reimbursed_amount || 0);
+    const left =
+      Math.round((Number(advance.amount) + reimbursed - returned - Number(advance.liquidated)) * 100) / 100;
     return left === 0;
   };
 
@@ -114,25 +131,31 @@ export default function CashAdvances() {
     setBusyId(returning.advance.id);
     setError("");
     try {
-      // Cumulative on the server, so what is sent is the running total handed
-      // back, not just this instalment.
-      const total = Number(returning.advance.returned_amount || 0) + Number(returning.amount || 0);
+      const entered = Number(returning.amount || 0);
+      const reimbursing = returning.direction === "reimburse";
 
-      // Money back with nothing left outstanding is the end of the advance, so
-      // it closes here rather than leaving a fully-accounted record sitting in
-      // the open list waiting for a second click nobody knew to make. The
-      // dialog has always said this would "close the advance out"; now it does.
-      const settles = closesOut(returning.advance, total);
+      // Both fields are cumulative on the server, so what is sent is the
+      // running total on that side, not just this instalment.
+      const total = Number(
+        (reimbursing ? returning.advance.reimbursed_amount : returning.advance.returned_amount) || 0
+      ) + entered;
+
+      // Squaring the balance is the end of the advance, so it closes here
+      // rather than leaving an accounted record in the open list waiting for a
+      // second click nobody knew to make.
+      const settles = closesOut(returning.advance, total, returning.direction);
 
       const updated = await api.put(`/cash-advances/${returning.advance.id}`, {
-        returned_amount: total,
+        [reimbursing ? "reimbursed_amount" : "returned_amount"]: total,
         ...(settles ? { status: "settled" } : {}),
       });
       setReturning(null);
       setNotice(
         settles
           ? `${updated.reference} is fully accounted for and settled — nothing outstanding.`
-          : `Recorded. ${money(updated.dueToCompany)} still due from ${updated.employee_name}.`
+          : reimbursing
+            ? `Recorded. ${money(updated.reimbursementDue)} still owed back to ${updated.employee_name}.`
+            : `Recorded. ${money(updated.dueToCompany)} still due from ${updated.employee_name}.`
       );
       await load();
     } catch (err) {
@@ -294,7 +317,7 @@ ${a.employee_name} will see this.`)
                   <th>Purpose</th>
                   <SortTh label="Amount" sortKey="amount" toggleSort={toggleSort} arrow={arrow} />
                   <SortTh label="Liquidated" sortKey="liquidated" toggleSort={toggleSort} arrow={arrow} />
-                  <th>Returned</th>
+                  <th>Settled</th>
                   <SortTh label="Balance" sortKey="outstanding" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 130 }} />
                   <th>Status</th>
                   {isHr && <th></th>}
@@ -328,7 +351,23 @@ ${a.employee_name} will see this.`)
                     </td>
                     <td className="col-nowrap">{money(a.amount)}</td>
                     <td className="col-nowrap">{money(a.liquidated)}</td>
-                    <td className="col-nowrap">{a.returned_amount > 0 ? money(a.returned_amount) : "—"}</td>
+                    {/* Cash moved to square the advance, whichever way it went.
+                        Without the reimbursement side an overspend that was
+                        paid back read as "fully accounted" against a blank
+                        column, with nothing on the row to say the money had
+                        actually left. */}
+                    <td className="col-nowrap">
+                      {a.returned_amount > 0 || a.reimbursed_amount > 0 ? (
+                        <>
+                          {money(a.returned_amount > 0 ? a.returned_amount : a.reimbursed_amount)}
+                          <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>
+                            {a.returned_amount > 0 ? "handed back" : "paid to employee"}
+                          </div>
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     {/* One signed figure read two ways: cash the employee still
                         holds, or money the company owes them for overspending.
                         The figure sits on its own line with the direction as a
@@ -371,13 +410,8 @@ ${a.employee_name} will see this.`)
                               </button>
                             </>
                           )}
-                          {a.status === "open" && a.dueToCompany > 0 && (
-                            <button className="btn btn-sm" disabled={busyId === a.id} onClick={() => openReturn(a)}>
-                              Cash returned
-                            </button>
-                          )}
                           {a.status === "open" && (
-                            <button className="btn btn-sm btn-secondary" disabled={busyId === a.id} onClick={() => setStatus(a, "settled")}>
+                            <button className="btn btn-sm" disabled={busyId === a.id} onClick={() => openSettle(a)}>
                               Settle
                             </button>
                           )}
@@ -387,7 +421,7 @@ ${a.employee_name} will see this.`)
                             </button>
                           )}
                           <button className="btn btn-sm btn-secondary" onClick={() => openEdit(a)}>Edit</button>
-                          {a.report_count === 0 && (
+                          {isAdmin && a.report_count === 0 && (
                             <button className="btn btn-sm btn-danger" disabled={busyId === a.id} onClick={() => remove(a)}>
                               Delete
                             </button>
@@ -515,26 +549,39 @@ ${a.employee_name} will see this.`)
       {returning && (
         <div className="modal-backdrop" onClick={() => setReturning(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Cash returned</h2>
+            <h2>{returning.direction === "reimburse" ? "Pay back the employee" : "Cash returned"}</h2>
             <p className="subtitle" style={{ margin: "0 0 12px" }}>
               {returning.advance.reference} — {money(returning.advance.amount)} released to{" "}
-              {returning.advance.employee_name}, {money(returning.advance.liquidated)} liquidated so far.
-              Recording the {money(returning.advance.dueToCompany)} unspent brings the balance to zero.
+              {returning.advance.employee_name}, {money(returning.advance.liquidated)} liquidated so far.{" "}
+              {returning.direction === "reimburse"
+                ? `They spent ${money(returning.advance.reimbursementDue)} of their own money, so the company owes them that back.`
+                : `Recording the ${money(returning.advance.dueToCompany)} unspent brings the balance to zero.`}
             </p>
             <form onSubmit={confirmReturn}>
               <div className="form-row">
-                <label>Amount handed back</label>
+                <label>{returning.direction === "reimburse" ? "Amount transferred to the employee" : "Amount handed back"}</label>
                 <DecimalInput
                   value={returning.amount}
                   onChange={(e) => setReturning({ ...returning, amount: e.target.value })}
                   required
                 />
                 <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
-                  {closesOut(returning.advance, Number(returning.advance.returned_amount || 0) + Number(returning.amount || 0))
+                  {closesOut(
+                    returning.advance,
+                    Number(
+                      (returning.direction === "reimburse"
+                        ? returning.advance.reimbursed_amount
+                        : returning.advance.returned_amount) || 0
+                    ) + Number(returning.amount || 0),
+                    returning.direction
+                  )
                     ? "This clears the balance, so the advance will be settled at the same time."
-                    : "Enter less than the full amount for a partial hand-back — the advance stays open for the rest."}
-                  {returning.advance.returned_amount > 0 &&
-                    ` ${money(returning.advance.returned_amount)} has already been returned.`}
+                    : "Enter less for a part payment — the advance stays open for the rest."}
+                  {returning.direction === "reimburse"
+                    ? returning.advance.reimbursed_amount > 0 &&
+                      ` ${money(returning.advance.reimbursed_amount)} has already been paid back.`
+                    : returning.advance.returned_amount > 0 &&
+                      ` ${money(returning.advance.returned_amount)} has already been returned.`}
                 </div>
               </div>
               <div className="modal-actions">
@@ -542,9 +589,17 @@ ${a.employee_name} will see this.`)
                 <button type="submit" className="btn" disabled={busyId === returning.advance.id}>
                   {busyId === returning.advance.id
                     ? "Recording…"
-                    : closesOut(returning.advance, Number(returning.advance.returned_amount || 0) + Number(returning.amount || 0))
-                      ? "Record return and settle"
-                      : "Record return"}
+                    : closesOut(
+                          returning.advance,
+                          Number(
+                            (returning.direction === "reimburse"
+                              ? returning.advance.reimbursed_amount
+                              : returning.advance.returned_amount) || 0
+                          ) + Number(returning.amount || 0),
+                          returning.direction
+                        )
+                      ? "Record and settle"
+                      : "Record"}
                 </button>
               </div>
             </form>

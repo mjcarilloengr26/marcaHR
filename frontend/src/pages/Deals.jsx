@@ -39,6 +39,8 @@ export default function Deals() {
   const { money } = useAppSettings();
   const { user } = useAuth();
   const isHr = user.role === "admin" || user.role === "hr";
+  // Destroying a record is an administrator's act — see the delete routes.
+  const isAdmin = user?.role === "admin";
   const [deals, setDeals] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [error, setError] = useState("");
@@ -234,7 +236,9 @@ export default function Deals() {
                 </td>
                 <td style={{ display: "flex", gap: 6 }}>
                   <button className="btn btn-sm btn-secondary" onClick={() => openEdit(d)}>Edit</button>
-                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(d.id)}>Delete</button>
+                  {isAdmin && (
+                    <button className="btn btn-sm btn-danger" onClick={() => handleDelete(d.id)}>Delete</button>
+                  )}
                 </td>
               </tr>
             ))}

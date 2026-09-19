@@ -151,10 +151,13 @@ router.put(
   })
 );
 
+// Deleting destroys the trail. Restricted to administrators so a removal is
+// always attributable to the one role accountable for it — everyone else
+// cancels, which leaves the record and its history intact.
 router.delete(
   "/:id",
   requireAuth,
-  requireRole("admin", "hr"),
+  requireRole("admin"),
   asyncHandler(async (req, res) => {
     const existing = await db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
     if (!existing) return res.status(404).json({ error: "Order not found" });

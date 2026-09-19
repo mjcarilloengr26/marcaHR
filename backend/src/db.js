@@ -1412,6 +1412,11 @@ async function ensureCustomerLinks() {
   // column added — CREATE TABLE IF NOT EXISTS will not do it.
   await pool.query(`ALTER TABLE customers ADD COLUMN IF NOT EXISTS cc_emails TEXT[] NOT NULL DEFAULT '{}'`);
   await pool.query(`ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS quote_reference TEXT`);
+  // Money paid back TO the employee. returned_amount only ever ran one way —
+  // employee hands cash back — so an advance the employee overspent could
+  // never be brought to zero: the company owed them and there was nowhere to
+  // record paying it.
+  await pool.query(`ALTER TABLE cash_advances ADD COLUMN IF NOT EXISTS reimbursed_amount NUMERIC(14,2) NOT NULL DEFAULT 0`);
   // Existing invoices were raised VAT-inclusive at the standard rate, so 12 is
   // the right default for them as well as for new ones.
   await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS vat_rate NUMERIC(5,2) NOT NULL DEFAULT 12`);

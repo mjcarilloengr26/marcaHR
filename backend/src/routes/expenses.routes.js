@@ -592,12 +592,17 @@ router.put(
   })
 );
 
+// Deleting destroys the trail, so a whole report can only be removed by an
+// administrator. Staff still edit and remove lines on their own drafts —
+// that is composing a claim, not erasing one that was filed.
 router.delete(
   "/:id",
   requireAuth,
-  asyncHandler(loadEditableReport),
+  requireRole("admin"),
   asyncHandler(async (req, res) => {
-    await db.prepare("DELETE FROM expense_reports WHERE id = ?").run(req.expenseReport.id);
+    const report = await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(req.params.id);
+    if (!report) return res.status(404).json({ error: "Expense report not found" });
+    await db.prepare("DELETE FROM expense_reports WHERE id = ?").run(report.id);
     res.status(204).end();
   })
 );

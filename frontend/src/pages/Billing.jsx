@@ -3,6 +3,7 @@ import { api, downloadFile, getToken } from "../api/client";
 import CustomerPicker from "../components/CustomerPicker";
 import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
+import { useAuth } from "../context/AuthContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
@@ -12,6 +13,9 @@ const STATUSES = ["draft", "approved", "sent", "paid", "overdue", "cancelled"];
 
 export default function Billing() {
   const { money } = useAppSettings();
+  const { user } = useAuth();
+  // Destroying a record is an administrator's act — see the delete routes.
+  const isAdmin = user?.role === "admin";
   const [invoices, setInvoices] = useState([]);
   const [orders, setOrders] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -462,7 +466,9 @@ export default function Billing() {
                   )}
                   <button className="btn btn-sm btn-secondary" onClick={() => openLines(inv)}>Lines</button>
                   <button className="btn btn-sm btn-secondary" onClick={() => openEdit(inv)}>Edit</button>
-                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(inv.id)}>Delete</button>
+                  {isAdmin && (
+                    <button className="btn btn-sm btn-danger" onClick={() => handleDelete(inv.id)}>Delete</button>
+                  )}
                 </td>
               </tr>
             ))}

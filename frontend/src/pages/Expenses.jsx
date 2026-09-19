@@ -89,6 +89,8 @@ export default function Expenses() {
   // Expense figures keep two decimals — they're reconciled to the centavo.
   const { moneyPrecise: money } = useAppSettings();
   const isHr = user.role === "admin" || user.role === "hr";
+  // Destroying a record is an administrator's act — see the delete routes.
+  const isAdmin = user?.role === "admin";
   const [reports, setReports] = useState([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -234,7 +236,10 @@ export default function Expenses() {
   // Deleting from the list is an HR/admin tool. The server would also accept an
   // employee removing their own draft, but employee-facing access is deliberately
   // left as it was — clearing out abandoned reports is an administrative job.
-  const canDelete = () => isHr;
+  // Removing a filed report is an administrator's act. Staff still edit and
+  // remove lines on their own drafts — that is composing a claim, not erasing
+  // one that was filed.
+  const canDelete = () => isAdmin;
 
   const [deletingId, setDeletingId] = useState(null);
 
@@ -449,8 +454,9 @@ export default function Expenses() {
       </div>
 
       {/* Only appears once something is ticked, so a destructive control isn't
-          sitting armed on the page during ordinary browsing. */}
-      {selected.size > 0 && (
+          sitting armed on the page during ordinary browsing — and only for the
+          role that is actually allowed to go through with it. */}
+      {isAdmin && selected.size > 0 && (
         <div
           className="card"
           style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}

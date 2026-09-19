@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
+import { useAuth } from "../context/AuthContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
@@ -12,6 +13,9 @@ const STATUSES = ["draft", "submitted", "approved", "received", "cancelled"];
 
 export default function PurchaseOrders() {
   const { money } = useAppSettings();
+  const { user } = useAuth();
+  // Destroying a record is an administrator's act — see the delete routes.
+  const isAdmin = user?.role === "admin";
   const [pos, setPos] = useState([]);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
@@ -202,7 +206,9 @@ export default function PurchaseOrders() {
                   {po.status === "draft" && (
                     <button className="btn btn-sm btn-secondary" onClick={() => openEdit(po)}>Edit</button>
                   )}
-                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(po.id)}>Delete</button>
+                  {isAdmin && (
+                    <button className="btn btn-sm btn-danger" onClick={() => handleDelete(po.id)}>Delete</button>
+                  )}
                 </td>
               </tr>
             ))}

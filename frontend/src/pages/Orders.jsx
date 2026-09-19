@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import CustomerPicker from "../components/CustomerPicker";
 import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
+import { useAuth } from "../context/AuthContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
@@ -13,6 +14,9 @@ const STATUSES = ["placed", "processing", "shipped", "delivered", "cancelled"];
 
 export default function Orders() {
   const { money } = useAppSettings();
+  const { user } = useAuth();
+  // Destroying a record is an administrator's act — see the delete routes.
+  const isAdmin = user?.role === "admin";
   const [orders, setOrders] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [error, setError] = useState("");
@@ -187,7 +191,9 @@ export default function Orders() {
                 </td>
                 <td style={{ display: "flex", gap: 6 }}>
                   <button className="btn btn-sm btn-secondary" onClick={() => openEdit(o)}>Edit</button>
-                  <button className="btn btn-sm btn-danger" onClick={() => handleDelete(o.id)}>Delete</button>
+                  {isAdmin && (
+                    <button className="btn btn-sm btn-danger" onClick={() => handleDelete(o.id)}>Delete</button>
+                  )}
                 </td>
               </tr>
             ))}

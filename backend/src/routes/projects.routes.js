@@ -387,10 +387,13 @@ router.put(
 // keys are ON DELETE SET NULL — it would quietly detach that spend from the
 // only thing measuring it, which is worse because nothing would look broken.
 // So a project with anything filed against it is cancelled, not deleted.
+// Deleting destroys the trail. Restricted to administrators so a removal is
+// always attributable to the one role accountable for it — everyone else
+// cancels, which leaves the record and its history intact.
 router.delete(
   "/:id",
   requireAuth,
-  requireRole("admin", "hr"),
+  requireRole("admin"),
   asyncHandler(async (req, res) => {
     const existing = await db.prepare("SELECT * FROM projects WHERE id = ?").get(req.params.id);
     if (!existing) return res.status(404).json({ error: "Project not found" });

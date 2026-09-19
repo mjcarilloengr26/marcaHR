@@ -60,9 +60,15 @@ const SELECT = `
 // than as a separate claim.
 function withBalance(row) {
   if (!row) return null;
-  const outstanding = money(row.amount - row.returned_amount - row.liquidated);
+  // Both directions. Cash handed back reduces what the employee holds; money
+  // paid out to cover an overspend settles what the company owes them. An
+  // advance is square when the two sides meet at zero.
+  const outstanding = money(
+    Number(row.amount) + Number(row.reimbursed_amount || 0) - Number(row.returned_amount) - Number(row.liquidated)
+  );
   return {
     ...row,
+    reimbursed_amount: money(row.reimbursed_amount || 0),
     liquidated: money(row.liquidated),
     outstanding,
     dueToCompany: outstanding > 0 ? outstanding : 0,
@@ -280,16 +286,48 @@ router.put(
 
     const returned = b.returned_amount === undefined ? current.returned_amount : Number(b.returned_amount);
     if (!Number.isFinite(returned) || returned < 0) return res.status(400).json({ error: "Returned cash cannot be negative" });
+
+    const reimbursed =
+      b.reimbursed_amount === undefined ? Number(current.reimbursed_amount || 0) : Number(b.reimbursed_amount);
+    if (!Number.isFinite(reimbursed) || reimbursed < 0) {
+      return res.status(400).json({ error: "Reimbursement cannot be negative" });
+    }
+
+    // Both sides are checked against the other's new value, so a settlement
+    // that moves cash in both directions at once is judged as a whole.
+    //
+    // Each ceiling also floors at what is already on record. An advance that
+    // has overspent is past its own returnable ceiling by definition, and
+    // without this an ordinary edit — a note, a cost centre — would be refused
+    // on the strength of a figure nobody was touching. You may leave a number
+    // where it is or bring it down; you may not push it further out.
+    const money0 = (n) => Math.max(money(n), 0);
+
     // Handing back more than was released is a data-entry slip, not a refund.
     if (money(returned) > money(amount)) {
       return res.status(400).json({ error: `Cannot return more than the ${money(amount)} released` });
     }
     // Returning cash that has already been spent would drive the balance
     // negative and read as a reimbursement the company does not owe.
-    if (money(returned + current.liquidated) > money(amount)) {
-      const spare = money(amount - current.liquidated);
+    const returnable = money0(amount + reimbursed - current.liquidated);
+    if (money(returned) > Math.max(returnable, money(current.returned_amount))) {
       return res.status(400).json({
-        error: `Only ${spare} is unspent on this advance, so that is the most that can be returned`,
+        error: returnable > 0
+          ? `Only ${returnable} is unspent on this advance, so that is the most that can be returned`
+          : "Everything released on this advance has already been spent, so there is nothing to hand back",
+      });
+    }
+
+    // What the company has paid out to cover an overspend. Capped at the
+    // overspend itself: paying more than the employee is owed is a slip, and
+    // would leave the advance reading as though they still held cash.
+    const overspend = money0(current.liquidated + returned - amount);
+    if (money(reimbursed) > Math.max(overspend, money(current.reimbursed_amount || 0))) {
+      return res.status(400).json({
+        error:
+          overspend > 0
+            ? `${overspend} is what this advance overspent, so that is the most that can be paid back`
+            : "Nothing is owed back on this advance, so there is nothing to reimburse",
       });
     }
 
@@ -311,13 +349,14 @@ router.put(
     const text = (v, fallback) => (v === undefined ? fallback : (String(v).trim() || null));
     await db
       .prepare(
-        `UPDATE cash_advances SET amount = ?, returned_amount = ?, status = ?, purpose = ?, cost_center = ?,
+        `UPDATE cash_advances SET amount = ?, returned_amount = ?, reimbursed_amount = ?, status = ?, purpose = ?, cost_center = ?,
                 notes = ?, date_released = ?
          WHERE id = ?`
       )
       .run(
         money(amount),
         money(returned),
+        money(reimbursed),
         status,
         text(b.purpose, current.purpose),
         costCenter,
@@ -341,10 +380,13 @@ router.put(
   })
 );
 
+// Deleting destroys the trail. Restricted to administrators so a removal is
+// always attributable to the one role accountable for it — everyone else
+// cancels, which leaves the record and its history intact.
 router.delete(
   "/:id",
   requireAuth,
-  requireRole("admin", "hr"),
+  requireRole("admin"),
   asyncHandler(async (req, res) => {
     const row = await db.prepare(`${SELECT} WHERE a.id = ?`).get(req.params.id);
     if (!row) return res.status(404).json({ error: "Cash advance not found" });

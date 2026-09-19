@@ -56,6 +56,8 @@ export default function Projects() {
   const { user } = useAuth();
   const { money, moneyWhole } = useAppSettings();
   const isHr = user.role === "admin" || user.role === "hr";
+  // Destroying a record is an administrator's act — see the delete routes.
+  const isAdmin = user?.role === "admin";
 
   const [data, setData] = useState(null);
   const [employees, setEmployees] = useState([]);
@@ -361,13 +363,15 @@ export default function Projects() {
                         <td className="col-actions-sticky">
                           <div className="col-actions">
                             <button className="btn btn-sm btn-secondary" onClick={() => openEdit(p)}>Edit</button>
-                            <button
-                              className="btn btn-sm btn-danger"
-                              disabled={busyId === p.id}
-                              onClick={() => remove(p)}
-                            >
-                              Delete
-                            </button>
+                            {isAdmin && (
+                              <button
+                                className="btn btn-sm btn-danger"
+                                disabled={busyId === p.id}
+                                onClick={() => remove(p)}
+                              >
+                                Delete
+                              </button>
+                            )}
                           </div>
                         </td>
                       )}
