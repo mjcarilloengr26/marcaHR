@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
+import PastRecords from "../components/PastRecords";
 import DecimalInput from "../components/DecimalInput";
 
 const STATUS_BADGE = { pending: "pending", open: "active", rejected: "rejected", settled: "approved", cancelled: "cancelled" };
@@ -95,9 +96,6 @@ export default function CashAdvances() {
     }
   };
 
-  // Handing unspent cash back is what actually closes an advance out. Prefilled
-  // with the whole outstanding amount, which is the common case — a partial
-  // hand-back just means typing a smaller figure.
   // Settling is where an advance is squared off, so it asks for the money that
   // squares it rather than waving the imbalance through. Which way it runs
   // depends on who is out of pocket: the employee still holding cash hands it
@@ -235,10 +233,166 @@ ${a.employee_name} will see this.`)
   });
   const { sorted, toggleSort, arrow } = useSort(filtered, "date_released", "desc");
 
+  // Money still in play, and money that is done with.
+  //
+  // A settled advance is square in both directions — nothing owed to the
+  // company, nothing owed to the employee — and a cancelled or rejected one
+  // never released any. None of them belong in the list somebody scans to see
+  // what is still outstanding, and a settled row sitting among open ones is
+  // how a balance gets recorded twice.
+  const CLOSED = ["settled", "cancelled", "rejected"];
+  const liveAdvances = sorted.filter((a) => !CLOSED.includes(a.status));
+  const closedAdvances = sorted.filter((a) => CLOSED.includes(a.status));
+
   const openAdvances = advances.filter((a) => a.status === "open");
   const pending = advances.filter((a) => a.status === "pending");
   const totalOut = openAdvances.reduce((n, a) => n + a.dueToCompany, 0);
   const totalOwed = openAdvances.reduce((n, a) => n + a.reimbursementDue, 0);
+
+  // One set of columns for both lists. The archive keeps the action column so
+  // a settled advance can still be reopened or corrected — it is history, not
+  // a locked record — but it is a click away rather than in the working list.
+  const advanceTable = (rows) => (
+        <div className="table-scroll">
+          <table className="sticky-head">
+            <thead>
+              <tr>
+                <SortTh label="Reference" sortKey="reference" toggleSort={toggleSort} arrow={arrow} className="col-nowrap" />
+                {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
+                <SortTh label="Released" sortKey="date_released" toggleSort={toggleSort} arrow={arrow} className="col-nowrap" />
+                <th>Purpose</th>
+                <SortTh label="Amount" sortKey="amount" toggleSort={toggleSort} arrow={arrow} />
+                <SortTh label="Liquidated" sortKey="liquidated" toggleSort={toggleSort} arrow={arrow} />
+                <th>Settled</th>
+                <SortTh label="Balance" sortKey="outstanding" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 130 }} />
+                <th>Status</th>
+                {isHr && <th></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((a) => (
+                <tr key={a.id}>
+                  <td className="col-nowrap" style={{ fontVariantNumeric: "tabular-nums" }}>
+                    {a.reference}
+                    {a.report_count > 0 && (
+                      <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>
+                        {a.report_count} report{a.report_count === 1 ? "" : "s"}
+                      </div>
+                    )}
+                  </td>
+                  {isHr && (
+                    <td>
+                      {a.employee_name}
+                      {a.department_name && (
+                        <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>{a.department_name}</div>
+                      )}
+                    </td>
+                  )}
+                  <td className="col-nowrap">{a.date_released}</td>
+                  <td>
+                    {a.purpose || "—"}
+                    {a.cost_center && (
+                      <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>{a.cost_center}</div>
+                    )}
+                  </td>
+                  <td className="col-nowrap">{money(a.amount)}</td>
+                  <td className="col-nowrap">{money(a.liquidated)}</td>
+                  {/* Cash moved to square the advance, whichever way it went.
+                      Without the reimbursement side an overspend that was
+                      paid back read as "fully accounted" against a blank
+                      column, with nothing on the row to say the money had
+                      actually left. */}
+                  <td className="col-nowrap">
+                    {a.returned_amount > 0 || a.reimbursed_amount > 0 ? (
+                      <>
+                        {money(a.returned_amount > 0 ? a.returned_amount : a.reimbursed_amount)}
+                        <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>
+                          {a.returned_amount > 0 ? "handed back" : "paid to employee"}
+                        </div>
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  {/* One signed figure read two ways: cash the employee still
+                      holds, or money the company owes them for overspending.
+                      The figure sits on its own line with the direction as a
+                      note beneath, the same shape the expense list uses — as
+                      one run of text it wrapped in a narrow column and the
+                      amount stopped being the thing you saw first. */}
+                  <td>
+                    {a.fullyAccounted ? (
+                      <span className="subtitle">fully accounted</span>
+                    ) : (
+                      <>
+                        <span
+                          className="col-nowrap"
+                          style={{ color: a.dueToCompany > 0 ? "var(--warning)" : "var(--danger)" }}
+                        >
+                          {money(a.dueToCompany > 0 ? a.dueToCompany : a.reimbursementDue)}
+                        </span>
+                        <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>
+                          {a.dueToCompany > 0 ? "due to company" : "due to employee"}
+                        </div>
+                      </>
+                    )}
+                  </td>
+                  <td>
+                    <span className={`badge badge-${STATUS_BADGE[a.status] || "neutral"}`}>{a.status}</span>
+                    {a.decision_note && (
+                      <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>{a.decision_note}</div>
+                    )}
+                    {/* Who accounted for the money. A settled advance is a
+                        balance somebody brought to zero, and the name is the
+                        whole point of recording it — an advance that closed
+                        itself is the thing this is meant to rule out.
+                        Advances settled before this shipped have no name to
+                        show, which is honest: nobody recorded one. */}
+                    {a.settled_by_name && (
+                      <div className="subtitle" style={{ fontSize: 11, margin: 0 }} title={a.settled_at || ""}>
+                        {a.status === "settled" ? "settled by " : "last recorded by "}
+                        {a.settled_by_name}
+                      </div>
+                    )}
+                  </td>
+                  {isHr && (
+                    <td>
+                      <div className="col-actions">
+                        {isHr && a.status === "pending" && (
+                          <>
+                            <button className="btn btn-sm" disabled={busyId === a.id} onClick={() => decide(a, "approved")}>
+                              Approve
+                            </button>
+                            <button className="btn btn-sm btn-secondary" disabled={busyId === a.id} onClick={() => decide(a, "rejected")}>
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        {a.status === "open" && (
+                          <button className="btn btn-sm" disabled={busyId === a.id} onClick={() => openSettle(a)}>
+                            Settle
+                          </button>
+                        )}
+                        {a.status === "settled" && (
+                          <button className="btn btn-sm btn-secondary" disabled={busyId === a.id} onClick={() => setStatus(a, "open")}>
+                            Reopen
+                          </button>
+                        )}
+                        <button className="btn btn-sm btn-secondary" onClick={() => openEdit(a)}>Edit</button>
+                        {isAdmin && a.report_count === 0 && (
+                          <button className="btn btn-sm btn-danger" disabled={busyId === a.id} onClick={() => remove(a)}>
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+  );
 
   return (
     <div>
@@ -307,150 +461,25 @@ ${a.employee_name} will see this.`)
               : "No cash has been released to you."}
           </div>
         ) : (
-          <div className="table-scroll">
-            <table className="sticky-head">
-              <thead>
-                <tr>
-                  <SortTh label="Reference" sortKey="reference" toggleSort={toggleSort} arrow={arrow} className="col-nowrap" />
-                  {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
-                  <SortTh label="Released" sortKey="date_released" toggleSort={toggleSort} arrow={arrow} className="col-nowrap" />
-                  <th>Purpose</th>
-                  <SortTh label="Amount" sortKey="amount" toggleSort={toggleSort} arrow={arrow} />
-                  <SortTh label="Liquidated" sortKey="liquidated" toggleSort={toggleSort} arrow={arrow} />
-                  <th>Settled</th>
-                  <SortTh label="Balance" sortKey="outstanding" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 130 }} />
-                  <th>Status</th>
-                  {isHr && <th></th>}
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((a) => (
-                  <tr key={a.id}>
-                    <td className="col-nowrap" style={{ fontVariantNumeric: "tabular-nums" }}>
-                      {a.reference}
-                      {a.report_count > 0 && (
-                        <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>
-                          {a.report_count} report{a.report_count === 1 ? "" : "s"}
-                        </div>
-                      )}
-                    </td>
-                    {isHr && (
-                      <td>
-                        {a.employee_name}
-                        {a.department_name && (
-                          <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>{a.department_name}</div>
-                        )}
-                      </td>
-                    )}
-                    <td className="col-nowrap">{a.date_released}</td>
-                    <td>
-                      {a.purpose || "—"}
-                      {a.cost_center && (
-                        <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>{a.cost_center}</div>
-                      )}
-                    </td>
-                    <td className="col-nowrap">{money(a.amount)}</td>
-                    <td className="col-nowrap">{money(a.liquidated)}</td>
-                    {/* Cash moved to square the advance, whichever way it went.
-                        Without the reimbursement side an overspend that was
-                        paid back read as "fully accounted" against a blank
-                        column, with nothing on the row to say the money had
-                        actually left. */}
-                    <td className="col-nowrap">
-                      {a.returned_amount > 0 || a.reimbursed_amount > 0 ? (
-                        <>
-                          {money(a.returned_amount > 0 ? a.returned_amount : a.reimbursed_amount)}
-                          <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>
-                            {a.returned_amount > 0 ? "handed back" : "paid to employee"}
-                          </div>
-                        </>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    {/* One signed figure read two ways: cash the employee still
-                        holds, or money the company owes them for overspending.
-                        The figure sits on its own line with the direction as a
-                        note beneath, the same shape the expense list uses — as
-                        one run of text it wrapped in a narrow column and the
-                        amount stopped being the thing you saw first. */}
-                    <td>
-                      {a.fullyAccounted ? (
-                        <span className="subtitle">fully accounted</span>
-                      ) : (
-                        <>
-                          <span
-                            className="col-nowrap"
-                            style={{ color: a.dueToCompany > 0 ? "var(--warning)" : "var(--danger)" }}
-                          >
-                            {money(a.dueToCompany > 0 ? a.dueToCompany : a.reimbursementDue)}
-                          </span>
-                          <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>
-                            {a.dueToCompany > 0 ? "due to company" : "due to employee"}
-                          </div>
-                        </>
-                      )}
-                    </td>
-                    <td>
-                      <span className={`badge badge-${STATUS_BADGE[a.status] || "neutral"}`}>{a.status}</span>
-                      {a.decision_note && (
-                        <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>{a.decision_note}</div>
-                      )}
-                      {/* Who accounted for the money. A settled advance is a
-                          balance somebody brought to zero, and the name is the
-                          whole point of recording it — an advance that closed
-                          itself is the thing this is meant to rule out.
-                          Advances settled before this shipped have no name to
-                          show, which is honest: nobody recorded one. */}
-                      {a.settled_by_name && (
-                        <div className="subtitle" style={{ fontSize: 11, margin: 0 }} title={a.settled_at || ""}>
-                          {a.status === "settled" ? "settled by " : "last recorded by "}
-                          {a.settled_by_name}
-                        </div>
-                      )}
-                    </td>
-                    {isHr && (
-                      <td>
-                        <div className="col-actions">
-                          {isHr && a.status === "pending" && (
-                            <>
-                              <button className="btn btn-sm" disabled={busyId === a.id} onClick={() => decide(a, "approved")}>
-                                Approve
-                              </button>
-                              <button className="btn btn-sm btn-secondary" disabled={busyId === a.id} onClick={() => decide(a, "rejected")}>
-                                Reject
-                              </button>
-                            </>
-                          )}
-                          {a.status === "open" && (
-                            <button className="btn btn-sm" disabled={busyId === a.id} onClick={() => openSettle(a)}>
-                              Settle
-                            </button>
-                          )}
-                          {a.status === "settled" && (
-                            <button className="btn btn-sm btn-secondary" disabled={busyId === a.id} onClick={() => setStatus(a, "open")}>
-                              Reopen
-                            </button>
-                          )}
-                          <button className="btn btn-sm btn-secondary" onClick={() => openEdit(a)}>Edit</button>
-                          {isAdmin && a.report_count === 0 && (
-                            <button className="btn btn-sm btn-danger" disabled={busyId === a.id} onClick={() => remove(a)}>
-                              Delete
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          advanceTable(liveAdvances)
         )}
         {advances.length > 0 && sorted.length === 0 && (
           <div className="empty-state">No advances match your search.</div>
         )}
+        {advances.length > 0 && sorted.length > 0 && liveAdvances.length === 0 && (
+          <div className="empty-state">
+            Nothing outstanding — every matching advance is closed. They are listed below.
+          </div>
+        )}
       </div>
+
+      <PastRecords
+        title="Closed advances"
+        count={closedAdvances.length}
+        hint="Settled, cancelled and rejected advances. Nothing here is still owed either way."
+      >
+        {() => advanceTable(closedAdvances)}
+      </PastRecords>
 
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>

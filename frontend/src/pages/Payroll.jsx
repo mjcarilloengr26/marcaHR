@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
+import PastRecords from "../components/PastRecords";
 
 const MONTH_NAMES = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -232,10 +233,103 @@ export default function Payroll() {
   });
   const { sorted, toggleSort, arrow } = useSort(filteredRecords, "period_sort", "desc");
 
-  // Rows a bulk action could actually move. Select-all works off this rather
-  // than every row, so ticking the header never claims to have selected
-  // records that are already paid and will be skipped anyway.
-  const selectableRows = sorted.filter(selectable);
+  // Paid runs are history and are listed apart from the work.
+  //
+  // A paid record and a finalized one looked identical down the whole width of
+  // the table bar a badge at the end, and one got paid twice because of it.
+  // Nothing about a paid row is actionable — there is no button on it — so
+  // keeping it in the working list only gave people something to misread.
+  const activeRecords = sorted.filter(selectable);
+  const paidRecords = sorted.filter((r) => !selectable(r));
+
+  // Rows a bulk action could move are exactly the rows in the live list, so
+  // select-all cannot reach a record that is already paid — it is not there to
+  // reach. Kept as its own name because the header checkbox reads better for
+  // it, and because the two would have to be pulled apart again the day some
+  // paid row becomes actionable.
+  const selectableRows = activeRecords;
+
+  // One set of columns, rendered for both lists. The archive drops the tick
+  // box and the action buttons: there is nothing to select and nothing to
+  // press on a run that has already been paid.
+  const payrollTable = (rows, withActions) => (
+      <table className="sticky-head">
+        <thead>
+          <tr>
+            {isHr && withActions && (
+              <th style={{ width: 32 }}>
+                <input
+                  type="checkbox"
+                  aria-label="Select all records shown"
+                  // Ticks only what is listed, so it respects the search
+                  // filter rather than quietly selecting rows off screen.
+                  checked={selectableRows.length > 0 && selectableRows.every((r) => selectedIds.includes(r.id))}
+                  ref={(el) => {
+                    if (el) {
+                      const n = selectableRows.filter((r) => selectedIds.includes(r.id)).length;
+                      el.indeterminate = n > 0 && n < selectableRows.length;
+                    }
+                  }}
+                  onChange={(e) => setSelectedIds(e.target.checked ? selectableRows.map((r) => r.id) : [])}
+                />
+              </th>
+            )}
+            {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
+            <SortTh label="Period" sortKey="period_sort" toggleSort={toggleSort} arrow={arrow} />
+            <SortTh label="Base" sortKey="base_salary" toggleSort={toggleSort} arrow={arrow} />
+            <SortTh label="Bonuses" sortKey="bonuses" toggleSort={toggleSort} arrow={arrow} />
+            <SortTh label="Overtime" sortKey="overtime_pay" toggleSort={toggleSort} arrow={arrow} />
+            <SortTh label="Night diff" sortKey="night_differential_pay" toggleSort={toggleSort} arrow={arrow} />
+            <SortTh label="Deductions" sortKey="deductions" toggleSort={toggleSort} arrow={arrow} />
+            <SortTh label="Net pay" sortKey="net_pay" toggleSort={toggleSort} arrow={arrow} />
+            <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
+            {isHr && withActions && <th></th>}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id} className={selectedIds.includes(r.id) ? "row-selected" : undefined}>
+              {isHr && withActions && (
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${r.employee_name}`}
+                    disabled={!selectable(r)}
+                    title={selectable(r) ? undefined : "Already paid"}
+                    checked={selectedIds.includes(r.id)}
+                    onChange={(e) =>
+                      setSelectedIds((prev) => (e.target.checked ? [...prev, r.id] : prev.filter((id) => id !== r.id)))
+                    }
+                  />
+                </td>
+              )}
+              {isHr && <td>{r.employee_name}</td>}
+              <td>{periodLabel(r)}</td>
+              <td>{money(r.base_salary)}</td>
+              <td>{money(r.bonuses)}</td>
+              <td>{money(r.overtime_pay)}</td>
+              <td>{money(r.night_differential_pay)}</td>
+              <td>{money(r.deductions)}</td>
+              <td><strong>{money(r.net_pay)}</strong></td>
+              <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
+              {isHr && withActions && (
+                <td style={{ display: "flex", gap: 6 }}>
+                  {r.status === "draft" && (
+                    <>
+                      <button className="btn btn-sm btn-secondary" onClick={() => openEdit(r)}>Edit</button>
+                      <button className="btn btn-sm" onClick={() => setStatus(r.id, "finalized")}>Finalize</button>
+                    </>
+                  )}
+                  {r.status === "finalized" && (
+                    <button className="btn btn-sm" onClick={() => setStatus(r.id, "paid")}>Mark paid</button>
+                  )}
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+  );
 
   return (
     <div>
@@ -334,86 +428,25 @@ export default function Payroll() {
       )}
 
       <div className="card">
-        <table className="sticky-head">
-          <thead>
-            <tr>
-              {isHr && (
-                <th style={{ width: 32 }}>
-                  <input
-                    type="checkbox"
-                    aria-label="Select all records shown"
-                    // Ticks only what is listed, so it respects the search
-                    // filter rather than quietly selecting rows off screen.
-                    checked={selectableRows.length > 0 && selectableRows.every((r) => selectedIds.includes(r.id))}
-                    ref={(el) => {
-                      if (el) {
-                        const n = selectableRows.filter((r) => selectedIds.includes(r.id)).length;
-                        el.indeterminate = n > 0 && n < selectableRows.length;
-                      }
-                    }}
-                    onChange={(e) => setSelectedIds(e.target.checked ? selectableRows.map((r) => r.id) : [])}
-                  />
-                </th>
-              )}
-              {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
-              <SortTh label="Period" sortKey="period_sort" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Base" sortKey="base_salary" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Bonuses" sortKey="bonuses" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Overtime" sortKey="overtime_pay" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Night diff" sortKey="night_differential_pay" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Deductions" sortKey="deductions" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Net pay" sortKey="net_pay" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
-              {isHr && <th></th>}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((r) => (
-              <tr key={r.id} className={selectedIds.includes(r.id) ? "row-selected" : undefined}>
-                {isHr && (
-                  <td>
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${r.employee_name}`}
-                      disabled={!selectable(r)}
-                      title={selectable(r) ? undefined : "Already paid"}
-                      checked={selectedIds.includes(r.id)}
-                      onChange={(e) =>
-                        setSelectedIds((prev) => (e.target.checked ? [...prev, r.id] : prev.filter((id) => id !== r.id)))
-                      }
-                    />
-                  </td>
-                )}
-                {isHr && <td>{r.employee_name}</td>}
-                <td>{periodLabel(r)}</td>
-                <td>{money(r.base_salary)}</td>
-                <td>{money(r.bonuses)}</td>
-                <td>{money(r.overtime_pay)}</td>
-                <td>{money(r.night_differential_pay)}</td>
-                <td>{money(r.deductions)}</td>
-                <td><strong>{money(r.net_pay)}</strong></td>
-                <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
-                {isHr && (
-                  <td style={{ display: "flex", gap: 6 }}>
-                    {r.status === "draft" && (
-                      <>
-                        <button className="btn btn-sm btn-secondary" onClick={() => openEdit(r)}>Edit</button>
-                        <button className="btn btn-sm" onClick={() => setStatus(r.id, "finalized")}>Finalize</button>
-                      </>
-                    )}
-                    {r.status === "finalized" && (
-                      <button className="btn btn-sm" onClick={() => setStatus(r.id, "paid")}>Mark paid</button>
-                    )}
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {payrollTable(activeRecords, true)}
         {records.length === 0 && <div className="empty-state">No payroll records yet.</div>}
-        {records.length > 0 && sorted.length === 0 && <div className="empty-state">No payroll records match your search.</div>}
+        {records.length > 0 && sorted.length === 0 && (
+          <div className="empty-state">No payroll records match your search.</div>
+        )}
+        {records.length > 0 && sorted.length > 0 && activeRecords.length === 0 && (
+          <div className="empty-state">
+            Nothing outstanding — every matching run has been paid. They are listed below.
+          </div>
+        )}
       </div>
 
+      <PastRecords
+        title="Past payroll"
+        count={paidRecords.length}
+        hint="Runs already paid. Kept out of the working list so a paid run cannot be mistaken for one still due."
+      >
+        {() => payrollTable(paidRecords, false)}
+      </PastRecords>
       {editingRecord && (
         <div className="modal-backdrop" onClick={() => setEditingRecord(null)}>
           <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={saveEdit}>

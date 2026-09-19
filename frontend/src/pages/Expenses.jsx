@@ -7,6 +7,7 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { compressImageFile, readFileAsDataUrl } from "../utils/image";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
+import PastRecords from "../components/PastRecords";
 import DecimalInput from "../components/DecimalInput";
 
 // The vocabularies come from the server (GET /expenses/options), which is also
@@ -361,7 +362,19 @@ export default function Expenses() {
   const { sorted, toggleSort, arrow } = useSort(filteredReports, "created_at", "desc");
 
   // Select-all covers what is on screen, not what the search has hidden.
-  const selectableVisible = sorted.filter(canDelete);
+  // Reports still moving, and reports that are done with.
+  //
+  // Reimbursed means the money has been paid out and rejected means it never
+  // will be; neither is waiting on anyone. Listing them beside reports still
+  // being approved is what made a paid payroll run easy to pay twice, and an
+  // expense report is the same shape of mistake.
+  const CLOSED = ["reimbursed", "rejected"];
+  const liveReports = sorted.filter((r) => !CLOSED.includes(r.status));
+  const closedReports = sorted.filter((r) => CLOSED.includes(r.status));
+
+  // Bulk actions work on the live list only, so ticking the header never
+  // reaches into the archive.
+  const selectableVisible = liveReports.filter(canDelete);
   const selectedVisible = selectableVisible.filter((r) => selected.has(r.id));
   const allVisibleSelected = selectableVisible.length > 0 && selectedVisible.length === selectableVisible.length;
 
@@ -450,6 +463,140 @@ export default function Expenses() {
     }
   };
 
+  // One set of columns for both lists. The archive drops the tick box — bulk
+  // actions work on the live list, and select-all reaching silently into
+  // history is exactly the kind of thing this split is for — but keeps the row
+  // actions, so a closed report can still be opened and read.
+  const reportTable = (rows, withBulk) => (
+      <table className="sticky-head">
+        <thead>
+          <tr>
+            {isHr && withBulk && (
+              <th style={{ width: 32 }}>
+                <input
+                  type="checkbox"
+                  aria-label="Select all reports shown"
+                  disabled={selectableVisible.length === 0}
+                  checked={allVisibleSelected}
+                  ref={(el) => {
+                    // Part-selected reads as a dash, so "select all" is never
+                    // mistaken for "everything is already ticked".
+                    if (el) el.indeterminate = selectedVisible.length > 0 && !allVisibleSelected;
+                  }}
+                  onChange={toggleAllVisible}
+                />
+              </th>
+            )}
+            {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
+            <SortTh label="Type" sortKey="expense_type" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 110 }} />
+            {/* The Title column is gone. The title is derived from the line
+                categories now, so it could only ever restate the Category
+                column beside it — which shows the same words and the amounts
+                with them, and shows all of them where a report spans several
+                rather than "Meals + 2 more". The field itself stays: it
+                names the report in notifications, in the search and as the
+                heading when a row is opened. */}
+            {/* Not sortable: a report has several categories, so there is no
+                single value to sort a row by. th-plain keeps it the same
+                colour as the sortable headings either way. */}
+            <th className="th-plain">Category</th>
+            <th className="th-plain" style={{ minWidth: 130 }}>Cost center</th>
+            <th className="th-plain" style={{ minWidth: 130 }}>Project</th>
+            <SortTh label="Cash advance" sortKey="cash_advance_amount" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 130 }} />
+            <SortTh label="Expenses" sortKey="total_expenses" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 100 }} />
+            <SortTh label="Balance" sortKey="balance" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 175 }} />
+            <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
+            <SortTh label="Date created" sortKey="created_at" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 110 }} />
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id} className={selected.has(r.id) ? "row-selected" : undefined}>
+              {isHr && withBulk && (
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${r.title}`}
+                    checked={selected.has(r.id)}
+                    onChange={() => toggleOne(r.id)}
+                  />
+                </td>
+              )}
+              {isHr && <td>{r.employee_name}</td>}
+              <td>{r.expense_type || "—"}</td>
+              {/* What the report was actually spent on, biggest first. A
+                  report is 1.7 categories on average and four at most in the
+                  live data, so the whole split fits without truncation. */}
+              <td>
+                {(r.categories || []).length === 0 ? (
+                  <span className="subtitle">—</span>
+                ) : (
+                  <div className="cat-breakdown">
+                    {r.categories.map((c) => (
+                      <div key={c.category} className="cat-breakdown-row">
+                        <span className="cat-breakdown-name" title={`${c.items} item${c.items === 1 ? "" : "s"}`}>
+                          {c.category}
+                        </span>
+                        <span className="cat-breakdown-amount">{money(c.total)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </td>
+              <td>{r.cost_center || "—"}</td>
+              <td>
+                {r.project_code ? (
+                  <>
+                    <Link to="/projects" className="location-link">{r.project_code}</Link>
+                    <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>{r.project_name}</div>
+                  </>
+                ) : (
+                  <span className="subtitle" style={{ margin: 0 }}>Not project work</span>
+                )}
+              </td>
+              <td>
+                {r.advance_reference ? (
+                  <>
+                    {money(r.advance_amount)}
+                    <div className="subtitle col-nowrap" style={{ fontSize: 11, margin: 0 }}>from {r.advance_reference}</div>
+                  </>
+                ) : (
+                  money(r.cash_advance_amount)
+                )}
+              </td>
+              <td>{money(r.total_expenses)}</td>
+              <td>
+                <BalanceCell report={r} money={money} />
+              </td>
+              <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
+              {/* Stored as UTC "YYYY-MM-DD HH:MM:SS"; only the day is useful
+                  in a list this wide, and the full stamp is on hover. */}
+              <td title={r.created_at || ""} style={{ whiteSpace: "nowrap" }}>
+                {r.created_at ? r.created_at.slice(0, 10) : "—"}
+              </td>
+              <td>
+                <div className="col-actions">
+                  <button className="link-btn" onClick={() => setOpenId(r.id)}>
+                    Open →
+                  </button>
+                  {canDelete(r) && (
+                    <button
+                      className="btn btn-sm btn-danger"
+                      disabled={deletingId === r.id}
+                      onClick={() => deleteReport(r)}
+                    >
+                      {deletingId === r.id ? "Deleting…" : "Delete"}
+                    </button>
+                  )}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+  );
+
   return (
     <div>
       <div className="page-header">
@@ -499,136 +646,23 @@ export default function Expenses() {
       )}
 
       <div className="card">
-        <table className="sticky-head">
-          <thead>
-            <tr>
-              {isHr && (
-                <th style={{ width: 32 }}>
-                  <input
-                    type="checkbox"
-                    aria-label="Select all reports shown"
-                    disabled={selectableVisible.length === 0}
-                    checked={allVisibleSelected}
-                    ref={(el) => {
-                      // Part-selected reads as a dash, so "select all" is never
-                      // mistaken for "everything is already ticked".
-                      if (el) el.indeterminate = selectedVisible.length > 0 && !allVisibleSelected;
-                    }}
-                    onChange={toggleAllVisible}
-                  />
-                </th>
-              )}
-              {isHr && <SortTh label="Employee" sortKey="employee_name" toggleSort={toggleSort} arrow={arrow} />}
-              <SortTh label="Type" sortKey="expense_type" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 110 }} />
-              {/* The Title column is gone. The title is derived from the line
-                  categories now, so it could only ever restate the Category
-                  column beside it — which shows the same words and the amounts
-                  with them, and shows all of them where a report spans several
-                  rather than "Meals + 2 more". The field itself stays: it
-                  names the report in notifications, in the search and as the
-                  heading when a row is opened. */}
-              {/* Not sortable: a report has several categories, so there is no
-                  single value to sort a row by. th-plain keeps it the same
-                  colour as the sortable headings either way. */}
-              <th className="th-plain">Category</th>
-              <th className="th-plain" style={{ minWidth: 130 }}>Cost center</th>
-              <th className="th-plain" style={{ minWidth: 130 }}>Project</th>
-              <SortTh label="Cash advance" sortKey="cash_advance_amount" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 130 }} />
-              <SortTh label="Expenses" sortKey="total_expenses" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 100 }} />
-              <SortTh label="Balance" sortKey="balance" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 175 }} />
-              <SortTh label="Status" sortKey="status" toggleSort={toggleSort} arrow={arrow} />
-              <SortTh label="Date created" sortKey="created_at" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 110 }} />
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((r) => (
-              <tr key={r.id} className={selected.has(r.id) ? "row-selected" : undefined}>
-                {isHr && (
-                  <td>
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${r.title}`}
-                      checked={selected.has(r.id)}
-                      onChange={() => toggleOne(r.id)}
-                    />
-                  </td>
-                )}
-                {isHr && <td>{r.employee_name}</td>}
-                <td>{r.expense_type || "—"}</td>
-                {/* What the report was actually spent on, biggest first. A
-                    report is 1.7 categories on average and four at most in the
-                    live data, so the whole split fits without truncation. */}
-                <td>
-                  {(r.categories || []).length === 0 ? (
-                    <span className="subtitle">—</span>
-                  ) : (
-                    <div className="cat-breakdown">
-                      {r.categories.map((c) => (
-                        <div key={c.category} className="cat-breakdown-row">
-                          <span className="cat-breakdown-name" title={`${c.items} item${c.items === 1 ? "" : "s"}`}>
-                            {c.category}
-                          </span>
-                          <span className="cat-breakdown-amount">{money(c.total)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </td>
-                <td>{r.cost_center || "—"}</td>
-                <td>
-                  {r.project_code ? (
-                    <>
-                      <Link to="/projects" className="location-link">{r.project_code}</Link>
-                      <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>{r.project_name}</div>
-                    </>
-                  ) : (
-                    <span className="subtitle" style={{ margin: 0 }}>Not project work</span>
-                  )}
-                </td>
-                <td>
-                  {r.advance_reference ? (
-                    <>
-                      {money(r.advance_amount)}
-                      <div className="subtitle col-nowrap" style={{ fontSize: 11, margin: 0 }}>from {r.advance_reference}</div>
-                    </>
-                  ) : (
-                    money(r.cash_advance_amount)
-                  )}
-                </td>
-                <td>{money(r.total_expenses)}</td>
-                <td>
-                  <BalanceCell report={r} money={money} />
-                </td>
-                <td><span className={`badge badge-${r.status}`}>{r.status}</span></td>
-                {/* Stored as UTC "YYYY-MM-DD HH:MM:SS"; only the day is useful
-                    in a list this wide, and the full stamp is on hover. */}
-                <td title={r.created_at || ""} style={{ whiteSpace: "nowrap" }}>
-                  {r.created_at ? r.created_at.slice(0, 10) : "—"}
-                </td>
-                <td>
-                  <div className="col-actions">
-                    <button className="link-btn" onClick={() => setOpenId(r.id)}>
-                      Open →
-                    </button>
-                    {canDelete(r) && (
-                      <button
-                        className="btn btn-sm btn-danger"
-                        disabled={deletingId === r.id}
-                        onClick={() => deleteReport(r)}
-                      >
-                        {deletingId === r.id ? "Deleting…" : "Delete"}
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        {reportTable(liveReports, true)}
         {reports.length === 0 && <div className="empty-state">No expense reports yet.</div>}
         {reports.length > 0 && sorted.length === 0 && <div className="empty-state">No reports match your search.</div>}
+        {reports.length > 0 && sorted.length > 0 && liveReports.length === 0 && (
+          <div className="empty-state">
+            Nothing in progress — every matching report is closed. They are listed below.
+          </div>
+        )}
       </div>
+
+      <PastRecords
+        title="Closed reports"
+        count={closedReports.length}
+        hint="Reimbursed and rejected reports. Nothing here is waiting on anybody."
+      >
+        {() => reportTable(closedReports, false)}
+      </PastRecords>
 
       {showForm && (
         <div className="modal-backdrop" onClick={() => setShowForm(false)}>
