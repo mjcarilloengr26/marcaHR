@@ -101,6 +101,14 @@ export default function CashAdvances() {
     setReturning({ advance: a, amount: String(a.dueToCompany || 0) });
   };
 
+  // Whether handing back this much leaves nothing outstanding. Rounded to the
+  // centavo before comparing, since a float subtraction of two exact amounts
+  // can land a hair off zero and would then never count as closed.
+  const closesOut = (advance, totalReturned) => {
+    const left = Math.round((Number(advance.amount) - totalReturned - Number(advance.liquidated)) * 100) / 100;
+    return left === 0;
+  };
+
   const confirmReturn = async (e) => {
     e.preventDefault();
     setBusyId(returning.advance.id);
@@ -109,11 +117,21 @@ export default function CashAdvances() {
       // Cumulative on the server, so what is sent is the running total handed
       // back, not just this instalment.
       const total = Number(returning.advance.returned_amount || 0) + Number(returning.amount || 0);
-      const updated = await api.put(`/cash-advances/${returning.advance.id}`, { returned_amount: total });
+
+      // Money back with nothing left outstanding is the end of the advance, so
+      // it closes here rather than leaving a fully-accounted record sitting in
+      // the open list waiting for a second click nobody knew to make. The
+      // dialog has always said this would "close the advance out"; now it does.
+      const settles = closesOut(returning.advance, total);
+
+      const updated = await api.put(`/cash-advances/${returning.advance.id}`, {
+        returned_amount: total,
+        ...(settles ? { status: "settled" } : {}),
+      });
       setReturning(null);
       setNotice(
-        updated.outstanding === 0
-          ? `${updated.reference} is now fully accounted for — nothing outstanding.`
+        settles
+          ? `${updated.reference} is fully accounted for and settled — nothing outstanding.`
           : `Recorded. ${money(updated.dueToCompany)} still due from ${updated.employee_name}.`
       );
       await load();
@@ -512,7 +530,9 @@ ${a.employee_name} will see this.`)
                   required
                 />
                 <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
-                  Leave as is to close the advance out, or enter less for a partial hand-back.
+                  {closesOut(returning.advance, Number(returning.advance.returned_amount || 0) + Number(returning.amount || 0))
+                    ? "This clears the balance, so the advance will be settled at the same time."
+                    : "Enter less than the full amount for a partial hand-back — the advance stays open for the rest."}
                   {returning.advance.returned_amount > 0 &&
                     ` ${money(returning.advance.returned_amount)} has already been returned.`}
                 </div>
@@ -520,7 +540,11 @@ ${a.employee_name} will see this.`)
               <div className="modal-actions">
                 <button type="button" className="btn btn-secondary" onClick={() => setReturning(null)}>Cancel</button>
                 <button type="submit" className="btn" disabled={busyId === returning.advance.id}>
-                  {busyId === returning.advance.id ? "Recording…" : "Record return"}
+                  {busyId === returning.advance.id
+                    ? "Recording…"
+                    : closesOut(returning.advance, Number(returning.advance.returned_amount || 0) + Number(returning.amount || 0))
+                      ? "Record return and settle"
+                      : "Record return"}
                 </button>
               </div>
             </form>
