@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, downloadFile, getToken } from "../api/client";
+import { api, downloadFile, fetchFileUrl } from "../api/client";
 import CustomerPicker from "../components/CustomerPicker";
 import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
@@ -107,15 +107,8 @@ export default function Billing() {
   const openPreview = async (inv) => {
     setError("");
     try {
-      const res = await fetch(`/api/invoices/${inv.id}/pdf`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      if (!res.ok) throw new Error(`Could not build the PDF (${res.status})`);
-      // Wrapped in a File rather than used as a bare Blob: the object URL is
-      // otherwise a bare UUID, and that is the name the browser's own PDF
-      // viewer offers when someone saves from it.
-      const file = new File([await res.blob()], `${inv.invoice_number}.pdf`, { type: "application/pdf" });
-      setPreview({ invoice: inv, url: URL.createObjectURL(file) });
+      const url = await fetchFileUrl(`/invoices/${inv.id}/pdf`, `${inv.invoice_number}.pdf`);
+      setPreview({ invoice: inv, url });
     } catch (err) {
       setError(err.message);
     }

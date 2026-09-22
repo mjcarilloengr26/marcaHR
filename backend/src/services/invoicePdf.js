@@ -21,8 +21,17 @@ const DOC_TITLE = "STATEMENT OF ACCOUNT";
 const SYSTEM_REMARK =
   "This Statement of Account is computer-generated and does not require a signature. " +
   "It is not a BIR-registered Sales Invoice or Official Receipt.";
-const COL = { desc: 48, qty: 300, unit: 350, price: 400, amount: 490 };
+// Column left edges. The money columns carry a currency code as well as the
+// figure — "PHP 690,000.00" is about 64pt at 9pt Helvetica — and AMOUNT used
+// to be given 51pt, so every total on the document wrapped onto a second line
+// inside its own cell. Description gives up the width instead: it wraps
+// gracefully and a figure does not.
 const RIGHT_EDGE = 547; // A4 width (595) less the right margin
+const COL = { desc: 48, qty: 276, unit: 312, price: 356, amount: 446 };
+const COL_W = { qty: 30, unit: 40, price: 86 };
+// The width of the money column, used by the line items and by the totals
+// beneath them so the figures share one right-hand edge all the way down.
+const AMOUNT_W = RIGHT_EDGE - COL.amount - 6;
 
 // Every figure on the document carries its currency code. A bare number on an
 // invoice that could be either peso or dollar is the kind of ambiguity that
@@ -57,38 +66,132 @@ function invoiceIdentity(branding) {
   };
 }
 
+// Small vector icons for the contact line.
+//
+// Drawn rather than typed. pdfkit's built-in fonts are WinAnsi, which has no
+// envelope, no globe and no emoji of any kind — a character like U+2709 does
+// not survive the encoding, and embedding a symbol font to get four glyphs
+// would put a font file in the repository and a licence question with it.
+// Four paths cost less and cannot go missing.
+function drawIcon(doc, kind, x, y, s, colour) {
+  doc.save().strokeColor(colour).lineWidth(0.6);
+  if (kind === "mail") {
+    const h = s * 0.74;
+    const top = y + (s - h) / 2;
+    doc.rect(x, top, s, h).stroke();
+    // The flap, as the diagonal it actually is.
+    doc.moveTo(x, top).lineTo(x + s / 2, top + h * 0.6).lineTo(x + s, top).stroke();
+  } else if (kind === "globe") {
+    const r = s / 2;
+    doc.circle(x + r, y + r, r).stroke();
+    doc.ellipse(x + r, y + r, r * 0.42, r).stroke();
+    doc.moveTo(x, y + r).lineTo(x + s, y + r).stroke();
+  } else if (kind === "id") {
+    const h = s * 0.76;
+    const top = y + (s - h) / 2;
+    doc.rect(x, top, s, h).stroke();
+    doc.moveTo(x + s * 0.2, top + h * 0.38).lineTo(x + s * 0.8, top + h * 0.38).stroke();
+    doc.moveTo(x + s * 0.2, top + h * 0.66).lineTo(x + s * 0.6, top + h * 0.66).stroke();
+  } else if (kind === "phone") {
+    // A handset is unreadable at 7pt, so this is a mobile: rounded body, a
+    // line for the earpiece. As a plain rectangle it read as an empty box.
+    const w = s * 0.62;
+    const left = x + (s - w) / 2;
+    doc.roundedRect(left, y, w, s, w * 0.22).stroke();
+    doc.moveTo(left + w * 0.3, y + s * 0.18).lineTo(left + w * 0.7, y + s * 0.18).stroke();
+  }
+  doc.restore();
+}
+
+// Contact details as one run across the page, each behind its own icon.
+//
+// They used to be one short line each — email, then website, then TIN, stacked
+// down the left — which left the block four lines deep and narrower than the
+// address above it. On one line it reads as a single strip of contact details
+// and squares off against the address.
+function drawContactLine(doc, x, y, width, parts) {
+  const SIZE = 8.5;
+  const ICON = 7.2;
+  const GAP = 3.5; // icon to its own text
+  const SEP = 11; // between one pair and the next
+  doc.fontSize(SIZE).font("Helvetica").fillColor("#555555");
+
+  let cx = x;
+  let cy = y;
+  for (const part of parts) {
+    const w = doc.widthOfString(part.text);
+    // Wrap the whole pair rather than splitting an icon from its value.
+    if (cx > x && cx + ICON + GAP + w > x + width) {
+      cx = x;
+      cy += SIZE + 5;
+    }
+    drawIcon(doc, part.icon, cx, cy + 0.6, ICON, "#999999");
+    doc.fillColor("#555555").text(part.text, cx + ICON + GAP, cy, { lineBreak: false });
+    cx += ICON + GAP + w + SEP;
+  }
+  return cy + SIZE + 3;
+}
+
+// The letterhead: the mark, then the name under it, then the address, then one
+// line of contact details. The document title sits top right, quieter than the
+// company it comes from.
+const TITLE_SIZE = 11.5;
+const LOGO_BOX = [170, 58];
+
 function drawLetterhead(doc, branding) {
   const identity = invoiceIdentity(branding);
   const logo = logoBuffer(identity.logo);
-  let textLeft = PAGE_MARGIN;
+  const blockWidth = RIGHT_EDGE - PAGE_MARGIN;
 
+  // The mark sits at the top on its own, with the name under it.
+  let y = PAGE_MARGIN;
   if (logo) {
     try {
-      doc.image(logo, PAGE_MARGIN, PAGE_MARGIN, { fit: [110, 55] });
-      textLeft = PAGE_MARGIN + 125;
+      doc.image(logo, PAGE_MARGIN, y, { fit: LOGO_BOX });
+      y += LOGO_BOX[1] + 6;
     } catch {
       // A corrupt image should cost the letterhead its picture, not the
-      // customer their invoice.
-      textLeft = PAGE_MARGIN;
+      // customer their statement.
     }
   }
 
-  doc.fontSize(15).font("Helvetica-Bold").fillColor("#111111");
-  doc.text(identity.name, textLeft, PAGE_MARGIN, { width: 330 });
+  // The title shares the company name's baseline rather than sitting up in the
+  // corner on its own. They are the two things that say what this is and who
+  // it is from, and on one line the eye takes both in at once instead of
+  // finding the second halfway down the page.
+  //
+  // It is measured and placed FIRST, and the name is given only the room left
+  // over. Laying the name out first against a fixed width is what used to
+  // print it straight over the top of the title.
+  doc.fontSize(TITLE_SIZE).font("Helvetica-Bold").fillColor("#111111");
+  const titleW = doc.widthOfString(DOC_TITLE) + 2;
+  const titleLeft = RIGHT_EDGE - titleW;
+  doc.text(DOC_TITLE, titleLeft, y, { width: titleW, align: "right" });
+  const titleBottom = doc.y;
 
-  doc.fontSize(8.5).font("Helvetica").fillColor("#555555");
-  const lines = [
-    branding?.company_address,
-    [branding?.company_phone, branding?.company_email].filter(Boolean).join("  ·  "),
-    branding?.company_website,
-    branding?.company_tin ? `TIN: ${branding.company_tin}` : null,
+  doc.fontSize(13).font("Helvetica-Bold").fillColor("#111111");
+  doc.text(identity.name, PAGE_MARGIN, y, { width: titleLeft - PAGE_MARGIN - 20 });
+  y = Math.max(doc.y, titleBottom) + 3;
+
+  // Below the title's line, so these may run the full width of the page.
+  if (branding?.company_address) {
+    doc.fontSize(8.5).font("Helvetica").fillColor("#555555");
+    doc.text(branding.company_address, PAGE_MARGIN, y, { width: blockWidth });
+    y = doc.y + 3;
+  }
+
+  // The scheme is noise on a printed page — nobody types it — and dropping it
+  // is what lets the details share one line.
+  const site = (branding?.company_website || "").trim().replace(/^https?:\/\//i, "").replace(/\/$/, "");
+  const parts = [
+    branding?.company_phone ? { icon: "phone", text: branding.company_phone } : null,
+    branding?.company_email ? { icon: "mail", text: branding.company_email } : null,
+    site ? { icon: "globe", text: site } : null,
+    branding?.company_tin ? { icon: "id", text: `TIN ${branding.company_tin}` } : null,
   ].filter(Boolean);
-  for (const line of lines) doc.text(line, textLeft, doc.y + 1, { width: 330 });
+  if (parts.length) y = drawContactLine(doc, PAGE_MARGIN, y, blockWidth, parts);
 
-  doc.font("Helvetica-Bold").fillColor("#111111");
-  doc.fontSize(15).text(DOC_TITLE, 340, PAGE_MARGIN, { width: RIGHT_EDGE - 340, align: "right" });
-
-  return Math.max(doc.y, PAGE_MARGIN + 70) + 14;
+  return y + 14;
 }
 
 function drawParties(doc, invoice, customer, top) {
@@ -137,10 +240,10 @@ function drawItemsHeader(doc, y) {
   doc.rect(PAGE_MARGIN, y, RIGHT_EDGE - PAGE_MARGIN, 20).fill("#f4f5f7");
   doc.fontSize(8).font("Helvetica-Bold").fillColor("#555555");
   doc.text("DESCRIPTION", COL.desc + 6, y + 6.5);
-  doc.text("QTY", COL.qty, y + 6.5, { width: 40, align: "right" });
-  doc.text("UNIT", COL.unit, y + 6.5, { width: 40 });
-  doc.text("UNIT PRICE", COL.price, y + 6.5, { width: 80, align: "right" });
-  doc.text("AMOUNT", COL.amount, y + 6.5, { width: RIGHT_EDGE - COL.amount - 6, align: "right" });
+  doc.text("QTY", COL.qty, y + 6.5, { width: COL_W.qty, align: "right" });
+  doc.text("UNIT", COL.unit, y + 6.5, { width: COL_W.unit });
+  doc.text("UNIT PRICE", COL.price, y + 6.5, { width: COL_W.price, align: "right" });
+  doc.text("AMOUNT", COL.amount, y + 6.5, { width: AMOUNT_W, align: "right" });
   return y + 20;
 }
 
@@ -161,10 +264,10 @@ function drawItems(doc, items, startY, currency) {
     }
 
     doc.text(item.description, COL.desc + 6, y + 5, { width: COL.qty - COL.desc - 16 });
-    doc.text(Number(item.quantity).toLocaleString("en-PH"), COL.qty, y + 5, { width: 40, align: "right" });
-    doc.text(item.unit || "", COL.unit, y + 5, { width: 40 });
-    doc.text(amountIn(item.unit_price, currency), COL.price, y + 5, { width: 80, align: "right" });
-    doc.text(amountIn(item.amount, currency), COL.amount, y + 5, { width: RIGHT_EDGE - COL.amount - 6, align: "right" });
+    doc.text(Number(item.quantity).toLocaleString("en-PH"), COL.qty, y + 5, { width: COL_W.qty, align: "right" });
+    doc.text(item.unit || "", COL.unit, y + 5, { width: COL_W.unit });
+    doc.text(amountIn(item.unit_price, currency), COL.price, y + 5, { width: COL_W.price, align: "right" });
+    doc.text(amountIn(item.amount, currency), COL.amount, y + 5, { width: AMOUNT_W, align: "right" });
 
     y += rowHeight;
     doc.moveTo(PAGE_MARGIN, y).lineTo(RIGHT_EDGE, y).strokeColor("#eeeeee").lineWidth(0.5).stroke();
@@ -208,13 +311,19 @@ function drawTotals(doc, invoice, startY) {
   const vat = money2(gross - vatable);
 
   let y = startY + 12;
-  const labelX = 330;
-  const valueX = 430;
+  // The figures sit in the same column as the line items' AMOUNT, so the money
+  // on the page reads down one edge instead of stepping in and out. The label
+  // column is wide enough for "TOTAL AMOUNT DUE" on one line — at 95pt it
+  // wrapped, which put the words and the figure they belong to on different
+  // rows.
+  const LABEL_W = 130;
+  const labelX = COL.amount - 8 - LABEL_W;
+  const valueX = COL.amount;
 
   const row = (label, value, bold) => {
     doc.fontSize(bold ? 11 : 9.5).font(bold ? "Helvetica-Bold" : "Helvetica");
-    doc.fillColor(bold ? "#111111" : "#555555").text(label, labelX, y, { width: 95, align: "right" });
-    doc.fillColor("#111111").text(value, valueX, y, { width: RIGHT_EDGE - valueX, align: "right" });
+    doc.fillColor(bold ? "#111111" : "#555555").text(label, labelX, y, { width: LABEL_W, align: "right" });
+    doc.fillColor("#111111").text(value, valueX, y, { width: AMOUNT_W, align: "right" });
     y += bold ? 20 : 15;
   };
 
@@ -228,19 +337,17 @@ function drawTotals(doc, invoice, startY) {
   return y;
 }
 
+// Notes and payment details, stacked down the left.
+//
+// The payment block used to sit in a right-hand column, directly under the
+// totals. That column is the one the line items push down: a statement with
+// enough items to grow the table moved the totals down onto it, and the two
+// blocks were laid out independently with no knowledge of each other. Down the
+// left, the payment details follow the notes in a single flow and cannot be
+// reached by anything above them.
 function drawFooter(doc, invoice, branding, startY) {
-  const LEFT_W = 250;
-  const RIGHT_X = 310;
-  const RIGHT_W = RIGHT_EDGE - RIGHT_X;
-  let leftBottom = startY + 16;
-  let rightBottom = startY + 16;
-
-  if (invoice.notes) {
-    doc.fontSize(8).font("Helvetica-Bold").fillColor("#888888").text("NOTES", PAGE_MARGIN, leftBottom);
-    doc.fontSize(9).font("Helvetica").fillColor("#444444");
-    doc.text(invoice.notes, PAGE_MARGIN, doc.y + 2, { width: LEFT_W });
-    leftBottom = doc.y;
-  }
+  const LEFT_W = 300;
+  let y = startY + 16;
 
   // Two accounts, labelled and kept apart. An overseas client paying into the
   // peso account, or a local one quoting a SWIFT code, both cost real money to
@@ -262,18 +369,52 @@ function drawFooter(doc, invoice, branding, startY) {
     : { label: "US dollar account", body: usdAcct, swift: swift };
   const account = primary.body || primary.swift ? primary : fallback;
 
+  // Measure the whole block before drawing any of it, and move it to a fresh
+  // page rather than let it break across one. pdfkit paginates on overflow,
+  // which on a long bill of materials left the PAYMENT heading at the foot of
+  // one page and the account number it belongs to at the top of the next —
+  // bank details split in half being the one thing on this document that must
+  // never happen.
+  let needed = 0;
+  if (invoice.notes) {
+    doc.fontSize(9).font("Helvetica");
+    needed += 12 + doc.heightOfString(invoice.notes, { width: LEFT_W }) + 14;
+  }
   if (account.body || account.swift) {
-    doc.fontSize(8).font("Helvetica-Bold").fillColor("#888888").text("PAYMENT", RIGHT_X, rightBottom, { width: RIGHT_W });
-    doc.fontSize(8).font("Helvetica-Bold").fillColor("#555555").text(account.label, RIGHT_X, doc.y + 4, { width: RIGHT_W });
+    needed += 24; // the PAYMENT heading and the account's own label
+    if (account.body) {
+      doc.fontSize(9).font("Helvetica");
+      needed += doc.heightOfString(account.body, { width: LEFT_W });
+    }
+    if (account.swift) needed += 12;
+  }
+  // Room kept below for the centred footer note and the system remark, both of
+  // which sit under whatever this block ends up being.
+  const floorY = doc.page.height - PAGE_MARGIN - 56;
+  if (needed > 0 && y + needed > floorY) {
+    doc.addPage();
+    y = PAGE_MARGIN;
+  }
+
+  if (invoice.notes) {
+    doc.fontSize(8).font("Helvetica-Bold").fillColor("#888888").text("NOTES", PAGE_MARGIN, y);
     doc.fontSize(9).font("Helvetica").fillColor("#444444");
-    if (account.body) doc.text(account.body, RIGHT_X, doc.y + 1, { width: RIGHT_W });
-    if (account.swift) doc.font("Helvetica-Bold").text(`SWIFT/BIC: ${account.swift}`, RIGHT_X, doc.y + 1, { width: RIGHT_W });
-    rightBottom = doc.y;
+    doc.text(invoice.notes, PAGE_MARGIN, doc.y + 2, { width: LEFT_W });
+    y = doc.y + 14;
+  }
+
+  if (account.body || account.swift) {
+    doc.fontSize(8).font("Helvetica-Bold").fillColor("#888888").text("PAYMENT", PAGE_MARGIN, y, { width: LEFT_W });
+    doc.fontSize(8).font("Helvetica-Bold").fillColor("#555555").text(account.label, PAGE_MARGIN, doc.y + 4, { width: LEFT_W });
+    doc.fontSize(9).font("Helvetica").fillColor("#444444");
+    if (account.body) doc.text(account.body, PAGE_MARGIN, doc.y + 1, { width: LEFT_W });
+    if (account.swift) doc.font("Helvetica-Bold").text(`SWIFT/BIC: ${account.swift}`, PAGE_MARGIN, doc.y + 1, { width: LEFT_W });
+    y = doc.y;
   }
 
   if (branding?.invoice_footer) {
     doc.fontSize(8).font("Helvetica").fillColor("#999999");
-    doc.text(branding.invoice_footer, PAGE_MARGIN, Math.max(leftBottom, rightBottom) + 24, {
+    doc.text(branding.invoice_footer, PAGE_MARGIN, y + 24, {
       width: RIGHT_EDGE - PAGE_MARGIN,
       align: "center",
     });

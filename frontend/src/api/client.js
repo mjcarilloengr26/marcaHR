@@ -66,6 +66,32 @@ export const api = {
 // For file downloads (e.g. Excel export) — the JSON-only `request` helper above
 // can't handle a binary response, and the browser needs a real click-to-download
 // flow rather than just the fetched bytes.
+// Fetches a generated file and hands back an object URL to show it in place.
+//
+// Lives here rather than in the page because of where it went wrong: the
+// preview called fetch("/api/...") directly, with no API_BASE. In local dev
+// Vite proxies /api to the backend so it worked; in production the front end
+// is on Vercel and the backend is elsewhere, so that path hit Vercel — whose
+// SPA rewrite answers every unmatched URL with index.html and a 200. The
+// response was therefore "ok", and the viewer was handed a page of HTML
+// labelled application/pdf, which is why it said it could not open the file.
+export async function fetchFileUrl(path, filename) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/api${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const contentType = res.headers.get("content-type") || "";
+    const data = contentType.includes("application/json") ? await res.json() : null;
+    throw new Error((data && data.error) || `Could not build the file (${res.status})`);
+  }
+  const blob = await res.blob();
+  // Wrapped in a File rather than used as a bare Blob: the object URL is
+  // otherwise a bare UUID, and that is the name the browser's own viewer
+  // offers when someone saves from it.
+  return URL.createObjectURL(new File([blob], filename, { type: blob.type || "application/octet-stream" }));
+}
+
 export async function downloadFile(path, fallbackFilename) {
   const token = getToken();
   const res = await fetch(`${API_BASE}/api${path}`, {
