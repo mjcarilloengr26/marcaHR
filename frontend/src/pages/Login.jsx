@@ -75,9 +75,12 @@ export default function Login() {
         {error && <div className="error-banner">{error}</div>}
         <div className="form-row">
           <label>{t("Email")}</label>
+          {/* No placeholder on either field. "admin@example.com" was a
+              leftover from the seed account, and on the one page anybody on
+              the internet can reach it read as a hint at a real login. The
+              labels above already say what each field is. */}
           <input
             type="email"
-            placeholder="admin@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
@@ -92,7 +95,6 @@ export default function Login() {
           <div className="input-with-action">
             <input
               type={showPassword ? "text" : "password"}
-              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required

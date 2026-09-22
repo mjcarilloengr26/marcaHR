@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
-import { compressLogoFile } from "../utils/image";
+import LogoEditor from "../components/LogoEditor";
 
 export default function BrandingSettings() {
   const [logoData, setLogoData] = useState(null);
@@ -83,30 +83,27 @@ export default function BrandingSettings() {
     }
   };
 
-  const onFileChange = async (e) => {
+  // Picking a file opens the editor rather than saving the file as it stands.
+  // Nothing reaches the server until Save is pressed in there, so a wrong file
+  // costs a Cancel instead of an upload and a Remove.
+  //
+  // { file, target } — which of the two logos is being replaced.
+  const [editing, setEditing] = useState(null);
+
+  const pickFor = (target) => (e) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
     setError("");
-    try {
-      const compressed = await compressLogoFile(file);
-      await save(compressed);
-    } catch (err) {
-      setError(err.message);
-    }
+    setEditing({ file, target });
   };
 
-  const onInvoiceFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const saveInvoiceLogo = async (dataUrl) => {
     setError("");
     try {
-      const compressed = await compressLogoFile(file);
-      setInvoiceLogo(compressed);
       const data = await api.put("/branding", {
         logo_data: logoData,
-        invoice_logo_data: compressed,
+        invoice_logo_data: dataUrl,
         ...company,
       });
       setInvoiceLogo(data.invoice_logo_data || null);
@@ -114,6 +111,13 @@ export default function BrandingSettings() {
     } catch (err) {
       setError(err.message);
     }
+  };
+
+  const applyEdited = async (dataUrl) => {
+    const target = editing?.target;
+    setEditing(null);
+    if (target === "invoice") await saveInvoiceLogo(dataUrl);
+    else await save(dataUrl);
   };
 
   return (
@@ -176,7 +180,8 @@ export default function BrandingSettings() {
         ) : (
           <>
             <p className="subtitle" style={{ margin: "0 0 12px" }}>
-              PNG or JPG recommended, square, at least 120×120px. Falls back to the default "M" mark when no logo is set.
+              PNG, JPG or SVG. An SVG is redrawn at 2048px before it is cropped, so it stays as sharp as the
+              vector was. Falls back to the default "M" mark when no logo is set.
             </p>
             <div style={{ display: "flex", alignItems: "center", gap: 20, marginBottom: 16 }}>
               <div
@@ -203,6 +208,19 @@ export default function BrandingSettings() {
                 <button type="button" className="btn" disabled={saving} onClick={() => fileInputRef.current?.click()}>
                   {saving ? "Uploading…" : "Upload logo"}
                 </button>
+                {/* Re-crop what is already saved. Whoever wants the mark
+                    straightened a year from now will not have the file it came
+                    from, and re-uploading is not the same act as adjusting. */}
+                {logoData && (
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    disabled={saving}
+                    onClick={() => setEditing({ src: logoData, target: "app" })}
+                  >
+                    Adjust
+                  </button>
+                )}
                 {logoData && (
                   <button
                     type="button"
@@ -220,7 +238,7 @@ export default function BrandingSettings() {
                   </button>
                 )}
               </div>
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={onFileChange} style={{ display: "none" }} />
+              <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/svg+xml,.svg" onChange={pickFor("app")} style={{ display: "none" }} />
             </div>
           </>
         )}
@@ -280,6 +298,15 @@ export default function BrandingSettings() {
               <button
                 type="button"
                 className="btn btn-sm btn-secondary"
+                onClick={() => setEditing({ src: invoiceLogo, target: "invoice" })}
+              >
+                Adjust
+              </button>
+            )}
+            {invoiceLogo && (
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
                 onClick={async () => {
                   // Saved the moment it is clicked, and the image itself is
                   // gone — the file it came from is on somebody's machine, not
@@ -311,13 +338,15 @@ export default function BrandingSettings() {
             )}
           </div>
           <span className="subtitle" style={{ fontSize: 12, display: "block" }}>
-            PNG or JPG. Appears on the Statement of Account PDF only. Falls back to the application logo when none is set.
+            PNG, JPG or SVG. Appears on the Statement of Account PDF only, which cannot draw a vector — so it is
+            saved as a picture, and the Print size is the one to pick for it. Falls back to the application logo when
+            none is set.
           </span>
           <input
             ref={invoiceFileRef}
             type="file"
-            accept="image/png,image/jpeg"
-            onChange={onInvoiceFileChange}
+            accept="image/png,image/jpeg,image/svg+xml,.svg"
+            onChange={pickFor("invoice")}
             style={{ display: "none" }}
           />
         </div>
@@ -506,6 +535,21 @@ export default function BrandingSettings() {
           {savingCompany ? "Saving…" : "Save company details"}
         </button>
       </div>
+
+      {/* The app mark is square everywhere it appears — the sidebar header and
+          the sign-in card — while the invoice logo is drawn into a 110×55 box
+          on the Statement of Account, so each opens on the shape it is going
+          to live in. Either can be changed in the editor. */}
+      {editing && (
+        <LogoEditor
+          file={editing.file}
+          src={editing.src}
+          title={editing.target === "invoice" ? "Adjust invoice logo" : "Adjust application logo"}
+          initialAspect={editing.target === "invoice" ? 2 : 1}
+          onCancel={() => setEditing(null)}
+          onApply={applyEdited}
+        />
+      )}
     </div>
   );
 }
