@@ -3,6 +3,7 @@ const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { invoiceForPdf, renderInvoicePdf } = require("../services/invoicePdf");
+const { snapshotRate } = require("../services/fxSnapshot");
 const { sendReadiness, sendInvoiceEmail } = require("../services/invoiceSend");
 const { logRequestEvent } = require("../services/auditLog");
 const { resolveCustomer, resolveCustomerForUpdate } = require("../services/customerRef");
@@ -191,12 +192,15 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
         .json({ error: `Amount exceeds the order's remaining unbilled balance of ${info.remaining.toLocaleString()}` });
     }
   }
+  // Read once, here, and never again for this statement.
+  const fx = await snapshotRate("USD", "PHP");
+
   try {
     const info = await db
       .prepare(
         `INSERT INTO invoices (invoice_number, order_id, customer_name, customer_id, amount, status, currency, issue_date, due_date, notes,
-                               project_id, created_by, status_changed_by, status_changed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?, ?, ?)`
+                               project_id, created_by, status_changed_by, status_changed_at, fx_rate, fx_rate_date)
+         VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         invoice_number,
@@ -212,7 +216,9 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
         project_id || null,
         req.user.employee_id || null,
         req.user.employee_id || null,
-        nowStamp()
+        nowStamp(),
+        fx.rate,
+        fx.date
       );
     res.status(201).json(withVat(await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(info.lastInsertRowid)));
   } catch (err) {
@@ -236,13 +242,15 @@ router.post("/from-order/:orderId", requireAuth, requireRole("admin", "hr"), asy
   // statement on the same order needs a distinguishing suffix to avoid colliding
   // with the first (invoice_number is the column that's actually unique).
   const invoiceCount = (await db.prepare("SELECT COUNT(*) AS c FROM invoices WHERE order_id = ?").get(order.id)).c;
+  const orderFx = await snapshotRate("USD", "PHP");
   const invoiceNumber = invoiceCount === 0 ? `SOA-${order.order_number}` : `SOA-${order.order_number}-${invoiceCount + 1}`;
 
   try {
     const insertResult = await db
       .prepare(
-        `INSERT INTO invoices (invoice_number, order_id, customer_name, customer_id, amount, status, issue_date, project_id)
-         VALUES (?, ?, ?, ?, ?, 'draft', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'), ?)`
+        `INSERT INTO invoices (invoice_number, order_id, customer_name, customer_id, amount, status, issue_date, project_id,
+                               fx_rate, fx_rate_date)
+         VALUES (?, ?, ?, ?, ?, 'draft', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'), ?, ?, ?)`
       )
       .run(
         invoiceNumber,
@@ -250,7 +258,9 @@ router.post("/from-order/:orderId", requireAuth, requireRole("admin", "hr"), asy
         order.customer_name,
         order.customer_id || (await resolveCustomerId(null, order.customer_name)),
         remaining,
-        order.project_id || null
+        order.project_id || null,
+        orderFx.rate,
+        orderFx.date
       );
     res.status(201).json(withVat(await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(insertResult.lastInsertRowid)));
   } catch (err) {

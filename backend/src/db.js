@@ -1437,6 +1437,16 @@ async function ensureCustomerLinks() {
   // from the app-wide currency setting, because both kinds are raised side by
   // side and an invoice's currency must not change when a setting does.
   await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'PHP'`);
+  // The USD/PHP rate on the day the statement was raised, frozen there.
+  //
+  // A statement in a foreign currency is a commercial record, not a live
+  // readout: re-reading today's rate would make the peso equivalent printed
+  // beside it drift daily, and two people opening the same statement a week
+  // apart would see different figures. Taken once at creation and never
+  // updated. Null on statements raised before this shipped, and on any raised
+  // while no rate was on file.
+  await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fx_rate NUMERIC(18,6)`);
+  await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS fx_rate_date TEXT`);
 
   // An invoice is reviewed before it goes out. "approved" is the state between
   // a draft anyone can edit and a document that has reached the customer:

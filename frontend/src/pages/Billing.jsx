@@ -12,7 +12,7 @@ const emptyForm = { invoice_number: "", order_id: "", customer_name: "", custome
 const STATUSES = ["draft", "approved", "sent", "paid", "overdue", "cancelled"];
 
 export default function Billing() {
-  const { money } = useAppSettings();
+  const { money, currency_code: appCurrency } = useAppSettings();
   const { user } = useAuth();
   // Destroying a record is an administrator's act — see the delete routes.
   const isAdmin = user?.role === "admin";
@@ -565,6 +565,56 @@ export default function Billing() {
                 new one if the charges need to change.
               </div>
             )}
+
+            {/* Changing the currency relabels the figures; it does not convert
+                them. Opportunities and orders are held in pesos on purpose so
+                the reporting stays in one currency — which means a statement
+                raised from an order arrives carrying peso amounts, and
+                switching it to USD would bill nine million dollars where nine
+                million pesos was meant.
+
+                The rate shown is the one taken the day this statement was
+                raised, stored on it and never refreshed. A live rate would
+                make the figure drift daily, so two people opening the same
+                statement a week apart would read different numbers off it —
+                and the sum a customer was quoted has to stay the sum they were
+                quoted. It is a figure to work from, never applied: what a
+                customer is charged is a commercial decision, not a mid-market
+                rate. */}
+            {(lines.invoice.currency || "PHP") !== (appCurrency || "PHP") &&
+              (() => {
+                const total = lines.rows.length
+                  ? lines.rows.reduce((n, r) => n + lineTotal(r), 0)
+                  : Number(lines.invoice.amount) || 0;
+                const rate = Number(lines.invoice.fx_rate) || 0;
+                return (
+                  <div className="warning-banner" style={{ marginBottom: 12 }}>
+                    <strong>These amounts are still in {appCurrency || "PHP"} — nothing has been converted.</strong>
+                    {lines.invoice.order_number
+                      ? ` They came across from order ${lines.invoice.order_number}, which is held in ${appCurrency || "PHP"}.`
+                      : ""}{" "}
+                    Changing the currency relabels the figures, so retype each unit price at its{" "}
+                    {lines.invoice.currency} value before approving.
+                    {rate > 0 ? (
+                      <div style={{ marginTop: 6 }}>
+                        At {rate.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{" "}
+                        {appCurrency || "PHP"} to 1 USD — the rate on{" "}
+                        {lines.invoice.fx_rate_date || "the day this statement was raised"}, held for this statement —
+                        the {money(total)} below comes to about{" "}
+                        <strong>
+                          USD {(total / rate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </strong>
+                        .
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 6 }}>
+                        No exchange rate was on file the day this statement was raised, so there is no peso equivalent to
+                        offer.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
             <table className="sticky-head">
               <thead>
