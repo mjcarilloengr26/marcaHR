@@ -7,6 +7,8 @@ import { useAppSettings } from "../context/AppSettingsContext";
 import { compressImageFile, readFileAsDataUrl } from "../utils/image";
 import { useSort } from "../hooks/useSort";
 import SortTh from "../components/SortTh";
+import ResizableTh, { useColumnWidth } from "../components/ResizableTh";
+import DuplicateExpenses from "../components/DuplicateExpenses";
 import PastRecords from "../components/PastRecords";
 import DecimalInput from "../components/DecimalInput";
 
@@ -368,6 +370,12 @@ export default function Expenses() {
   // will be; neither is waiting on anyone. Listing them beside reports still
   // being approved is what made a paid payroll run easy to pay twice, and an
   // expense report is the same shape of mistake.
+  // Owned here, not inside the heading: the table scrolls sideways and is laid
+  // out automatically, so a width on the <th> is only a suggestion. The number
+  // has to reach the cell contents to bind, which it does through a custom
+  // property set on the table.
+  const projectCol = useColumnWidth("expenses.project.width", { defaultWidth: 190, min: 110, max: 480 });
+
   const CLOSED = ["reimbursed", "rejected"];
   const liveReports = sorted.filter((r) => !CLOSED.includes(r.status));
   const closedReports = sorted.filter((r) => CLOSED.includes(r.status));
@@ -468,7 +476,12 @@ export default function Expenses() {
   // history is exactly the kind of thing this split is for — but keeps the row
   // actions, so a closed report can still be opened and read.
   const reportTable = (rows, withBulk) => (
-      <table className="sticky-head">
+    // The table is wider than the card it sits in — eleven columns, several of
+    // them free text — so it scrolls sideways inside the card rather than
+    // running out past its right edge over bare page background. Same wrapper
+    // the other wide tables in the app already use.
+    <div className="table-scroll">
+      <table className="sticky-head" style={{ "--project-col": `${projectCol.width}px` }}>
         <thead>
           <tr>
             {isHr && withBulk && (
@@ -501,7 +514,13 @@ export default function Expenses() {
                 colour as the sortable headings either way. */}
             <th className="th-plain">Category</th>
             <th className="th-plain" style={{ minWidth: 130 }}>Cost center</th>
-            <th className="th-plain" style={{ minWidth: 130 }}>Project</th>
+            {/* Project titles here are full sentences — "Supply of Scada System
+                for the Control and Monitoring of 45MVA Diesel Powerplant BIP-
+                Phase 2 & 3" — and at 130px one of them ran to five lines and
+                set the height of every other cell in the row. The column is
+                given room by default and can be dragged to whatever suits the
+                screen it is being read on. */}
+            <ResizableTh label="Project" column={projectCol} />
             <SortTh label="Cash advance" sortKey="cash_advance_amount" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 130 }} />
             <SortTh label="Expenses" sortKey="total_expenses" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 100 }} />
             <SortTh label="Balance" sortKey="balance" toggleSort={toggleSort} arrow={arrow} style={{ minWidth: 175 }} />
@@ -546,14 +565,26 @@ export default function Expenses() {
               </td>
               <td>{r.cost_center || "—"}</td>
               <td>
+                <div style={{ maxWidth: "var(--project-col)" }}>
                 {r.project_code ? (
                   <>
                     <Link to="/projects" className="location-link">{r.project_code}</Link>
-                    <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>{r.project_name}</div>
+                    {/* Two lines, then an ellipsis, with the whole title on
+                        hover. The code above it is the identifier people act
+                        on; the name is there to recognise it by, and two lines
+                        is enough to do that. */}
+                    <div
+                      className="subtitle clamp-2"
+                      style={{ fontSize: 12, margin: 0 }}
+                      title={r.project_name || ""}
+                    >
+                      {r.project_name}
+                    </div>
                   </>
                 ) : (
                   <span className="subtitle" style={{ margin: 0 }}>Not project work</span>
                 )}
+                </div>
               </td>
               <td>
                 {r.advance_reference ? (
@@ -595,6 +626,7 @@ export default function Expenses() {
           ))}
         </tbody>
       </table>
+    </div>
   );
 
   return (
@@ -655,6 +687,11 @@ export default function Expenses() {
           </div>
         )}
       </div>
+
+      {/* Above the archive and below the working list: it is a thing to act on,
+          not history. HR and admin only — it shows other people's claims side
+          by side, which is not something an employee should be able to browse. */}
+      {isHr && <DuplicateExpenses onChanged={load} />}
 
       <PastRecords
         title="Closed reports"

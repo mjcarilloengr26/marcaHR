@@ -1798,3 +1798,37 @@ body.snapshot-tv .content {
   font-style: italic;
   white-space: nowrap;
 }
+
+/* A grip on a resizable table heading. Same idea as the Gantt chart's, sized
+   for a table header rather than a chart column: the visible line sits in the
+   middle of a wider hit area, so it is easy to catch without drawing a thick
+   rule down the table. */
+.col-resizer {
+  position: absolute;
+  top: 0;
+  right: -4px;
+  width: 9px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  z-index: 3;
+  background: linear-gradient(to right, transparent 3px, var(--border) 3px, var(--border) 5px, transparent 5px);
+}
+.col-resizer:hover,
+.col-resizer:focus-visible {
+  background: linear-gradient(to right, transparent 3px, var(--primary) 3px, var(--primary) 5px, transparent 5px);
+  outline: none;
+}
+
+/* A cell whose content is allowed to wrap, but only so far. Anything past the
+   limit is cut with an ellipsis and the whole value lives in the title
+   attribute — a project named "Supply of Scada System for the Control and
+   Monitoring of 45MVA Diesel Powerplant BIP- Phase 2 & 3" otherwise ran to
+   five lines and set the height of every row beside it. */
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}

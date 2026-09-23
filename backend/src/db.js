@@ -1627,6 +1627,60 @@ async function ensureEmployeeStandingDeductions() {
   await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS supplier_address TEXT");
   await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS supplier_tin TEXT");
 
+  // Duplicate-receipt detection.
+  //
+  // A fingerprint of the receipt image, which is the only signal here that
+  // nobody can edit around: the vendor name can be spelled differently, the
+  // amount retyped and the OR number left blank, but the same photograph
+  // filed twice hashes the same both times. The other checks catch the honest
+  // mistake of keying one receipt in twice; this one catches somebody trying.
+  await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS receipt_hash TEXT");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_expense_items_receipt_hash ON expense_items(receipt_hash)");
+  // An official receipt number is unique per vendor by law, so the pair is
+  // what identifies a receipt.
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS idx_expense_items_vendor_ref ON expense_items(supplier_name, receipt_ref)"
+  );
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_expense_items_vendor_date ON expense_items(supplier_name, expense_date)");
+
+  // What HR decided about a flagged pair.
+  //
+  // The check finds candidates; it does not know the answer. Two taxi rides at
+  // the same fare on the same day are genuinely identical and genuinely both
+  // real, so a cleared cluster has to stay cleared rather than reappearing
+  // every time the page is opened — and who cleared it, and why, is exactly
+  // the audit trail a duplicate claim needs.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_duplicate_reviews (
+      id SERIAL PRIMARY KEY,
+      cluster_key TEXT NOT NULL UNIQUE,
+      verdict TEXT NOT NULL CHECK (verdict IN ('cleared','confirmed')),
+      note TEXT,
+      decided_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      decided_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+    )
+  `);
+
+  // Fingerprint whatever is already on file. Runs once — afterwards every
+  // upload arrives with its hash already computed.
+  try {
+    const pending = await pool.query(
+      "SELECT id, receipt_data FROM expense_items WHERE receipt_data IS NOT NULL AND receipt_hash IS NULL"
+    );
+    if (pending.rows.length) {
+      const { createHash } = require("crypto");
+      for (const row of pending.rows) {
+        const hash = createHash("sha256").update(String(row.receipt_data)).digest("hex");
+        await pool.query("UPDATE expense_items SET receipt_hash = $1 WHERE id = $2", [hash, row.id]);
+      }
+      console.log(`Fingerprinted ${pending.rows.length} existing receipt image(s) for duplicate checking`);
+    }
+  } catch (err) {
+    // A backfill that cannot run must not stop the app starting; the checks
+    // simply see fewer images until it does.
+    console.warn("Could not fingerprint existing receipts:", err.message);
+  }
+
   // The company this installation belongs to. Kept in the database rather
   // than hardcoded so the same build can be deployed for a different
   // company without touching the source.

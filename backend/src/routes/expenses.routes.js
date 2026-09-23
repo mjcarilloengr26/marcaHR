@@ -1,3 +1,5 @@
+const { createHash } = require("crypto");
+const { findDuplicates } = require("../services/duplicateExpenses");
 const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole, requireSelfOrRole } = require("../middleware/auth");
@@ -98,14 +100,18 @@ const { EXPENSE_TYPES, TITLES, CATEGORIES, resolveChoice } = require("../service
 // request — a single field shouldn't be allowed to approach that cap.
 function parseReceipt(body) {
   const data = body?.receipt_data;
-  if (!data) return { name: null, type: null, data: null };
+  if (!data) return { name: null, type: null, data: null, hash: null };
   if (typeof data !== "string" || !data.startsWith("data:") || data.length > 6_000_000) {
-    return { name: null, type: null, data: null };
+    return { name: null, type: null, data: null, hash: null };
   }
   return {
     name: typeof body.receipt_name === "string" ? body.receipt_name.slice(0, 255) : null,
     type: typeof body.receipt_type === "string" ? body.receipt_type.slice(0, 100) : null,
     data,
+    // Fingerprinted as it arrives, so the duplicate check never has to read
+    // every stored image back to compare them. The same photograph filed twice
+    // hashes the same however the fields around it were typed.
+    hash: createHash("sha256").update(data).digest("hex"),
   };
 }
 
@@ -317,6 +323,66 @@ router.get(
   })
 );
 
+// Lines that look like the same receipt claimed twice, for somebody to judge.
+//
+// HR and admin only: it names other people's claims side by side, which is not
+// something an employee should be able to browse. Declared before "/:id" for
+// the same reason "options" is.
+router.get(
+  "/duplicates",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    res.json(await findDuplicates());
+  })
+);
+
+// The verdict on one cluster. "cleared" means a human looked and these are
+// genuinely separate purchases; "confirmed" means they are not, and the
+// reports themselves are then rejected in the ordinary way — this records the
+// finding, it does not reject anything on its own.
+router.put(
+  "/duplicates/:key/review",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const verdict = String(req.body?.verdict || "");
+    if (!["cleared", "confirmed"].includes(verdict)) {
+      return res.status(400).json({ error: "verdict must be cleared or confirmed" });
+    }
+    const note = String(req.body?.note || "").trim() || null;
+    const key = String(req.params.key || "").slice(0, 400);
+    if (!key) return res.status(400).json({ error: "Which cluster?" });
+
+    await db
+      .prepare(
+        `INSERT INTO expense_duplicate_reviews (cluster_key, verdict, note, decided_by)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT (cluster_key) DO UPDATE SET verdict = excluded.verdict, note = excluded.note,
+           decided_by = excluded.decided_by,
+           decided_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')`
+      )
+      .run(key, verdict, note, req.user.employee_id || null);
+
+    await logRequestEvent(req, "review_duplicate_expenses", {
+      entityType: "expense_duplicate",
+      details: { cluster_key: key, verdict, note },
+    });
+    res.json(await findDuplicates());
+  })
+);
+
+// Undo a verdict — a decision made in haste, or new information.
+router.delete(
+  "/duplicates/:key/review",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    await db.prepare("DELETE FROM expense_duplicate_reviews WHERE cluster_key = ?").run(String(req.params.key || ""));
+    res.json(await findDuplicates());
+  })
+);
+
 router.get(
   "/:id",
   requireAuth,
@@ -518,12 +584,12 @@ router.post(
       for (const l of lines) {
         await db
           .prepare(
-            `INSERT INTO expense_items (report_id, expense_date, category, description, amount, receipt_ref, receipt_name, receipt_type, receipt_data, supplier_name, supplier_address, supplier_tin)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            `INSERT INTO expense_items (report_id, expense_date, category, description, amount, receipt_ref, receipt_name, receipt_type, receipt_data, receipt_hash, supplier_name, supplier_address, supplier_tin)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           )
           .run(
             reportId, l.expense_date, l.category, l.description, l.amount, l.receipt_ref,
-            l.receipt.name, l.receipt.type, l.receipt.data,
+            l.receipt.name, l.receipt.type, l.receipt.data, l.receipt.hash,
             l.supplier_name, l.supplier_address, l.supplier_tin
           );
       }
@@ -635,8 +701,8 @@ router.post(
     const receipt = parseReceipt(body);
     const info = await db
       .prepare(
-        `INSERT INTO expense_items (report_id, expense_date, category, description, amount, receipt_ref, receipt_name, receipt_type, receipt_data, supplier_name, supplier_address, supplier_tin)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO expense_items (report_id, expense_date, category, description, amount, receipt_ref, receipt_name, receipt_type, receipt_data, receipt_hash, supplier_name, supplier_address, supplier_tin)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         req.expenseReport.id,
@@ -648,6 +714,7 @@ router.post(
         receipt.name,
         receipt.type,
         receipt.data,
+        receipt.hash,
         supplier_name?.trim() || null,
         supplier_address?.trim() || null,
         supplier_tin?.trim() || null
@@ -744,7 +811,8 @@ router.put(
                 receipt_ref = ?, supplier_name = ?, supplier_address = ?, supplier_tin = ?,
                 receipt_name = CASE WHEN ?::boolean THEN receipt_name ELSE ? END,
                 receipt_type = CASE WHEN ?::boolean THEN receipt_type ELSE ? END,
-                receipt_data = CASE WHEN ?::boolean THEN receipt_data ELSE ? END
+                receipt_data = CASE WHEN ?::boolean THEN receipt_data ELSE ? END,
+                receipt_hash = CASE WHEN ?::boolean THEN receipt_hash ELSE ? END
          WHERE id = ?`
       )
       .run(
@@ -759,6 +827,7 @@ router.put(
         keepReceipt, photo.name,
         keepReceipt, photo.type,
         keepReceipt, photo.data,
+        keepReceipt, photo.hash,
         req.params.itemId
       );
 
