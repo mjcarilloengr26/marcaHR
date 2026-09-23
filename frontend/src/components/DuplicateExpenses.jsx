@@ -60,6 +60,31 @@ export default function DuplicateExpenses({ onChanged }) {
     }
   };
 
+  // Asking is a step before deciding, not a decision. The cluster stays open
+  // and simply says who it is waiting on.
+  const ask = async (cluster) => {
+    const names = [...new Set(cluster.items.map((i) => i.employee_name))];
+    if (
+      !confirm(
+        `Email ${names.join(" and ")} to ask about ${cluster.items.length} lines?\n\n` +
+          "They are shown only their own lines, told that nothing has been rejected, and asked to reply."
+      )
+    ) {
+      return;
+    }
+    setBusy(cluster.key);
+    setError("");
+    try {
+      const res = await api.post(`/expenses/duplicates/${encodeURIComponent(cluster.key)}/ask`, {});
+      setData(res);
+      if (res.failed?.length) setError(`Some messages did not send — ${res.failed.join("; ")}`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const reopen = async (cluster) => {
     setBusy(cluster.key);
     setError("");
@@ -75,6 +100,8 @@ export default function DuplicateExpenses({ onChanged }) {
   // Nothing found and nothing ever judged: no card at all. An empty control is
   // noise on every other day of the year.
   if (!data || data.clusters.length === 0) return null;
+
+  const waiting = data.clusters.filter((c) => !c.review && c.asked).length;
 
   return (
     <div className="card" style={{ marginTop: 16 }}>
@@ -92,6 +119,7 @@ export default function DuplicateExpenses({ onChanged }) {
         ) : (
           <span className="badge badge-approved">all reviewed</span>
         )}
+        {waiting > 0 && <span className="badge badge-draft">{waiting} awaiting a reply</span>}
         {data.exposure > 0 && (
           <span className="subtitle" style={{ margin: 0, fontSize: 12 }}>
             {money(data.exposure)} at stake
@@ -191,7 +219,15 @@ export default function DuplicateExpenses({ onChanged }) {
                     </button>
                   </div>
                 ) : (
-                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      disabled={busy === c.key}
+                      onClick={() => ask(c)}
+                    >
+                      {c.asked ? "Ask again" : "Ask the employee"}
+                    </button>
                     <button
                       type="button"
                       className="btn btn-sm btn-secondary"
@@ -208,8 +244,10 @@ export default function DuplicateExpenses({ onChanged }) {
                     >
                       Confirm duplicate
                     </button>
-                    <span className="subtitle" style={{ margin: 0, fontSize: 11, alignSelf: "center" }}>
-                      Confirming records the finding — reject the report itself on its own row.
+                    <span className="subtitle" style={{ margin: 0, fontSize: 11 }}>
+                      {c.asked
+                        ? `Asked ${c.asked.to} on ${c.asked.at}${c.asked.by ? ` by ${c.asked.by}` : ""} — waiting on a reply.`
+                        : "Confirming records the finding — reject the report itself on its own row."}
                     </span>
                   </div>
                 )}

@@ -1654,12 +1654,27 @@ async function ensureEmployeeStandingDeductions() {
     CREATE TABLE IF NOT EXISTS expense_duplicate_reviews (
       id SERIAL PRIMARY KEY,
       cluster_key TEXT NOT NULL UNIQUE,
-      verdict TEXT NOT NULL CHECK (verdict IN ('cleared','confirmed')),
+      -- Null while the employee has been asked to explain but nobody has
+      -- decided yet. Asking is a step before the verdict, not a verdict.
+      verdict TEXT CHECK (verdict IN ('cleared','confirmed')),
       note TEXT,
       decided_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
       decided_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
     )
   `);
+
+  // Asking the employee to explain comes before deciding, so a row can exist
+  // with no verdict on it yet. Installs that got the table before this need
+  // the constraint relaxed — CREATE TABLE IF NOT EXISTS will not do it.
+  await pool.query("ALTER TABLE expense_duplicate_reviews ALTER COLUMN verdict DROP NOT NULL");
+  await pool.query("ALTER TABLE expense_duplicate_reviews ADD COLUMN IF NOT EXISTS asked_at TEXT");
+  await pool.query(
+    "ALTER TABLE expense_duplicate_reviews ADD COLUMN IF NOT EXISTS asked_by INTEGER REFERENCES employees(id) ON DELETE SET NULL"
+  );
+  // Who it actually went to, kept as text: the point of recording it is to be
+  // able to say later that the question was put, and to whom, even if the
+  // employee record is gone by then.
+  await pool.query("ALTER TABLE expense_duplicate_reviews ADD COLUMN IF NOT EXISTS asked_to TEXT");
 
   // Fingerprint whatever is already on file. Runs once — afterwards every
   // upload arrives with its hash already computed.

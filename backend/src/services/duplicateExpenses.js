@@ -130,7 +130,16 @@ async function findDuplicates() {
     db.prepare(QUERIES[1]).all(),
     db.prepare(QUERIES[2]).all(),
     db.prepare(QUERIES[34]).all(),
-    db.prepare("SELECT cluster_key, verdict, note, decided_at, decided_by FROM expense_duplicate_reviews").all(),
+    db
+      .prepare(
+        `SELECT r.cluster_key, r.verdict, r.note, r.decided_at, r.asked_at, r.asked_to,
+                (d.first_name || ' ' || d.last_name) AS decided_by_name,
+                (a.first_name || ' ' || a.last_name) AS asked_by_name
+         FROM expense_duplicate_reviews r
+         LEFT JOIN employees d ON d.id = r.decided_by
+         LEFT JOIN employees a ON a.id = r.asked_by`
+      )
+      .all(),
   ]);
 
   const decided = new Map(reviews.map((r) => [r.cluster_key, r]));
@@ -164,8 +173,11 @@ async function findDuplicates() {
   collect(3, tier34, (items) => items.every((i) => !String(i.receipt_ref || "").trim()));
 
   for (const c of clusters) {
-    const review = decided.get(c.key);
-    c.review = review || null;
+    const row = decided.get(c.key);
+    // Asked and decided are different states. A cluster the employee has been
+    // asked about is still open — it is waiting on them, not on nobody.
+    c.review = row?.verdict ? row : null;
+    c.asked = row?.asked_at ? { at: row.asked_at, to: row.asked_to, by: row.asked_by_name } : null;
   }
 
   // Certain first, then by what is at stake. A cleared cluster drops to the

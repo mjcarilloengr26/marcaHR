@@ -398,7 +398,57 @@ const notifyStaleDeals = guarded(async ({ deals, thresholdDays, companyLabel }) 
   }
 });
 
+// Asking an employee to explain lines that look like the same receipt twice.
+//
+// Deliberately NOT wrapped in guarded(). Every other notification here is
+// fire-and-forget — nobody is waiting to hear whether the leave email went.
+// This one is sent because somebody pressed a button and is standing there, so
+// a failure has to reach them rather than being logged and swallowed.
+//
+// The tone matters. At this point nothing is proven: it is two lines that look
+// alike, and the commonest answer is a good one. So the message asks rather
+// than accuses, shows exactly which lines are in question so the employee can
+// actually answer, and says plainly that nothing has been rejected.
+async function askAboutDuplicateExpenses({ employee, items, asker, replyTo }) {
+  if (!employee?.email) throw new Error(`${fullName(employee)} has no email address on file`);
+
+  const company = await companyName();
+  const lines = items.map(
+    (i) =>
+      `  • ${i.expense_date}  ${i.supplier_name || "—"}  ${i.description || i.category || ""}` +
+      `  ${Number(i.amount).toLocaleString("en-PH", { minimumFractionDigits: 2 })}` +
+      `${i.receipt_ref ? `  (receipt ${i.receipt_ref})` : "  (no receipt number)"}` +
+      `  — on "${i.title}", ${i.status}`
+  );
+
+  const text = [
+    `Hi ${employee.first_name},`,
+    "",
+    "These expense lines look alike, and we want to check whether they are two separate purchases or the same receipt entered twice:",
+    "",
+    ...lines,
+    "",
+    "Could you reply and let us know? If they are genuinely separate — two trips on the same day, or a charge and a fee from the same supplier — just say so and we will note it and close it off.",
+    "",
+    "Nothing has been rejected and no action is needed beyond your reply.",
+    "",
+    `Asked by ${asker || "the finance team"} · ${company}`,
+  ].join("\n");
+
+  await sendMail({
+    to: employee.email,
+    // The person who asked gets a copy, so the question and the answer sit in
+    // the same place for whoever reviews this later.
+    subject: `Quick question about an expense claim — ${items[0]?.supplier_name || "duplicate check"}`,
+    text,
+    replyTo: replyTo || undefined,
+  });
+
+  return employee.email;
+}
+
 module.exports = {
+  askAboutDuplicateExpenses,
   notifyLeaveSubmitted,
   notifyLeaveStatusChanged,
   notifyLeaveAllowanceExhausted,

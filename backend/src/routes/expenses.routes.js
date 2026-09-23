@@ -1,5 +1,6 @@
 const { createHash } = require("crypto");
 const { findDuplicates } = require("../services/duplicateExpenses");
+const { askAboutDuplicateExpenses } = require("../notifications");
 const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole, requireSelfOrRole } = require("../middleware/auth");
@@ -323,6 +324,17 @@ router.get(
   })
 );
 
+// Who is asking, named rather than left anonymous: "asked by Mark" answers the
+// question the recipient actually has. Falls back to nothing rather than
+// guessing, since an admin account need not have an employee row.
+async function actorName(req) {
+  if (!req.user?.employee_id) return null;
+  const row = await db
+    .prepare("SELECT first_name, last_name FROM employees WHERE id = ?")
+    .get(req.user.employee_id);
+  return row ? `${row.first_name} ${row.last_name}`.trim() : null;
+}
+
 // Lines that look like the same receipt claimed twice, for somebody to judge.
 //
 // HR and admin only: it names other people's claims side by side, which is not
@@ -369,6 +381,83 @@ router.put(
       details: { cluster_key: key, verdict, note },
     });
     res.json(await findDuplicates());
+  })
+);
+
+// Put the question to the employee.
+//
+// A duplicate check produces a suspicion, and the person who can settle it in
+// one sentence is the one who filed the claim. Asking them first is both
+// quicker than an investigation and fairer than one — at this point nothing is
+// proven, and the commonest answer is a good one.
+//
+// Sends synchronously and reports what happened: somebody pressed a button and
+// is waiting to know whether the mail went. Recorded against the cluster so
+// the page can show it is waiting on a reply rather than on nobody.
+router.post(
+  "/duplicates/:key/ask",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const key = String(req.params.key || "").slice(0, 400);
+    const { clusters } = await findDuplicates();
+    const cluster = clusters.find((c) => c.key === key);
+    if (!cluster) return res.status(404).json({ error: "That duplicate is no longer listed" });
+
+    // One email per person, carrying only their own lines — a cluster spanning
+    // two employees must not show either of them the other's claim.
+    const byEmployee = new Map();
+    for (const item of cluster.items) {
+      const list = byEmployee.get(item.employee_id) || [];
+      list.push(item);
+      byEmployee.set(item.employee_id, list);
+    }
+
+    const asker = await actorName(req);
+    const branding = await db.prepare("SELECT company_email FROM branding_settings WHERE id = 1").get();
+    const sent = [];
+    const failed = [];
+    for (const [employeeId, items] of byEmployee) {
+      const employee = await db
+        .prepare("SELECT id, first_name, last_name, email FROM employees WHERE id = ?")
+        .get(employeeId);
+      try {
+        sent.push(
+          await askAboutDuplicateExpenses({
+            employee,
+            items,
+            asker,
+            // Back to whoever asked, not to the company's public address: the
+            // reply is an answer to their question, and sales@ is where
+            // customers write.
+            replyTo: req.user.email || branding?.company_email || undefined,
+          })
+        );
+      } catch (err) {
+        failed.push(`${employee ? `${employee.first_name} ${employee.last_name}` : `#${employeeId}`}: ${err.message}`);
+      }
+    }
+
+    if (sent.length) {
+      await db
+        .prepare(
+          `INSERT INTO expense_duplicate_reviews (cluster_key, asked_at, asked_by, asked_to)
+           VALUES (?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), ?, ?)
+           ON CONFLICT (cluster_key) DO UPDATE SET
+             asked_at = to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+             asked_by = excluded.asked_by, asked_to = excluded.asked_to`
+        )
+        .run(key, req.user.employee_id || null, sent.join(", "));
+      await logRequestEvent(req, "ask_duplicate_expenses", {
+        entityType: "expense_duplicate",
+        details: { cluster_key: key, asked: sent },
+      });
+    }
+
+    // A partial failure is reported rather than hidden: "asked" on the page has
+    // to mean the mail actually left.
+    if (failed.length && !sent.length) return res.status(400).json({ error: failed.join("; ") });
+    res.json({ ...(await findDuplicates()), sent, failed });
   })
 );
 
