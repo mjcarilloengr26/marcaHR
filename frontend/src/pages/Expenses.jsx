@@ -366,17 +366,21 @@ export default function Expenses() {
   // Select-all covers what is on screen, not what the search has hidden.
   // Reports still moving, and reports that are done with.
   //
-  // Reimbursed means the money has been paid out and rejected means it never
-  // will be; neither is waiting on anyone. Listing them beside reports still
-  // being approved is what made a paid payroll run easy to pay twice, and an
-  // expense report is the same shape of mistake.
+  // Only reimbursed is done with: the money has been paid out and nobody is
+  // waiting on anything.
+  //
+  // Rejected is NOT done with, which this had wrong. A rejection here is not a
+  // refusal to pay — it is a report sent back with a note saying what to fix,
+  // and the same record goes to draft again through Reopen and is resubmitted.
+  // It is the most actionable row on the page, and it was being filed in a
+  // collapsed archive where the person who has to fix it would never see it.
   // Owned here, not inside the heading: the table scrolls sideways and is laid
   // out automatically, so a width on the <th> is only a suggestion. The number
   // has to reach the cell contents to bind, which it does through a custom
   // property set on the table.
   const projectCol = useColumnWidth("expenses.project.width", { defaultWidth: 190, min: 110, max: 480 });
 
-  const CLOSED = ["reimbursed", "rejected"];
+  const CLOSED = ["reimbursed"];
   const liveReports = sorted.filter((r) => !CLOSED.includes(r.status));
   const closedReports = sorted.filter((r) => CLOSED.includes(r.status));
 
@@ -683,7 +687,7 @@ export default function Expenses() {
         {reports.length > 0 && sorted.length === 0 && <div className="empty-state">No reports match your search.</div>}
         {reports.length > 0 && sorted.length > 0 && liveReports.length === 0 && (
           <div className="empty-state">
-            Nothing in progress — every matching report is closed. They are listed below.
+            Nothing in progress — every matching report has been reimbursed. They are listed below.
           </div>
         )}
       </div>
@@ -696,7 +700,7 @@ export default function Expenses() {
       <PastRecords
         title="Closed reports"
         count={closedReports.length}
-        hint="Reimbursed and rejected reports. Nothing here is waiting on anybody."
+        hint="Reimbursed reports. The money has been paid out and nothing here is waiting on anybody."
       >
         {() => reportTable(closedReports, false)}
       </PastRecords>
