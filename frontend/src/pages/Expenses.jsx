@@ -60,7 +60,6 @@ const blankLine = () => ({
   key: Math.random().toString(36).slice(2),
   expense_date: new Date().toISOString().slice(0, 10),
   category: "",
-  category_other: "",
   description: "",
   amount: "",
   receipt: null,
@@ -78,7 +77,6 @@ const EMPTY_FORM = { expense_type: "", cash_advance_amount: "", cost_center: "",
 const EMPTY_ITEM_FORM = {
   expense_date: "",
   category: "",
-  category_other: "",
   description: "",
   amount: "",
   receipt_ref: "",
@@ -446,7 +444,6 @@ export default function Expenses() {
         items: lines.map((l) => ({
           expense_date: l.expense_date,
           category: l.category,
-          category_other: l.category_other,
           description: l.description,
           amount: Number(l.amount) || 0,
           receipt_name: l.receipt?.name,
@@ -834,7 +831,6 @@ export default function Expenses() {
                       onChange={(e) =>
                         setLine(l.key, {
                           category: e.target.value,
-                          category_other: e.target.value === "Others" ? l.category_other : "",
                         })
                       }
                       required
@@ -845,14 +841,13 @@ export default function Expenses() {
                         <option key={opt} value={opt}>{opt}</option>
                       ))}
                     </select>
+                    {/* No "say what it was" box. Typing a name here created a
+                        new category, and the chart grew a slice per phrase.
+                        What it was goes in Description, immediately below. */}
                     {l.category === "Others" && (
-                      <input
-                        value={l.category_other}
-                        onChange={(e) => setLine(l.key, { category_other: e.target.value })}
-                        placeholder="Say what it was"
-                        required
-                        style={{ marginTop: 6 }}
-                      />
+                      <p className="subtitle" style={{ margin: "6px 0 0", fontSize: 11 }}>
+                        Say what it was in the description below.
+                      </p>
                     )}
                   </div>
                   <div className="form-row">
@@ -1159,11 +1154,11 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
     setEditingItemId(it.id);
     setItemForm({
       expense_date: it.expense_date || "",
-      // A stored value that is no longer on the list — an older free-text
-      // category — would leave the select blank and silently change on save.
-      // Route it through "Others" with the original text kept instead.
+      // A stored value that is no longer on the list — one of the free-text
+      // categories from before the list was closed — would leave the select
+      // blank and silently change on save. It falls to "Others" instead, and
+      // saving is what finally retires it.
       category: options.categories.includes(it.category) ? it.category : it.category ? "Others" : "",
-      category_other: options.categories.includes(it.category) ? "" : it.category || "",
       description: it.description || "",
       amount: it.amount == null ? "" : String(it.amount),
       receipt_ref: it.receipt_ref || "",
@@ -1187,9 +1182,6 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
     setSaving(true);
     setError("");
     try {
-      // "Others" is a prompt for the real name, not a category to store — a
-      // column full of "Others" would be the free-text problem again wearing
-      // a different label. category_other never reaches the server.
       const payload = {
         ...itemForm,
         amount: Number(itemForm.amount),
@@ -1402,7 +1394,6 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
                         category: e.target.value,
                         // Drop a typed-in value the moment the choice moves
                         // off "Others", so a stale one cannot be submitted.
-                        category_other: e.target.value === "Others" ? itemForm.category_other : "",
                       })
                     }
                     required
@@ -1413,17 +1404,7 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
                     ))}
                   </select>
                 </div>
-                {itemForm.category === "Others" && (
-                  <div className="form-row">
-                    <label>Which category?</label>
-                    <input
-                      value={itemForm.category_other}
-                      onChange={(e) => setItemForm({ ...itemForm, category_other: e.target.value })}
-                      placeholder="Only if none of the above fits"
-                      required
-                    />
-                  </div>
-                )}
+
                 <div className="form-row" style={{ flex: 1 }}>
                   <label>Description</label>
                   <SuggestInput

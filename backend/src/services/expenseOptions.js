@@ -3,8 +3,16 @@
 // was a suggestion: anything could still be written by an edited request, and
 // nothing stopped the same category arriving under a new spelling.
 //
-// Free text survives in exactly one place — picking "Others" and saying what
-// it is. Everything else must be one of these.
+// There is no free text at all. "Others" used to let somebody type a name and
+// have it stored as the category, which is how a single ₱290 line called "Key
+// Duplicate" became a permanent slice on the spend-by-category chart beside
+// Meals and Fuel. One person's one-off phrase is not a category: the chart is
+// only readable if the vocabulary is fixed, and a vocabulary anybody can
+// extend is not fixed.
+//
+// Picking "Others" now stores exactly that, and what the money actually bought
+// goes in the line's own description, which is the field for it and which no
+// chart groups by.
 
 const EXPENSE_TYPES = ["Operating Expenses", "Project Expenses"];
 
@@ -76,16 +84,11 @@ function resolveChoice({ choice, other, allowed, label, required = true }) {
   if (!allowed.includes(picked)) {
     return { error: `${label} must be one of the listed options` };
   }
-  if (picked !== OTHER) return { value: picked };
-
-  const typed = typeof other === "string" ? other.trim() : "";
-  if (!typed) return { error: `Say what the ${label.toLowerCase()} is when choosing ${OTHER}` };
-  // Storing the literal word would put the whole point back: a column full of
-  // "Others" tells nobody anything.
-  if (typed.toLowerCase() === OTHER.toLowerCase()) {
-    return { error: `Give the ${label.toLowerCase()} a real name rather than "${OTHER}"` };
-  }
-  return { value: typed.slice(0, 120) };
+  // "Others" stores "Others". The `other` field is accepted and ignored so an
+  // older page still in somebody's browser cannot slip a new category past
+  // this — the enforcement has to be here, because the client is whatever the
+  // caller chooses to send.
+  return { value: picked };
 }
 
 module.exports = { EXPENSE_TYPES, TERMS, TITLES, CATEGORIES, OTHER, resolveChoice };

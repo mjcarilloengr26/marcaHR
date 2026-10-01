@@ -2,6 +2,7 @@ const express = require("express");
 const ExcelJS = require("exceljs");
 const db = require("../db");
 const { advancePositions } = require("../services/advancePosition");
+const { CATEGORIES, OTHER } = require("../services/expenseOptions");
 const { COUNTED_SQL } = require("../services/expenseScope");
 const { requireAuth } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
@@ -1096,7 +1097,12 @@ router.get(
     const categoryTotals = new Map();
     const categorySpellings = new Map();
     for (const it of countedItems) {
-      const label = String(it.category || "").trim() || "Uncategorised";
+      // Folded the same way the dashboard folds it — a category the configured
+      // list does not contain came through the old free-text box and reads as
+      // "Others". This sheet exists to agree with that chart, so the rule has
+      // to be the same one.
+      const raw = String(it.category || "").trim();
+      const label = !raw ? "Uncategorised" : CATEGORIES.includes(raw) ? raw : OTHER;
       const key = label.toLowerCase();
       categoryTotals.set(key, (categoryTotals.get(key) || 0) + Number(it.amount || 0));
       const seen = categorySpellings.get(key) || new Map();

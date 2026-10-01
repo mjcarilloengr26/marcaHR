@@ -1,5 +1,6 @@
 const express = require("express");
 const { COUNTED_SQL } = require("../services/expenseScope");
+const { CATEGORIES, TITLES, OTHER } = require("../services/expenseOptions");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
@@ -321,11 +322,26 @@ async function fetchExpenseItemRows(start, end) {
 // Both periods are resolved together on purpose — deciding the display
 // spelling per period could label the same category "sop" one year and "SOP"
 // the next, which would split it across the year-on-year bars.
+// A category the configured list does not contain was typed by somebody into
+// the old free-text box, which no longer exists. On this chart it reads as
+// "Others" — which is what choosing Others records now — so one ₱290 line
+// called "Key Duplicate" is not a permanent slice beside Meals and Fuel.
+//
+// Folded here rather than rewritten in the database: the line keeps the words
+// whoever filed it chose, which are worth something when you open the report,
+// and only the chart — whose whole value is a fixed set of columns to compare
+// across periods — insists on the vocabulary.
+function listedOrOther(raw) {
+  const label = String(raw || "").trim();
+  if (!label) return "Uncategorised";
+  return CATEGORIES.includes(label) ? label : OTHER;
+}
+
 function groupExpenseItemsByCategory(currentRows, previousRows) {
   const spellings = new Map(); // folded key -> Map(label -> times seen)
   const noteSpelling = (rows) => {
     for (const r of rows) {
-      const label = String(r.category || "").trim() || "Uncategorised";
+      const label = listedOrOther(r.category);
       const key = label.toLowerCase();
       const seen = spellings.get(key) || new Map();
       seen.set(label, (seen.get(label) || 0) + 1);
@@ -346,7 +362,7 @@ function groupExpenseItemsByCategory(currentRows, previousRows) {
   const total = (rows) => {
     const out = new Map();
     for (const r of rows) {
-      const key = (String(r.category || "").trim() || "Uncategorised").toLowerCase();
+      const key = listedOrOther(r.category).toLowerCase();
       const label = display.get(key);
       out.set(label, (out.get(label) || 0) + (Number(r.amount) || 0));
     }
@@ -356,13 +372,27 @@ function groupExpenseItemsByCategory(currentRows, previousRows) {
   return { current: total(currentRows), previous: total(previousRows) };
 }
 
+// A report's title is derived from its categories, so a free-text category
+// became a free-text title too and turns up on this chart the same way. It is
+// folded the same way — but only the leading term, because a report spanning
+// several categories is titled "Meals + 2 more" and that count has to survive.
+function listedTitleOrOther(raw) {
+  const title = String(raw || "").trim();
+  if (!title) return "Unspecified";
+  if (TITLES.includes(title)) return title;
+  const composite = /^(.*) \+ (\d+) more$/.exec(title);
+  if (!composite) return OTHER;
+  const [, lead, rest] = composite;
+  return `${TITLES.includes(lead) ? lead : OTHER} + ${rest} more`;
+}
+
 function groupExpenseRows(rows) {
   const byType = new Map();
   const byTitle = new Map();
   for (const r of rows) {
     const type = r.expense_type || "Unspecified";
     byType.set(type, (byType.get(type) || 0) + r.total_expenses);
-    const title = r.title || "Unspecified";
+    const title = listedTitleOrOther(r.title);
     byTitle.set(title, (byTitle.get(title) || 0) + r.total_expenses);
   }
   return { byType, byTitle };
