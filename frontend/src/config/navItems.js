@@ -51,6 +51,7 @@ export const NAV_ITEMS = [
   { to: "/users", label: "Users", icon: "👤", roles: ["admin"] },
   { to: "/events", label: "Events", icon: "📜", roles: ["admin"] },
   { to: "/cost-centers", label: "Cost Centers", icon: "🏷️", roles: ["admin", "hr"] },
+  { to: "/expense-categories", label: "Expense Categories", icon: "🗂️", roles: ["admin"] },
   { to: "/page-access", label: "Page Access", icon: "🕒", roles: ["admin"] },
   { to: "/menu-order", label: "Menu Order", icon: "↕️", roles: ["admin"] },
   { to: "/terms-settings", label: "Terms & Conditions", icon: "📄", roles: ["admin"] },

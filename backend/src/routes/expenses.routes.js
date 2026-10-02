@@ -94,7 +94,7 @@ function splitMessage(reference, left, total, others) {
   );
 }
 
-const { EXPENSE_TYPES, TITLES, CATEGORIES, resolveChoice } = require("../services/expenseOptions");
+const { EXPENSE_TYPES, resolveChoice, activeCategories, activeTitles, forgetCategories } = require("../services/expenseOptions");
 
 // Accepts a base64 data URL (image, PDF, etc.) or null. Caps the stored size
 // defensively even though express.json()'s limit already bounds the whole
@@ -320,7 +320,10 @@ router.get(
   "/options",
   requireAuth,
   asyncHandler(async (req, res) => {
-    res.json({ types: EXPENSE_TYPES, titles: TITLES, categories: CATEGORIES });
+    // The active list only: a retired category is still understood when it
+    // comes back from the database, but must not be offered for anything new.
+    const categories = await activeCategories();
+    res.json({ types: EXPENSE_TYPES, titles: categories, categories });
   })
 );
 
@@ -334,6 +337,124 @@ async function actorName(req) {
     .get(req.user.employee_id);
   return row ? `${row.first_name} ${row.last_name}`.trim() : null;
 }
+
+// The category vocabulary itself. Admin only to change, because every chart
+// that groups spend depends on it: one careless addition and the figures stop
+// comparing across periods, which is the whole reason the list is closed.
+//
+// Readable by anyone who can file an expense — the picker needs it — but that
+// is served by /options; this one carries the usage counts and retired entries
+// an administrator needs and nobody else should see.
+router.get(
+  "/categories",
+  requireAuth,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const rows = await db
+      .prepare(
+        `SELECT c.id, c.name, c.active, c.is_system, c.created_at,
+                (SELECT COUNT(*) FROM expense_items i WHERE btrim(i.category) = c.name)::int AS uses,
+                COALESCE((SELECT SUM(i.amount) FROM expense_items i WHERE btrim(i.category) = c.name), 0) AS total
+         FROM expense_categories c
+         ORDER BY c.is_system, lower(c.name)`
+      )
+      .all();
+    res.json(rows.map((r) => ({ ...r, total: Number(r.total) })));
+  })
+);
+
+router.post(
+  "/categories",
+  requireAuth,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const name = String(req.body?.name || "").trim().replace(/\s+/g, " ");
+    if (!name) return res.status(400).json({ error: "Give the category a name" });
+    if (name.length > 60) return res.status(400).json({ error: "Keep the name under 60 characters" });
+
+    const clash = await db
+      .prepare("SELECT name, active FROM expense_categories WHERE lower(name) = lower(?)")
+      .get(name);
+    if (clash) {
+      // A retired one coming back is a restore, not a duplicate — and saying
+      // so beats refusing with "already exists" for something not on the list.
+      return res.status(400).json({
+        error: clash.active
+          ? `"${clash.name}" is already a category`
+          : `"${clash.name}" exists but is retired — bring it back instead of adding it again`,
+      });
+    }
+
+    await db
+      .prepare("INSERT INTO expense_categories (name, created_by) VALUES (?, ?)")
+      .run(name, req.user.employee_id || null);
+    forgetCategories();
+    await logRequestEvent(req, "create_expense_category", {
+      entityType: "expense_category",
+      details: { name },
+    });
+    res.status(201).json({ name });
+  })
+);
+
+// Retire or restore. Retiring takes a category off the picker without touching
+// the spend already filed under it — the charts still know the word.
+router.put(
+  "/categories/:id",
+  requireAuth,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const row = await db.prepare("SELECT * FROM expense_categories WHERE id = ?").get(req.params.id);
+    if (!row) return res.status(404).json({ error: "No such category" });
+    if (row.is_system) return res.status(400).json({ error: `"${row.name}" is built in and cannot be changed` });
+    const active = !!req.body?.active;
+
+    await db.prepare("UPDATE expense_categories SET active = ? WHERE id = ?").run(active, row.id);
+    forgetCategories();
+    await logRequestEvent(req, active ? "restore_expense_category" : "retire_expense_category", {
+      entityType: "expense_category",
+      entityId: row.id,
+      details: { name: row.name },
+    });
+    res.json({ ...row, active });
+  })
+);
+
+// Only a category nothing has ever used can actually go. Deleting one that has
+// spend behind it would leave those lines naming a word the list no longer
+// knows, and the dashboard folds anything unknown into "Others" — so the
+// delete would silently reclassify history. Retiring is the answer there, and
+// the error says so rather than just refusing.
+router.delete(
+  "/categories/:id",
+  requireAuth,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const row = await db.prepare("SELECT * FROM expense_categories WHERE id = ?").get(req.params.id);
+    if (!row) return res.status(404).json({ error: "No such category" });
+    if (row.is_system) return res.status(400).json({ error: `"${row.name}" is built in and cannot be removed` });
+
+    const uses = (
+      await db
+        .prepare("SELECT COUNT(*) AS c FROM expense_items WHERE btrim(category) = ?")
+        .get(row.name)
+    ).c;
+    if (Number(uses) > 0) {
+      return res.status(400).json({
+        error: `${uses} expense line${Number(uses) === 1 ? "" : "s"} already use "${row.name}". Retire it instead — deleting it would move that spend to Others on every chart.`,
+      });
+    }
+
+    await db.prepare("DELETE FROM expense_categories WHERE id = ?").run(row.id);
+    forgetCategories();
+    await logRequestEvent(req, "delete_expense_category", {
+      entityType: "expense_category",
+      entityId: row.id,
+      details: { name: row.name },
+    });
+    res.status(204).end();
+  })
+);
 
 // Lines that look like the same receipt claimed twice, for somebody to judge.
 //
@@ -548,7 +669,7 @@ router.post(
       const categoryChoice = resolveChoice({
         choice: raw?.category,
         other: raw?.category_other,
-        allowed: CATEGORIES,
+        allowed: await activeCategories(),
         label: `${where} category`,
       });
       if (categoryChoice.error) return res.status(400).json({ error: categoryChoice.error });
@@ -594,7 +715,7 @@ router.post(
       const titleChoice = resolveChoice({
         choice: body.title,
         other: body.title_other,
-        allowed: TITLES,
+        allowed: await activeTitles(),
         label: "Title / purpose",
       });
       if (titleChoice.error) return res.status(400).json({ error: titleChoice.error });
@@ -772,7 +893,7 @@ router.post(
     const categoryChoice = resolveChoice({
       choice: body.category,
       other: body.category_other,
-      allowed: CATEGORIES,
+      allowed: await activeCategories(),
       label: "Category",
     });
     if (categoryChoice.error) return res.status(400).json({ error: categoryChoice.error });
@@ -861,7 +982,7 @@ router.put(
     const categoryChoice = resolveChoice({
       choice: body.category,
       other: body.category_other,
-      allowed: CATEGORIES,
+      allowed: await activeCategories(),
       label: "Category",
     });
     if (categoryChoice.error) return res.status(400).json({ error: categoryChoice.error });

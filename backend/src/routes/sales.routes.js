@@ -1,6 +1,6 @@
 const express = require("express");
 const { COUNTED_SQL } = require("../services/expenseScope");
-const { CATEGORIES, TITLES, OTHER } = require("../services/expenseOptions");
+const { OTHER, knownCategories } = require("../services/expenseOptions");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
@@ -331,17 +331,21 @@ async function fetchExpenseItemRows(start, end) {
 // whoever filed it chose, which are worth something when you open the report,
 // and only the chart — whose whole value is a fixed set of columns to compare
 // across periods — insists on the vocabulary.
-function listedOrOther(raw) {
+//
+// It folds against every category ever configured, not just the ones still on
+// offer. Retiring "Fuel" must not make years of fuel spend reappear as
+// "Others" — the word was a real category when that money was filed.
+function listedOrOther(raw, known) {
   const label = String(raw || "").trim();
   if (!label) return "Uncategorised";
-  return CATEGORIES.includes(label) ? label : OTHER;
+  return known.includes(label) ? label : OTHER;
 }
 
-function groupExpenseItemsByCategory(currentRows, previousRows) {
+function groupExpenseItemsByCategory(currentRows, previousRows, known) {
   const spellings = new Map(); // folded key -> Map(label -> times seen)
   const noteSpelling = (rows) => {
     for (const r of rows) {
-      const label = listedOrOther(r.category);
+      const label = listedOrOther(r.category, known);
       const key = label.toLowerCase();
       const seen = spellings.get(key) || new Map();
       seen.set(label, (seen.get(label) || 0) + 1);
@@ -362,7 +366,7 @@ function groupExpenseItemsByCategory(currentRows, previousRows) {
   const total = (rows) => {
     const out = new Map();
     for (const r of rows) {
-      const key = listedOrOther(r.category).toLowerCase();
+      const key = listedOrOther(r.category, known).toLowerCase();
       const label = display.get(key);
       out.set(label, (out.get(label) || 0) + (Number(r.amount) || 0));
     }
@@ -376,23 +380,23 @@ function groupExpenseItemsByCategory(currentRows, previousRows) {
 // became a free-text title too and turns up on this chart the same way. It is
 // folded the same way — but only the leading term, because a report spanning
 // several categories is titled "Meals + 2 more" and that count has to survive.
-function listedTitleOrOther(raw) {
+function listedTitleOrOther(raw, known) {
   const title = String(raw || "").trim();
   if (!title) return "Unspecified";
-  if (TITLES.includes(title)) return title;
+  if (known.includes(title)) return title;
   const composite = /^(.*) \+ (\d+) more$/.exec(title);
   if (!composite) return OTHER;
   const [, lead, rest] = composite;
-  return `${TITLES.includes(lead) ? lead : OTHER} + ${rest} more`;
+  return `${known.includes(lead) ? lead : OTHER} + ${rest} more`;
 }
 
-function groupExpenseRows(rows) {
+function groupExpenseRows(rows, known) {
   const byType = new Map();
   const byTitle = new Map();
   for (const r of rows) {
     const type = r.expense_type || "Unspecified";
     byType.set(type, (byType.get(type) || 0) + r.total_expenses);
-    const title = listedTitleOrOther(r.title);
+    const title = listedTitleOrOther(r.title, known);
     byTitle.set(title, (byTitle.get(title) || 0) + r.total_expenses);
   }
   return { byType, byTitle };
@@ -445,9 +449,11 @@ router.get(
     const liquidationRatePercent =
       totalCashAdvance > 0 ? (advancePosition.liquidated / totalCashAdvance) * 100 : null;
 
-    const grouped = groupExpenseRows(rows);
-    const prevGrouped = groupExpenseRows(prevRows);
-    const byCategory = groupExpenseItemsByCategory(itemRows, prevItemRows);
+    // Fetched once for the whole response rather than per row.
+    const known = await knownCategories();
+    const grouped = groupExpenseRows(rows, known);
+    const prevGrouped = groupExpenseRows(prevRows, known);
+    const byCategory = groupExpenseItemsByCategory(itemRows, prevItemRows, known);
 
     // The same two breakdowns again, but split by expense type. Reading "meals
     // under Project Expenses" off the combined charts was impossible: the two
@@ -461,12 +467,12 @@ router.get(
       const prev = ofType(prevRows, type);
       const curItems = ofType(itemRows, type);
       const prevItems = ofType(prevItemRows, type);
-      const cats = groupExpenseItemsByCategory(curItems, prevItems);
+      const cats = groupExpenseItemsByCategory(curItems, prevItems, known);
       return {
         type,
         total: cur.reduce((n, r) => n + r.total_expenses, 0),
         previousTotal: prev.reduce((n, r) => n + r.total_expenses, 0),
-        byTitle: mergeByLabel(groupExpenseRows(cur).byTitle, groupExpenseRows(prev).byTitle),
+        byTitle: mergeByLabel(groupExpenseRows(cur, known).byTitle, groupExpenseRows(prev, known).byTitle),
         byCategory: mergeByLabel(cats.current, cats.previous),
       };
     });

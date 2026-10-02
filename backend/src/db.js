@@ -1627,6 +1627,49 @@ async function ensureEmployeeStandingDeductions() {
   await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS supplier_address TEXT");
   await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS supplier_tin TEXT");
 
+  // The expense category vocabulary, moved out of the source and into here so
+  // an admin can extend it without a deploy.
+  //
+  // active vs deleted is the whole design. A category that has been used is
+  // never removed: expense lines store the category as text, so dropping the
+  // row would leave that spend referring to a word the list no longer knows —
+  // and the dashboard, which folds anything unlisted into "Others", would
+  // quietly reclassify years of history. Retiring it keeps it known to the
+  // charts and stops it being offered for anything new. Only a category
+  // nothing has ever used can actually be deleted.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS expense_categories (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      active BOOLEAN NOT NULL DEFAULT true,
+      -- "Others" is the escape hatch the whole scheme rests on; it cannot be
+      -- retired or removed, or there would be nowhere to file an oddity.
+      is_system BOOLEAN NOT NULL DEFAULT false,
+      created_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'),
+      created_by INTEGER REFERENCES employees(id) ON DELETE SET NULL
+    )
+  `);
+  await pool.query("CREATE UNIQUE INDEX IF NOT EXISTS idx_expense_categories_name ON expense_categories(lower(name))");
+
+  // Seeded from the list that used to live in the code, so nothing changes on
+  // the day this ships. Does nothing on every start after the first.
+  try {
+    const { TERMS, OTHER } = require("./services/expenseOptions");
+    for (const name of TERMS) {
+      await pool.query(
+        `INSERT INTO expense_categories (name, is_system) VALUES ($1, $2)
+         ON CONFLICT (name) DO NOTHING`,
+        [name, name === OTHER]
+      );
+    }
+    // Deliberately NOT seeded from what is already in expense_items. The
+    // free-text entries that predate the closed list are exactly what should
+    // read as "Others" on the charts; bringing them in here would make them
+    // known categories again and undo that.
+  } catch (err) {
+    console.warn("Could not seed expense categories:", err.message);
+  }
+
   // Duplicate-receipt detection.
   //
   // A fingerprint of the receipt image, which is the only signal here that

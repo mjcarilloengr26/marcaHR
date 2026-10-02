@@ -65,8 +65,57 @@ const TERMS = [
 // two are different questions — what the advance was for, and what the money
 // bought — and a future divergence should be a deliberate edit here rather
 // than a surprise.
-const TITLES = TERMS;
-const CATEGORIES = TERMS;
+// TERMS is now only the seed for the table in the database — db.migrate()
+// inserts it on first run. What the app reads at runtime comes from there, so
+// an admin can add a category without a deploy.
+//
+// Two different sets, because they answer two different questions:
+//
+//   active  — what somebody may pick for a NEW line. Shrinks when an admin
+//             retires something.
+//   known   — every category that has ever been configured, retired or not.
+//             This is what the charts fold against: retiring "Fuel" must not
+//             make years of fuel spend reappear as "Others".
+//
+// Cached briefly. The pickers and the dashboard both ask on nearly every
+// request, and the list changes a handful of times a year.
+const CACHE_MS = 30_000;
+let cache = null;
+
+async function readCategories() {
+  if (cache && Date.now() - cache.at < CACHE_MS) return cache;
+  const db = require("../db");
+  const rows = await db
+    .prepare("SELECT name, active, is_system FROM expense_categories ORDER BY is_system, lower(name)")
+    .all();
+  // Falling back to the seed rather than to nothing: an empty list would make
+  // every category invalid and every expense unfilable.
+  if (!rows.length) return { at: Date.now(), active: TERMS, known: TERMS, rows: [] };
+  // "Others" sorts last wherever it appears — a reader scanning for a real
+  // choice should reach the escape hatch after them, not before.
+  const names = rows.filter((r) => !r.is_system).map((r) => r.name);
+  const system = rows.filter((r) => r.is_system).map((r) => r.name);
+  cache = {
+    at: Date.now(),
+    active: [...rows.filter((r) => r.active && !r.is_system).map((r) => r.name), ...system],
+    known: [...names, ...system],
+    rows,
+  };
+  return cache;
+}
+
+// Called by the admin routes after any change, so the next request sees it
+// rather than waiting out the cache.
+function forgetCategories() {
+  cache = null;
+}
+
+const activeCategories = async () => (await readCategories()).active;
+const knownCategories = async () => (await readCategories()).known;
+
+// Titles are derived from categories, so they draw on the same vocabulary.
+const activeTitles = activeCategories;
+const knownTitles = knownCategories;
 
 // Resolves a { choice, other } pair to the value to store, or an error.
 //
@@ -91,4 +140,14 @@ function resolveChoice({ choice, other, allowed, label, required = true }) {
   return { value: picked };
 }
 
-module.exports = { EXPENSE_TYPES, TERMS, TITLES, CATEGORIES, OTHER, resolveChoice };
+module.exports = {
+  EXPENSE_TYPES,
+  TERMS,
+  OTHER,
+  resolveChoice,
+  activeCategories,
+  knownCategories,
+  activeTitles,
+  knownTitles,
+  forgetCategories,
+};

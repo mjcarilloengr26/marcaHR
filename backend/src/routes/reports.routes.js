@@ -2,7 +2,7 @@ const express = require("express");
 const ExcelJS = require("exceljs");
 const db = require("../db");
 const { advancePositions } = require("../services/advancePosition");
-const { CATEGORIES, OTHER } = require("../services/expenseOptions");
+const { OTHER, knownCategories } = require("../services/expenseOptions");
 const { COUNTED_SQL } = require("../services/expenseScope");
 const { requireAuth } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
@@ -1094,6 +1094,7 @@ router.get(
     //
     // Folded case-insensitively and labelled with the spelling used most
     // often, matching the dashboard exactly so the two cannot disagree.
+    const known = await knownCategories();
     const categoryTotals = new Map();
     const categorySpellings = new Map();
     for (const it of countedItems) {
@@ -1102,7 +1103,7 @@ router.get(
       // "Others". This sheet exists to agree with that chart, so the rule has
       // to be the same one.
       const raw = String(it.category || "").trim();
-      const label = !raw ? "Uncategorised" : CATEGORIES.includes(raw) ? raw : OTHER;
+      const label = !raw ? "Uncategorised" : known.includes(raw) ? raw : OTHER;
       const key = label.toLowerCase();
       categoryTotals.set(key, (categoryTotals.get(key) || 0) + Number(it.amount || 0));
       const seen = categorySpellings.get(key) || new Map();
