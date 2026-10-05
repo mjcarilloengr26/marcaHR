@@ -49,6 +49,9 @@ export default function Inventory() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [stockModal, setStockModal] = useState(null); // { item, mode: "in" | "out" | "adjust" }
+  // Jobs a movement can be booked against. Loaded once; the picker is optional
+  // so a failed fetch costs the link, not the ability to move stock.
+  const [projects, setProjects] = useState([]);
   const [stockForm, setStockForm] = useState({ quantity: "", reason: "" });
   const [historyItem, setHistoryItem] = useState(null);
   const [history, setHistory] = useState([]);
@@ -73,6 +76,10 @@ export default function Inventory() {
 
   const loadThreshold = () =>
     api.get("/inventory/settings").then((s) => setAlarmThreshold(s.alarm_threshold_percent)).catch(() => {});
+
+  useEffect(() => {
+    api.get("/projects/options").then(setProjects).catch(() => setProjects([]));
+  }, []);
 
   useEffect(() => {
     load();
@@ -217,8 +224,16 @@ export default function Inventory() {
 
   const openStock = (item, mode) => {
     setStockModal({ item, mode });
-    setStockForm({ quantity: mode === "adjust" ? item.quantity_on_hand : "", reason: "" });
+    setStockForm({ quantity: mode === "adjust" ? item.quantity_on_hand : "", reason: "", project_id: "" });
   };
+
+  // What this movement will book, shown before it is confirmed. Uses the
+  // item's cost now, which is exactly the figure the server will freeze onto
+  // the row.
+  const bookedValue =
+    stockModal && stockModal.mode !== "adjust"
+      ? Math.round((Number(stockForm.quantity) || 0) * (Number(stockModal.item.unit_cost) || 0) * 100) / 100
+      : 0;
 
   const submitStock = async (e) => {
     e.preventDefault();
@@ -229,6 +244,9 @@ export default function Inventory() {
       await api.post(`/inventory/${stockModal.item.id}/${endpoint}`, {
         quantity: Number(stockForm.quantity) || 0,
         reason: stockForm.reason || null,
+        // Adjustments never carry one — a stock count correction is shrinkage,
+        // not something a job spent.
+        project_id: stockModal.mode === "adjust" ? null : stockForm.project_id || null,
       });
       setStockModal(null);
       load();
@@ -631,6 +649,35 @@ export default function Inventory() {
                 required
               />
             </div>
+            {/* Naming a job is what books the material as its cost. Optional:
+                plenty of stock goes out for general upkeep and belongs to no
+                job, and forcing a choice there only teaches people to pick the
+                nearest project to get past the dialog. */}
+            {stockModal.mode !== "adjust" && (
+              <div className="form-row">
+                <label>Project {stockModal.mode === "out" ? "this is for" : "this is coming back from"} (optional)</label>
+                <select
+                  value={stockForm.project_id}
+                  onChange={(e) => setStockForm({ ...stockForm, project_id: e.target.value })}
+                >
+                  <option value="">Not project work</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.code} — {p.name}</option>
+                  ))}
+                </select>
+                {stockForm.project_id && bookedValue > 0 ? (
+                  <p className="subtitle" style={{ fontSize: 12, margin: "4px 0 0" }}>
+                    {stockModal.mode === "out" ? "Adds" : "Credits back"} {money(bookedValue)} {stockModal.mode === "out" ? "to" : "on"} that
+                    project, at {money(stockModal.item.unit_cost)} per {stockModal.item.unit}. The value is fixed now and
+                    will not change if the item is repriced later.
+                  </p>
+                ) : (
+                  <p className="subtitle" style={{ fontSize: 12, margin: "4px 0 0" }}>
+                    Leave as Not project work for general stock. Named, the material counts toward that project's cost.
+                  </p>
+                )}
+              </div>
+            )}
             <div className="form-row">
               <label>Reason</label>
               <input

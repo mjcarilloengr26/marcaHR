@@ -1627,6 +1627,31 @@ async function ensureEmployeeStandingDeductions() {
   await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS supplier_address TEXT");
   await pool.query("ALTER TABLE expense_items ADD COLUMN IF NOT EXISTS supplier_tin TEXT");
 
+  // Stock issued to a job is project cost.
+  //
+  // Until now a project's cost was expense reports plus purchase orders, so
+  // material taken off the shelf for a job landed nowhere: the warehouse went
+  // on absorbing it and the project's margin read better than it was. Tagging
+  // the movement is what connects the two.
+  await pool.query(
+    "ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL"
+  );
+  // The cost at the moment of the movement, not today's.
+  //
+  // An item's unit_cost is a standing figure that moves every time stock is
+  // bought at a different price. Multiplying quantity by the current cost at
+  // read time would mean re-pricing one item silently rewrote the cost of
+  // every project it had ever gone to. Frozen here, the same way a statement
+  // freezes its exchange rate.
+  await pool.query("ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS unit_cost_at_move NUMERIC(14,2)");
+  // Signed, as the effect on the project: positive when stock goes out to a
+  // job, negative when it comes back. The rollup is then a plain SUM with no
+  // rule about types encoded a second time somewhere else.
+  await pool.query("ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS project_value NUMERIC(14,2)");
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS idx_inventory_transactions_project ON inventory_transactions(project_id) WHERE project_id IS NOT NULL"
+  );
+
   // The expense category vocabulary, moved out of the source and into here so
   // an admin can extend it without a deploy.
   //

@@ -417,6 +417,69 @@ function mergeByLabel(current, previous) {
 // Expenses Report for a period: cash advances vs. actual spend drawn from the
 // liquidation/expense reports module, broken down by Expenses Type (Operating
 // vs Project) and by Title/Purpose — each paired against the same period one
+// Stock as a business figure rather than a warehouse one.
+//
+// Nearly a million pesos sits on the shelf and nothing on the dashboard said
+// so: it is working capital, it is the single largest asset the company holds
+// outside receivables, and it belongs beside what the business earned and
+// spent. Its own page answers "what do we have"; this answers "what is it
+// worth, and how much of it has gone out to jobs".
+//
+// A point-in-time figure, deliberately not filtered by the period picker
+// above it. Stock on hand is what is there now — there is no such thing as
+// last year's stock on hand on a chart of this year.
+router.get(
+  "/inventory-summary",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    const [stock, issued, top] = await Promise.all([
+      db
+        .prepare(
+          `SELECT COUNT(*)::int AS items,
+                  COALESCE(SUM(quantity_on_hand * unit_cost), 0) AS value,
+                  COUNT(*) FILTER (WHERE reorder_level > 0 AND quantity_on_hand <= reorder_level)::int AS at_reorder,
+                  COUNT(*) FILTER (WHERE quantity_on_hand <= 0)::int AS out_of_stock
+           FROM inventory_items`
+        )
+        .get(),
+      // What has left the shelf for a job, net of anything returned from one.
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(project_value), 0) AS value,
+                  COUNT(*)::int AS movements,
+                  COUNT(DISTINCT project_id)::int AS projects
+           FROM inventory_transactions
+           WHERE project_id IS NOT NULL AND project_value IS NOT NULL`
+        )
+        .get(),
+      // Where the money on the shelf actually is. A stock value is not
+      // actionable on its own; the handful of items holding most of it is.
+      db
+        .prepare(
+          `SELECT name, sku, quantity_on_hand, unit, (quantity_on_hand * unit_cost) AS value
+           FROM inventory_items
+           WHERE quantity_on_hand * unit_cost > 0
+           ORDER BY value DESC LIMIT 5`
+        )
+        .all(),
+    ]);
+
+    res.json({
+      items: stock.items,
+      value: Number(stock.value),
+      atReorder: stock.at_reorder,
+      outOfStock: stock.out_of_stock,
+      issuedToProjects: {
+        value: Number(issued.value),
+        movements: issued.movements,
+        projects: issued.projects,
+      },
+      topByValue: top.map((t) => ({ ...t, value: Number(t.value), quantity_on_hand: Number(t.quantity_on_hand) })),
+    });
+  })
+);
+
 // year earlier for a YoY comparison. Filtered on the report's created_at like
 // the Reports page's expenses-export, not on individual item dates, since
 // Expenses Type and Cash Advance are report-level attributes.

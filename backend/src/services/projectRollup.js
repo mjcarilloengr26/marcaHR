@@ -33,6 +33,20 @@ const PROCUREMENT_SQL = `
   WHERE project_id IS NOT NULL AND status NOT IN ('cancelled', 'draft')
   GROUP BY project_id`;
 
+// Stock issued to the job, valued at what it cost when it left the shelf.
+//
+// Signed on the row, so material returned from site credits the project back
+// and this stays a plain SUM. Adjustments cannot carry a project — a stock
+// count correction is shrinkage, not something a job spent — so they never
+// reach this.
+const MATERIALS_SQL = `
+  SELECT project_id,
+         COALESCE(SUM(project_value), 0) AS spent,
+         COUNT(*)::int AS movements
+  FROM inventory_transactions
+  WHERE project_id IS NOT NULL AND project_value IS NOT NULL
+  GROUP BY project_id`;
+
 const BILLING_SQL = `
   SELECT project_id,
          COALESCE(SUM(amount) FILTER (WHERE status NOT IN ('draft', 'cancelled')), 0) AS invoiced,
@@ -125,10 +139,11 @@ function schedule(project, progressPercent, today) {
 }
 
 async function withRollup(today = new Date().toISOString().slice(0, 10)) {
-  const [projects, spend, procurement, billing, delivery, tasks, orders] = await Promise.all([
+  const [projects, spend, procurement, materials, billing, delivery, tasks, orders] = await Promise.all([
     db.prepare(PROJECT_SQL).all(),
     db.prepare(SPEND_SQL).all(),
     db.prepare(PROCUREMENT_SQL).all(),
+    db.prepare(MATERIALS_SQL).all(),
     db.prepare(BILLING_SQL).all(),
     db.prepare(DELIVERY_SQL).all(),
     db.prepare(TASK_SQL).all(today),
@@ -138,6 +153,7 @@ async function withRollup(today = new Date().toISOString().slice(0, 10)) {
   const byId = (rows) => new Map(rows.map((r) => [r.project_id, r]));
   const spendBy = byId(spend);
   const procBy = byId(procurement);
+  const matBy = byId(materials);
   const billBy = byId(billing);
   const delivBy = byId(delivery);
   const taskBy = byId(tasks);
@@ -146,6 +162,7 @@ async function withRollup(today = new Date().toISOString().slice(0, 10)) {
   return projects.map((p) => {
     const e = spendBy.get(p.id);
     const po = procBy.get(p.id);
+    const mat = matBy.get(p.id);
     const b = billBy.get(p.id);
     const d = delivBy.get(p.id);
     const t = taskBy.get(p.id);
@@ -153,7 +170,8 @@ async function withRollup(today = new Date().toISOString().slice(0, 10)) {
 
     const expenseSpend = money(e ? e.spent : 0);
     const procurementSpend = money(po ? po.spent : 0);
-    const spent = money(expenseSpend + procurementSpend);
+    const materialsSpend = money(mat ? mat.spent : 0);
+    const spent = money(expenseSpend + procurementSpend + materialsSpend);
     const contract = money(p.contract_value);
     const invoiced = money(b ? b.invoiced : 0);
     const collected = money(b ? b.collected : 0);
@@ -165,9 +183,15 @@ async function withRollup(today = new Date().toISOString().slice(0, 10)) {
     return {
       ...p,
       contract_value: contract,
-      spend: { expenses: expenseSpend, procurement: procurementSpend, total: spent },
+      spend: {
+        expenses: expenseSpend,
+        procurement: procurementSpend,
+        materials: materialsSpend,
+        total: spent,
+      },
       reports: e ? e.reports : 0,
       purchaseOrders: po ? po.purchase_orders : 0,
+      stockMovements: mat ? mat.movements : 0,
       billing: {
         invoiced,
         collected,

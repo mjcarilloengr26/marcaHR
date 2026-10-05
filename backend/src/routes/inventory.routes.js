@@ -8,6 +8,10 @@ const ExcelJS = require("exceljs");
 
 const router = express.Router();
 
+// Centavos, consistently. A value booked against a project is money, and
+// floating-point quantity times floating-point cost is not.
+const money = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
 const SELECT_BASE = `
   SELECT i.*, l.name AS location_name
   FROM inventory_items i
@@ -97,8 +101,11 @@ router.get("/:id/transactions", requireAuth, requireRole("admin", "hr"), asyncHa
   if (!item) return res.status(404).json({ error: "Inventory item not found" });
   const rows = await db
     .prepare(
-      `SELECT t.*, (e.first_name || ' ' || e.last_name) AS created_by_name
-       FROM inventory_transactions t LEFT JOIN employees e ON e.id = t.created_by
+      `SELECT t.*, (e.first_name || ' ' || e.last_name) AS created_by_name,
+              p.code AS project_code, p.name AS project_name
+       FROM inventory_transactions t
+       LEFT JOIN employees e ON e.id = t.created_by
+       LEFT JOIN projects p ON p.id = t.project_id
        WHERE t.item_id = ? ORDER BY t.created_at DESC`
     )
     .all(req.params.id);
@@ -219,6 +226,19 @@ function notifyIfEnteredCritical(existing, newQuantity, thresholdPercent) {
   }
 }
 
+// Naming a project on a movement is what books the material as that job's
+// cost. Optional on purpose: plenty of stock goes out for general upkeep and
+// belongs to no job, and forcing a choice there would only teach people to
+// pick the nearest project to get past the dialog.
+async function resolveMovementProject(input) {
+  if (input === undefined || input === null || input === "") return { project: null };
+  const id = Number(input);
+  if (!Number.isInteger(id) || id <= 0) return { error: "That is not a project" };
+  const project = await db.prepare("SELECT id, code, name, status FROM projects WHERE id = ?").get(id);
+  if (!project) return { error: "That project no longer exists" };
+  return { project };
+}
+
 async function moveStock(req, res, type, sign) {
   const existing = await db.prepare("SELECT * FROM inventory_items WHERE id = ?").get(req.params.id);
   if (!existing) return res.status(404).json({ error: "Inventory item not found" });
@@ -230,13 +250,76 @@ async function moveStock(req, res, type, sign) {
     return res.status(400).json({ error: `Only ${existing.quantity_on_hand} ${existing.unit} in stock` });
   }
   const { reason, reference } = req.body || {};
+
+  const resolved = await resolveMovementProject(req.body?.project_id);
+  if (resolved.error) return res.status(400).json({ error: resolved.error });
+  const project = resolved.project;
+
+  // Issues are valued at the item's cost now. Returns are valued at what that
+  // job was actually charged, which is not the same thing and cannot be.
+  //
+  // Valuing a return at today's cost looked right and is not: issue ten metres
+  // at 250, reprice the item to 900, take four metres back, and the job is
+  // credited 3,600 against a 2,500 charge — a negative material cost on a
+  // project that consumed material. The credit has to come out of the same
+  // pot the charge went into, so it is priced at the average the job was
+  // charged, and it cannot exceed what is still booked.
+  let unitCost = null;
+  let projectValue = null;
+  if (project) {
+    if (type === "out") {
+      unitCost = money(existing.unit_cost);
+      projectValue = money(quantity * unitCost);
+    } else {
+      const issued = await db
+        .prepare(
+          `SELECT COALESCE(SUM(quantity), 0) AS qty, COALESCE(SUM(project_value), 0) AS value
+           FROM inventory_transactions
+           WHERE project_id = ? AND item_id = ? AND type = 'out' AND project_value IS NOT NULL`
+        )
+        .get(project.id, req.params.id);
+      const returned = await db
+        .prepare(
+          `SELECT COALESCE(SUM(quantity), 0) AS qty
+           FROM inventory_transactions
+           WHERE project_id = ? AND item_id = ? AND type = 'in' AND project_value IS NOT NULL`
+        )
+        .get(project.id, req.params.id);
+
+      const outstanding = Number(issued.qty) - Number(returned.qty);
+      if (Number(issued.qty) <= 0) {
+        return res.status(400).json({
+          error: `${existing.name} was never issued to ${project.code}, so there is nothing to return to it`,
+        });
+      }
+      if (quantity > outstanding) {
+        return res.status(400).json({
+          error: `${project.code} still holds ${outstanding} ${existing.unit} of ${existing.name} — more than that cannot come back`,
+        });
+      }
+      unitCost = money(Number(issued.value) / Number(issued.qty));
+      projectValue = money(-1 * quantity * unitCost);
+    }
+  }
+
   const newQuantity = existing.quantity_on_hand + sign * quantity;
   await db.transaction(async () => {
     await db.prepare("UPDATE inventory_items SET quantity_on_hand = ? WHERE id = ?").run(newQuantity, req.params.id);
     await db.prepare(
-      `INSERT INTO inventory_transactions (item_id, type, quantity, reason, reference, created_by)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(req.params.id, type, quantity, reason || null, reference || null, req.user.employee_id || null);
+      `INSERT INTO inventory_transactions (item_id, type, quantity, reason, reference, created_by,
+                                           project_id, unit_cost_at_move, project_value)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      req.params.id,
+      type,
+      quantity,
+      reason || null,
+      reference || null,
+      req.user.employee_id || null,
+      project ? project.id : null,
+      unitCost,
+      projectValue
+    );
   })();
   if (type === "out") notifyIfEnteredCritical(existing, newQuantity, await getAlarmThresholdPercent());
   res.json(await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(req.params.id));

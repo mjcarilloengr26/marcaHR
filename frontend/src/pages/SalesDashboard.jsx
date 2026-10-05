@@ -358,6 +358,7 @@ export default function SalesDashboard() {
   const [targets, setTargets] = useState([]);
   const [pnl, setPnl] = useState(null);
   const [expensesReport, setExpensesReport] = useState(null);
+  const [inventory, setInventory] = useState(null);
   const [aging, setAging] = useState(null);
   const [thresholdDraft, setThresholdDraft] = useState("");
   const [savingThreshold, setSavingThreshold] = useState(false);
@@ -429,6 +430,9 @@ export default function SalesDashboard() {
   useEffect(() => {
     api.get("/sales/stats").then(setStats).catch((err) => setError(err.message));
     api.get("/sales/revenue-trend").then(setRevenueTrend).catch((err) => setError(err.message));
+    // Point-in-time, so it is fetched once rather than with the period pickers.
+    // A failure hides the card rather than taking the page down with it.
+    api.get("/sales/inventory-summary").then(setInventory).catch(() => setInventory(null));
     loadAging();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -686,6 +690,81 @@ export default function SalesDashboard() {
         What the work earned after costs, where the money went, and how each cost center is
         tracking against its allocation.
       </p>
+
+        {/* Stock as a business figure rather than a warehouse one. Close to a
+            million pesos sits on the shelf and nothing here said so: it is
+            working capital and the largest asset the company holds outside
+            receivables. Deliberately not tied to the period pickers around it
+            — stock on hand is what is there now, and there is no such thing as
+            last year's stock on hand. */}
+        {inventory && (
+          <div className="card" style={{ marginBottom: 16 }}>
+            <div className="page-header" style={{ marginBottom: 10 }}>
+              <div>
+                <h2>Inventory</h2>
+                <p className="subtitle" style={{ margin: 0 }}>
+                  What is on the shelf today, and what has gone out to jobs
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-4" style={{ marginBottom: 14 }}>
+              <div className="stat-card">
+                <div className="stat-value">{money(inventory.value)}</div>
+                <div className="stat-label">Stock on hand · {inventory.items} items</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: inventory.atReorder ? "var(--warning)" : undefined }}>
+                  {inventory.atReorder}
+                </div>
+                <div className="stat-label">At or below reorder level</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value" style={{ color: inventory.outOfStock ? "var(--danger)" : undefined }}>
+                  {inventory.outOfStock}
+                </div>
+                <div className="stat-label">Out of stock</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value">{money(inventory.issuedToProjects.value)}</div>
+                <div className="stat-label">
+                  Issued to projects
+                  {inventory.issuedToProjects.projects > 0
+                    ? ` · ${inventory.issuedToProjects.projects} job${inventory.issuedToProjects.projects === 1 ? "" : "s"}`
+                    : ""}
+                </div>
+              </div>
+            </div>
+            {/* A stock value is not actionable on its own; the handful of items
+                holding most of it is. */}
+            {inventory.topByValue.length > 0 && (
+              <>
+                <h3 style={{ margin: "0 0 8px", fontSize: 14 }}>Where the money is sitting</h3>
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th>SKU</th>
+                        <th>On hand</th>
+                        <th>Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inventory.topByValue.map((t) => (
+                        <tr key={t.sku}>
+                          <td>{t.name}</td>
+                          <td className="col-nowrap">{t.sku}</td>
+                          <td className="col-nowrap">{t.quantity_on_hand} {t.unit}</td>
+                          <td className="col-nowrap">{money(t.value)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="page-header" style={{ marginBottom: 4 }}>

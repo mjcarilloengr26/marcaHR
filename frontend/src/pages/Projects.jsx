@@ -321,6 +321,7 @@ export default function Projects() {
                         {money(p.spend.total)}
                         <div className="subtitle" style={{ fontSize: 12, margin: 0 }}>
                           {money(p.spend.expenses)} expenses · {money(p.spend.procurement)} purchasing
+                          {p.spend.materials ? ` · ${money(p.spend.materials)} materials` : ""}
                         </div>
                       </td>
                       <td className="col-nowrap" style={{ color: p.margin < 0 ? "var(--danger)" : undefined }}>
