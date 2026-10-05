@@ -78,6 +78,33 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
     po_number, vendor_name, description, amount, order_date, expected_delivery_date, notes,
     work_order_id, project_id, quote_reference,
   } = req.body || {};
+
+  // The other half of the double-charge guard — the receipt side is in
+  // inventory.routes.js.
+  //
+  // Tagging a project onto a purchase order puts its whole cost on that job.
+  // If the goods it bought are already sitting in stock, they will be charged
+  // to a job again when they are issued, and the project pays twice for one
+  // delivery. Blocked here rather than reconciled later, because by the time
+  // anyone notices, the margin has been wrong for a month.
+  const wantsProject = project_id !== undefined ? project_id || null : existing.project_id;
+  if (wantsProject && !existing.project_id) {
+    const received = await db
+      .prepare(
+        `SELECT COUNT(*)::int AS movements, COUNT(DISTINCT item_id)::int AS items
+         FROM inventory_transactions WHERE purchase_order_id = ?`
+      )
+      .get(req.params.id);
+    if (received.movements > 0) {
+      return res.status(400).json({
+        error:
+          `${existing.po_number} has already been received into stock (${received.items} item${received.items === 1 ? "" : "s"}). ` +
+          `Charging it to a project now would double the cost: the project would pay once here, and again when the ` +
+          `material is issued from stock. Leave it unassigned and let the stock issues carry the cost to the job.`,
+      });
+    }
+  }
+
   try {
     await db.prepare(
       `UPDATE purchase_orders SET po_number = ?, vendor_name = ?, description = ?, amount = ?,

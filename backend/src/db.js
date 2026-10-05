@@ -1652,6 +1652,25 @@ async function ensureEmployeeStandingDeductions() {
     "CREATE INDEX IF NOT EXISTS idx_inventory_transactions_project ON inventory_transactions(project_id) WHERE project_id IS NOT NULL"
   );
 
+  // Which purchase order a receipt came from.
+  //
+  // Free text in the reason field was already being used for this — "PO 1001"
+  // — which is a link nothing can check. Structured, it closes the one way a
+  // project could be charged twice for the same goods: a PO tagged to a job
+  // books its cost at purchase, so if those goods then enter stock and are
+  // issued to that same job, the job pays for them again.
+  //
+  // The two paths are now mutually exclusive, enforced from both ends. A
+  // project-tagged PO is a direct-to-site purchase and its goods do not enter
+  // stock; anything bought into stock is bought untagged, and the job is
+  // charged when the material is issued.
+  await pool.query(
+    "ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS purchase_order_id INTEGER REFERENCES purchase_orders(id) ON DELETE SET NULL"
+  );
+  await pool.query(
+    "CREATE INDEX IF NOT EXISTS idx_inventory_transactions_po ON inventory_transactions(purchase_order_id) WHERE purchase_order_id IS NOT NULL"
+  );
+
   // The expense category vocabulary, moved out of the source and into here so
   // an admin can extend it without a deploy.
   //

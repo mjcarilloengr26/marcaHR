@@ -52,6 +52,11 @@ export default function Inventory() {
   // Jobs a movement can be booked against. Loaded once; the picker is optional
   // so a failed fetch costs the link, not the ability to move stock.
   const [projects, setProjects] = useState([]);
+  // Purchase orders a receipt can be booked against. Only those with no
+  // project: a project-tagged PO is a direct-to-site purchase whose cost is
+  // already on the job, and receiving it into stock is what the server
+  // refuses. Offering it here would only produce that refusal.
+  const [purchaseOrders, setPurchaseOrders] = useState([]);
   const [stockForm, setStockForm] = useState({ quantity: "", reason: "" });
   const [historyItem, setHistoryItem] = useState(null);
   const [history, setHistory] = useState([]);
@@ -79,6 +84,10 @@ export default function Inventory() {
 
   useEffect(() => {
     api.get("/projects/options").then(setProjects).catch(() => setProjects([]));
+    api
+      .get("/purchase-orders")
+      .then((rows) => setPurchaseOrders((Array.isArray(rows) ? rows : []).filter((p) => !p.project_id && p.status !== "cancelled")))
+      .catch(() => setPurchaseOrders([]));
   }, []);
 
   useEffect(() => {
@@ -224,7 +233,7 @@ export default function Inventory() {
 
   const openStock = (item, mode) => {
     setStockModal({ item, mode });
-    setStockForm({ quantity: mode === "adjust" ? item.quantity_on_hand : "", reason: "", project_id: "" });
+    setStockForm({ quantity: mode === "adjust" ? item.quantity_on_hand : "", reason: "", project_id: "", purchase_order_id: "" });
   };
 
   // What this movement will book, shown before it is confirmed. Uses the
@@ -247,6 +256,7 @@ export default function Inventory() {
         // Adjustments never carry one — a stock count correction is shrinkage,
         // not something a job spent.
         project_id: stockModal.mode === "adjust" ? null : stockForm.project_id || null,
+        purchase_order_id: stockModal.mode === "in" ? stockForm.purchase_order_id || null : null,
       });
       setStockModal(null);
       load();
@@ -649,6 +659,33 @@ export default function Inventory() {
                 required
               />
             </div>
+            {/* Which purchase order the goods came from. Structured, because
+                this was already being written into the reason field as "PO
+                1001" — a link nothing could check, and the one that has to be
+                checkable: a PO already charged to a job must not have its
+                goods charged to that job a second time on the way out of
+                stock. Only unassigned POs are listed, for that reason. */}
+            {stockModal.mode === "in" && (
+              <div className="form-row">
+                <label>Received against purchase order (optional)</label>
+                <select
+                  value={stockForm.purchase_order_id}
+                  onChange={(e) => setStockForm({ ...stockForm, purchase_order_id: e.target.value })}
+                >
+                  <option value="">No purchase order</option>
+                  {purchaseOrders.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.po_number} — {p.vendor_name}
+                    </option>
+                  ))}
+                </select>
+                <p className="subtitle" style={{ fontSize: 12, margin: "4px 0 0" }}>
+                  Only purchase orders with no project are listed. One charged to a project has already put its cost on
+                  that job, so its goods are delivered to site rather than taken into stock.
+                </p>
+              </div>
+            )}
+
             {/* Naming a job is what books the material as its cost. Optional:
                 plenty of stock goes out for general upkeep and belongs to no
                 job, and forcing a choice there only teaches people to pick the

@@ -102,10 +102,12 @@ router.get("/:id/transactions", requireAuth, requireRole("admin", "hr"), asyncHa
   const rows = await db
     .prepare(
       `SELECT t.*, (e.first_name || ' ' || e.last_name) AS created_by_name,
-              p.code AS project_code, p.name AS project_name
+              p.code AS project_code, p.name AS project_name,
+              po.po_number
        FROM inventory_transactions t
        LEFT JOIN employees e ON e.id = t.created_by
        LEFT JOIN projects p ON p.id = t.project_id
+       LEFT JOIN purchase_orders po ON po.id = t.purchase_order_id
        WHERE t.item_id = ? ORDER BY t.created_at DESC`
     )
     .all(req.params.id);
@@ -255,6 +257,38 @@ async function moveStock(req, res, type, sign) {
   if (resolved.error) return res.status(400).json({ error: resolved.error });
   const project = resolved.project;
 
+  // Which purchase order this receipt came from, and the half of the
+  // double-charge guard that lives here.
+  //
+  // A PO tagged to a project has already put its cost on that project. If the
+  // same goods come into stock and are later issued to that job, the job pays
+  // twice. So the two paths are kept apart: a project-tagged PO goes direct to
+  // site, and anything bought into stock is bought untagged.
+  let purchaseOrderId = null;
+  const poInput = req.body?.purchase_order_id;
+  if (poInput !== undefined && poInput !== null && poInput !== "") {
+    if (type !== "in") return res.status(400).json({ error: "A purchase order belongs on a receipt, not on an issue" });
+    const id = Number(poInput);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: "That is not a purchase order" });
+    const po = await db
+      .prepare(
+        `SELECT p.id, p.po_number, p.project_id, pr.code AS project_code
+         FROM purchase_orders p LEFT JOIN projects pr ON pr.id = p.project_id
+         WHERE p.id = ?`
+      )
+      .get(id);
+    if (!po) return res.status(404).json({ error: "That purchase order no longer exists" });
+    if (po.project_id) {
+      return res.status(400).json({
+        error:
+          `${po.po_number} is charged to ${po.project_code}, so that project has already paid for these goods. ` +
+          `Receiving them into stock and issuing them to the same job would charge it twice. ` +
+          `Either receive them without the purchase order reference, or clear the project on ${po.po_number} first.`,
+      });
+    }
+    purchaseOrderId = po.id;
+  }
+
   // Issues are valued at the item's cost now. Returns are valued at what that
   // job was actually charged, which is not the same thing and cannot be.
   //
@@ -307,8 +341,8 @@ async function moveStock(req, res, type, sign) {
     await db.prepare("UPDATE inventory_items SET quantity_on_hand = ? WHERE id = ?").run(newQuantity, req.params.id);
     await db.prepare(
       `INSERT INTO inventory_transactions (item_id, type, quantity, reason, reference, created_by,
-                                           project_id, unit_cost_at_move, project_value)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                                           project_id, unit_cost_at_move, project_value, purchase_order_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       req.params.id,
       type,
@@ -318,7 +352,8 @@ async function moveStock(req, res, type, sign) {
       req.user.employee_id || null,
       project ? project.id : null,
       unitCost,
-      projectValue
+      projectValue,
+      purchaseOrderId
     );
   })();
   if (type === "out") notifyIfEnteredCritical(existing, newQuantity, await getAlarmThresholdPercent());
