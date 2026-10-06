@@ -4,6 +4,8 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { invoiceForPdf, renderInvoicePdf } = require("../services/invoicePdf");
 const { snapshotRate } = require("../services/fxSnapshot");
+const { validateTreatment, rateFor, labelsFor, DEFAULT_TREATMENT } = require("../services/vatTreatment");
+const { settlementOf, settlementFor, settlementMap } = require("../services/invoiceSettlement");
 const { sendReadiness, sendInvoiceEmail } = require("../services/invoiceSend");
 const { logRequestEvent } = require("../services/auditLog");
 const { resolveCustomer, resolveCustomerForUpdate } = require("../services/customerRef");
@@ -70,7 +72,11 @@ function vatBreakdown(total, rate) {
 // numbers rather than each re-deriving them.
 function withVat(invoice) {
   if (!invoice) return invoice;
-  return { ...invoice, ...vatBreakdown(invoice.amount, invoice.vat_rate) };
+  const treatment = invoice.vat_treatment || DEFAULT_TREATMENT;
+  const breakdown = vatBreakdown(invoice.amount, invoice.vat_rate);
+  // The labels travel with the figures so the page and the PDF cannot word the
+  // same statement differently.
+  return { ...invoice, ...breakdown, vat_treatment: treatment, vat_labels: labelsFor(treatment, breakdown.vat_rate) };
 }
 
 const CURRENCIES = ["PHP", "USD"];
@@ -167,7 +173,14 @@ router.get("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req
     params.push(req.query.order_id);
   }
   sql += " ORDER BY i.created_at DESC";
-  res.json((await db.prepare(sql).all(...params)).map(withVat));
+  // One query for every statement's receipts rather than one per row.
+  const settled = await settlementMap();
+  res.json(
+    (await db.prepare(sql).all(...params)).map((inv) => ({
+      ...withVat(inv),
+      ...settlementOf(inv, settled.get(inv.id)),
+    }))
+  );
 }));
 
 router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
@@ -195,12 +208,27 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
   // Read once, here, and never again for this statement.
   const fx = await snapshotRate("USD", "PHP");
 
+  // Inherited from the customer, which is where it is set, then copied onto
+  // the statement. Copied rather than looked up later: a customer whose status
+  // changes next year must not rewrite what a document already sent them said.
+  // An explicit treatment on the request still wins — one export sale to an
+  // otherwise VATable customer is legitimately zero-rated.
+  const row = await db.prepare("SELECT vat_treatment FROM customers WHERE id = ?").get(customer.id);
+  const asked = validateTreatment(req.body?.vat_treatment);
+  if (asked.error) return res.status(400).json({ error: asked.error });
+  const treatment = asked.treatment || row?.vat_treatment || DEFAULT_TREATMENT;
+  const askedRate = validateVatRate(req.body?.vat_rate);
+  if (askedRate.error) return res.status(400).json({ error: askedRate.error });
+  // The rate follows the treatment, so the two can never contradict.
+  const vatRate = rateFor(treatment, askedRate.rate);
+
   try {
     const info = await db
       .prepare(
         `INSERT INTO invoices (invoice_number, order_id, customer_name, customer_id, amount, status, currency, issue_date, due_date, notes,
-                               project_id, created_by, status_changed_by, status_changed_at, fx_rate, fx_rate_date)
-         VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?, ?, ?, ?, ?)`
+                               project_id, created_by, status_changed_by, status_changed_at, fx_rate, fx_rate_date,
+                               vat_treatment, vat_rate)
+         VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD')), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         invoice_number,
@@ -218,9 +246,12 @@ router.post("/", requireAuth, requireRole("admin", "hr"), asyncHandler(async (re
         req.user.employee_id || null,
         nowStamp(),
         fx.rate,
-        fx.date
+        fx.date,
+        treatment,
+        vatRate
       );
-    res.status(201).json(withVat(await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(info.lastInsertRowid)));
+    const created = await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(info.lastInsertRowid);
+    res.status(201).json({ ...withVat(created), ...settlementOf(created, await settlementFor(created.id)) });
   } catch (err) {
     res.status(400).json({ error: "An invoice with that number already exists" });
   }
@@ -243,26 +274,37 @@ router.post("/from-order/:orderId", requireAuth, requireRole("admin", "hr"), asy
   // with the first (invoice_number is the column that's actually unique).
   const invoiceCount = (await db.prepare("SELECT COUNT(*) AS c FROM invoices WHERE order_id = ?").get(order.id)).c;
   const orderFx = await snapshotRate("USD", "PHP");
+  // The customer's treatment, resolved before the insert so the statement is
+  // raised already carrying it rather than defaulting to standard and being
+  // corrected by hand afterwards.
+  const orderCustomerId = order.customer_id || (await resolveCustomerId(null, order.customer_name));
+  const orderCustomer = orderCustomerId
+    ? await db.prepare("SELECT vat_treatment FROM customers WHERE id = ?").get(orderCustomerId)
+    : null;
+  const orderTreatment = orderCustomer?.vat_treatment || DEFAULT_TREATMENT;
   const invoiceNumber = invoiceCount === 0 ? `SOA-${order.order_number}` : `SOA-${order.order_number}-${invoiceCount + 1}`;
 
   try {
     const insertResult = await db
       .prepare(
         `INSERT INTO invoices (invoice_number, order_id, customer_name, customer_id, amount, status, issue_date, project_id,
-                               fx_rate, fx_rate_date)
-         VALUES (?, ?, ?, ?, ?, 'draft', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'), ?, ?, ?)`
+                               fx_rate, fx_rate_date, vat_treatment, vat_rate)
+         VALUES (?, ?, ?, ?, ?, 'draft', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD'), ?, ?, ?, ?, ?)`
       )
       .run(
         invoiceNumber,
         order.id,
         order.customer_name,
-        order.customer_id || (await resolveCustomerId(null, order.customer_name)),
+        orderCustomerId,
         remaining,
         order.project_id || null,
         orderFx.rate,
-        orderFx.date
+        orderFx.date,
+        orderTreatment,
+        rateFor(orderTreatment)
       );
-    res.status(201).json(withVat(await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(insertResult.lastInsertRowid)));
+    const fromOrder = await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(insertResult.lastInsertRowid);
+    res.status(201).json({ ...withVat(fromOrder), ...settlementOf(fromOrder, await settlementFor(fromOrder.id)) });
   } catch (err) {
     res.status(400).json({ error: "An invoice with that number already exists" });
   }
@@ -424,7 +466,124 @@ router.get("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
   const invoice = await db.prepare(`${SELECT_BASE} WHERE i.id = ?`).get(req.params.id);
   if (!invoice) return res.status(404).json({ error: "Invoice not found" });
   invoice.items = await itemsFor(invoice.id);
-  res.json(withVat(invoice));
+  res.json({ ...withVat(invoice), ...settlementOf(invoice, await settlementFor(invoice.id)) });
+}));
+
+// Receipts against a statement — what actually settled it.
+//
+// A separate record per receipt rather than a figure on the invoice, because
+// the question is not only how much but when, how, and against what reference.
+// A statement settled by a cheque in March and a 2307 in April has two facts
+// to keep, not one.
+router.get("/:id/receipts", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
+  const invoice = await db.prepare("SELECT id, amount FROM invoices WHERE id = ?").get(req.params.id);
+  if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+  const rows = await db
+    .prepare(
+      `SELECT r.*, (e.first_name || ' ' || e.last_name) AS recorded_by_name
+       FROM invoice_receipts r LEFT JOIN employees e ON e.id = r.recorded_by
+       WHERE r.invoice_id = ? ORDER BY r.received_on, r.id`
+    )
+    .all(req.params.id);
+  res.json({
+    receipts: rows.map((r) => ({ ...r, amount: money(r.amount) })),
+    ...settlementOf(invoice, await settlementFor(invoice.id)),
+  });
+}));
+
+const RECEIPT_KINDS = ["payment", "withholding", "adjustment"];
+
+router.post("/:id/receipts", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
+  const invoice = await db.prepare("SELECT * FROM invoices WHERE id = ?").get(req.params.id);
+  if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+  // A draft has not been sent, so there is nothing for a customer to have
+  // settled. A cancelled one is not owed.
+  if (["draft", "cancelled"].includes(invoice.status)) {
+    return res.status(400).json({ error: `A ${invoice.status} statement cannot have receipts against it` });
+  }
+
+  const kind = String(req.body?.kind || "").trim();
+  if (!RECEIPT_KINDS.includes(kind)) {
+    return res.status(400).json({ error: "kind must be payment, withholding or adjustment" });
+  }
+  const amount = money(req.body?.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return res.status(400).json({ error: "Amount must be more than zero" });
+
+  const receivedOn = String(req.body?.received_on || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedOn)) return res.status(400).json({ error: "Give the date as YYYY-MM-DD" });
+
+  // Settling more than the statement is worth is a keying slip far more often
+  // than it is a real overpayment, and the figure it corrupts is what the
+  // customer still owes. Refused, naming what is actually left.
+  const current = settlementOf(invoice, await settlementFor(invoice.id));
+  if (amount > current.outstanding) {
+    return res.status(400).json({
+      error:
+        current.outstanding <= 0
+          ? `${invoice.invoice_number} is already settled in full`
+          : `Only ${current.outstanding.toLocaleString()} is outstanding on ${invoice.invoice_number}`,
+    });
+  }
+
+  await db
+    .prepare(
+      `INSERT INTO invoice_receipts (invoice_id, kind, amount, received_on, reference, note, recorded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .run(
+      invoice.id,
+      kind,
+      amount,
+      receivedOn,
+      String(req.body?.reference || "").trim() || null,
+      String(req.body?.note || "").trim() || null,
+      req.user.employee_id || null
+    );
+
+  // The invoice's own status follows the receipts rather than being set by
+  // hand, so the two can never disagree. paid_date is the day it was finally
+  // settled, whatever mix of cash, withholding and adjustment did it.
+  const after = settlementOf(invoice, await settlementFor(invoice.id));
+  if (after.outstanding <= 0 && invoice.status !== "paid") {
+    await db
+      .prepare("UPDATE invoices SET status = 'paid', paid_date = ?, status_changed_by = ?, status_changed_at = ? WHERE id = ?")
+      .run(receivedOn, req.user.employee_id || null, nowStamp(), invoice.id);
+  }
+
+  await logRequestEvent(req, "record_invoice_receipt", {
+    entityType: "invoice",
+    entityId: invoice.id,
+    details: { invoice_number: invoice.invoice_number, kind, amount, received_on: receivedOn },
+  });
+
+  const fresh = await db.prepare("SELECT id, amount FROM invoices WHERE id = ?").get(invoice.id);
+  res.status(201).json(settlementOf(fresh, await settlementFor(invoice.id)));
+}));
+
+router.delete("/:id/receipts/:receiptId", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
+  const row = await db
+    .prepare("SELECT * FROM invoice_receipts WHERE id = ? AND invoice_id = ?")
+    .get(req.params.receiptId, req.params.id);
+  if (!row) return res.status(404).json({ error: "No such receipt on this statement" });
+
+  await db.prepare("DELETE FROM invoice_receipts WHERE id = ?").run(row.id);
+
+  // Removing a receipt can reopen a statement that was settled, so the status
+  // is recomputed rather than left reading "paid" against a balance.
+  const invoice = await db.prepare("SELECT * FROM invoices WHERE id = ?").get(req.params.id);
+  const after = settlementOf(invoice, await settlementFor(invoice.id));
+  if (after.outstanding > 0 && invoice.status === "paid") {
+    await db
+      .prepare("UPDATE invoices SET status = 'sent', paid_date = NULL, status_changed_by = ?, status_changed_at = ? WHERE id = ?")
+      .run(req.user.employee_id || null, nowStamp(), invoice.id);
+  }
+
+  await logRequestEvent(req, "delete_invoice_receipt", {
+    entityType: "invoice",
+    entityId: invoice.id,
+    details: { invoice_number: invoice.invoice_number, kind: row.kind, amount: money(row.amount) },
+  });
+  res.json(settlementOf(invoice, await settlementFor(invoice.id)));
 }));
 
 // Replaces the whole breakdown in one go. A per-line API would leave an
@@ -463,6 +622,10 @@ router.put("/:id/items", requireAuth, requireRole("admin", "hr"), asyncHandler(a
     }
   }
 
+  const lineTreatmentCheck = validateTreatment(req.body?.vat_treatment);
+  if (lineTreatmentCheck.error) return res.status(400).json({ error: lineTreatmentCheck.error });
+  const lineTreatment = lineTreatmentCheck.treatment;
+
   await db.transaction(async () => {
     await db.prepare("DELETE FROM invoice_items WHERE invoice_id = ?").run(existing.id);
     for (const it of items) {
@@ -479,8 +642,13 @@ router.put("/:id/items", requireAuth, requireRole("admin", "hr"), asyncHandler(a
     if (items.length > 0) {
       await db.prepare("UPDATE invoices SET amount = ? WHERE id = ?").run(total, existing.id);
     }
-    if (rate !== undefined) {
-      await db.prepare("UPDATE invoices SET vat_rate = ? WHERE id = ?").run(rate, existing.id);
+    // Treatment and rate are written together so they cannot drift apart: the
+    // rate is derived from the treatment, never typed against it.
+    if (lineTreatment !== undefined || rate !== undefined) {
+      const treatment = lineTreatment || existing.vat_treatment || DEFAULT_TREATMENT;
+      await db
+        .prepare("UPDATE invoices SET vat_treatment = ?, vat_rate = ? WHERE id = ?")
+        .run(treatment, rateFor(treatment, rate !== undefined ? rate : existing.vat_rate), existing.id);
     }
     if (itemsCurrency !== undefined) {
       await db.prepare("UPDATE invoices SET currency = ? WHERE id = ?").run(itemsCurrency, existing.id);
@@ -541,10 +709,17 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
   const paid_date = status === "paid" && existing.status !== "paid" ? new Date().toISOString().slice(0, 10) : existing.paid_date;
   const invStatusMoved = (status || existing.status) !== existing.status;
 
+  // The treatment leads and the rate follows it, so the pair can never end up
+  // saying different things — "exempt" at 12% is not a state worth supporting.
+  const askedTreatment = validateTreatment(req.body?.vat_treatment);
+  if (askedTreatment.error) return res.status(400).json({ error: askedTreatment.error });
+  const updatedTreatment = askedTreatment.treatment || existing.vat_treatment || DEFAULT_TREATMENT;
+  const updatedRate = rateFor(updatedTreatment, rate !== undefined ? rate : existing.vat_rate);
+
   try {
     await db.prepare(
       `UPDATE invoices SET invoice_number = ?, order_id = ?, customer_name = ?, customer_id = ?, amount = ?, status = ?,
-       vat_rate = ?, currency = ?, issue_date = ?, due_date = ?, notes = ?, paid_date = ?, project_id = ?,
+       vat_rate = ?, vat_treatment = ?, currency = ?, issue_date = ?, due_date = ?, notes = ?, paid_date = ?, project_id = ?,
        status_changed_by = ?, status_changed_at = ? WHERE id = ?`
     ).run(
       invoice_number ?? existing.invoice_number,
@@ -553,7 +728,8 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
       customerId,
       amount !== undefined ? amount : existing.amount,
       status || existing.status,
-      rate !== undefined ? rate : existing.vat_rate,
+      updatedRate,
+      updatedTreatment,
       currency !== undefined ? currency : existing.currency,
       issue_date ?? existing.issue_date,
       due_date !== undefined ? due_date : existing.due_date,

@@ -1433,6 +1433,75 @@ async function ensureCustomerLinks() {
   // Existing invoices were raised VAT-inclusive at the standard rate, so 12 is
   // the right default for them as well as for new ones.
   await pool.query(`ALTER TABLE invoices ADD COLUMN IF NOT EXISTS vat_rate NUMERIC(5,2) NOT NULL DEFAULT 12`);
+
+  // What actually settled a statement, one row per receipt.
+  //
+  // Before this an invoice was paid or not paid, and "collected" was the sum
+  // of whole invoices marked paid. A customer who pays less than the face
+  // value had nowhere to go: marking it paid overstates collections by the
+  // shortfall, leaving it sent understates them by the whole payment, and
+  // editing the amount down is worse than either — what is left to bill on an
+  // order is the order less the invoices raised against it, so reducing an
+  // invoice silently makes the difference billable again.
+  //
+  // The kinds are not the same thing and must not be added up as one:
+  //
+  //   payment     cash actually banked.
+  //   withholding tax the customer withheld and remitted on our behalf —
+  //               creditable withholding, evidenced by BIR Form 2307. The
+  //               invoice IS settled by it; it is simply not cash, so it must
+  //               not inflate what the business collected.
+  //   adjustment  an agreed discount, retention, or write-off. Settles the
+  //               receivable and will never arrive as money.
+  //
+  // All three reduce what is outstanding. Only payment is cash.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS invoice_receipts (
+      id SERIAL PRIMARY KEY,
+      invoice_id INTEGER NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK (kind IN ('payment','withholding','adjustment')),
+      amount NUMERIC(14,2) NOT NULL CHECK (amount > 0),
+      received_on TEXT NOT NULL,
+      -- The deposit slip, the cheque number, the 2307 serial, or why the
+      -- adjustment was agreed. What an auditor asks for next.
+      reference TEXT,
+      note TEXT,
+      recorded_by INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+      recorded_at TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+    )
+  `);
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_invoice_receipts_invoice ON invoice_receipts(invoice_id)");
+  await pool.query("CREATE INDEX IF NOT EXISTS idx_invoice_receipts_date ON invoice_receipts(received_on)");
+
+  // How a sale is treated for VAT, as a classification rather than a rate.
+  //
+  // Zero-rated and VAT-exempt are both 0%, and they are not the same thing —
+  // BIR classifies them separately and the label belongs on the document. With
+  // only the rate stored, a zero-rated statement was headed "VATable sales",
+  // which is the one thing it is not.
+  //
+  // On the customer so it is set once rather than remembered on every
+  // statement, and copied onto each statement as it is raised so changing a
+  // customer's status later cannot rewrite what a document already sent them
+  // said — the same reason the VAT rate and the exchange rate are snapshotted.
+  await pool.query(
+    `ALTER TABLE customers ADD COLUMN IF NOT EXISTS vat_treatment TEXT NOT NULL DEFAULT 'standard'`
+  );
+  await pool.query(
+    `ALTER TABLE invoices ADD COLUMN IF NOT EXISTS vat_treatment TEXT NOT NULL DEFAULT 'standard'`
+  );
+  for (const table of ["customers", "invoices"]) {
+    await pool
+      .query(
+        `ALTER TABLE ${table} ADD CONSTRAINT ${table}_vat_treatment_check
+         CHECK (vat_treatment IN ('standard','zero_rated','exempt'))`
+      )
+      .catch(() => {
+        /* already constrained */
+      });
+  }
+  // Statements raised before this are all at the standard rate — the default
+  // above is already right for them, and nothing needs rewriting.
   // Peso unless someone says otherwise. Stored on the invoice rather than read
   // from the app-wide currency setting, because both kinds are raised side by
   // side and an invoice's currency must not change when a setting does.

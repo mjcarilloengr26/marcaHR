@@ -160,6 +160,7 @@ export default function Billing() {
     try {
       const saved = await api.put(`/invoices/${lines.invoice.id}/items`, {
         vat_rate: lines.invoice.vat_rate,
+        vat_treatment: lines.invoice.vat_treatment || "standard",
         currency: lines.invoice.currency,
         items: lines.rows.map((r) => ({
           description: r.description,
@@ -698,7 +699,18 @@ export default function Billing() {
                     lines.rows.length > 0
                       ? lines.rows.reduce((n, r) => n + lineTotal(r), 0)
                       : Number(lines.invoice.amount) || 0;
-                  const rate = Number(lines.invoice.vat_rate ?? 12);
+                  // Zero-rated and exempt are 0% by definition, so the rate is
+                  // derived from the treatment rather than typed beside it and
+                  // allowed to contradict it.
+                  const treatment = lines.invoice.vat_treatment || "standard";
+                  const rate = treatment === "standard" ? Number(lines.invoice.vat_rate ?? 12) : 0;
+                  const salesLabel =
+                    treatment === "zero_rated"
+                      ? "Zero-rated sales"
+                      : treatment === "exempt"
+                        ? "VAT-exempt sales"
+                        : "VATable sales";
+                  const vatLabel = treatment === "zero_rated" ? "VAT (zero-rated)" : "VAT (exempt)";
                   const vatable = rate > 0 ? Math.round((gross / (1 + rate / 100)) * 100) / 100 : gross;
                   const vat = Math.round((gross - vatable) * 100) / 100;
                   return (
@@ -721,27 +733,54 @@ export default function Billing() {
                         <td></td>
                         <td></td>
                       </tr>
+                      {/* The treatment leads and the rate follows it. A rate
+                          box on its own cannot tell zero-rated from exempt —
+                          both are 0% and BIR counts them separately — which is
+                          how a zero-rated statement came to be headed "VATable
+                          sales". */}
                       <tr>
-                        <td colSpan={4} style={{ textAlign: "right" }}>VATable sales</td>
+                        <td colSpan={4} style={{ textAlign: "right" }}>VAT treatment</td>
+                        <td colSpan={2}>
+                          <select
+                            value={treatment}
+                            disabled={lines.invoice.status !== "draft"}
+                            onChange={(e) =>
+                              setLines({ ...lines, invoice: { ...lines.invoice, vat_treatment: e.target.value } })
+                            }
+                          >
+                            <option value="standard">Standard — VATable</option>
+                            <option value="zero_rated">Zero-rated</option>
+                            <option value="exempt">VAT-exempt</option>
+                          </select>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td colSpan={4} style={{ textAlign: "right" }}>{salesLabel}</td>
                         <td>{inCurrency(vatable, lines.invoice.currency)}</td>
                         <td></td>
                       </tr>
                       <tr>
                         <td colSpan={4} style={{ textAlign: "right" }}>
-                          VAT
-                          <input
-                            type="number"
-                            min="0"
-                            max="100"
-                            step="0.01"
-                            value={lines.invoice.vat_rate ?? 12}
-                            disabled={lines.invoice.status !== "draft"}
-                            style={{ width: 70, marginLeft: 8, marginRight: 4 }}
-                            onChange={(e) =>
-                              setLines({ ...lines, invoice: { ...lines.invoice, vat_rate: e.target.value } })
-                            }
-                          />
-                          %
+                          {treatment === "standard" ? (
+                            <>
+                              VAT
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                step="0.01"
+                                value={lines.invoice.vat_rate ?? 12}
+                                disabled={lines.invoice.status !== "draft"}
+                                style={{ width: 70, marginLeft: 8, marginRight: 4 }}
+                                onChange={(e) =>
+                                  setLines({ ...lines, invoice: { ...lines.invoice, vat_rate: e.target.value } })
+                                }
+                              />
+                              %
+                            </>
+                          ) : (
+                            vatLabel
+                          )}
                         </td>
                         <td>{inCurrency(vat, lines.invoice.currency)}</td>
                         <td></td>

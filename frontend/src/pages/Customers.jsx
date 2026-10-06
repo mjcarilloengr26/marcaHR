@@ -12,6 +12,7 @@ const emptyForm = {
   billing_address: "",
   tin: "",
   payment_terms_days: 30,
+  vat_treatment: "standard",
   status: "active",
   notes: "",
   cc_emails: [],
@@ -60,6 +61,7 @@ export default function Customers() {
       tin: c.tin || "",
       cc_emails: c.cc_emails || [],
       payment_terms_days: c.payment_terms_days ?? 30,
+      vat_treatment: c.vat_treatment || "standard",
       status: c.status || "active",
       notes: c.notes || "",
     });
@@ -273,6 +275,21 @@ export default function Customers() {
                     value={form.payment_terms_days}
                     onChange={(e) => setForm({ ...form, payment_terms_days: e.target.value })}
                   />
+                </label>
+                {/* Set once here rather than remembered on every statement.
+                    Zero-rated and exempt are both 0% and are not the same
+                    thing — BIR classifies them separately and the statement
+                    prints which it was. */}
+                <label>
+                  VAT treatment
+                  <select
+                    value={form.vat_treatment}
+                    onChange={(e) => setForm({ ...form, vat_treatment: e.target.value })}
+                  >
+                    <option value="standard">Standard — VATable at 12%</option>
+                    <option value="zero_rated">Zero-rated</option>
+                    <option value="exempt">VAT-exempt</option>
+                  </select>
                 </label>
               </div>
 

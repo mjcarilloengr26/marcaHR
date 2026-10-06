@@ -1,5 +1,6 @@
 const PDFDocument = require("pdfkit");
 const db = require("../db");
+const { labelsFor } = require("./vatTreatment");
 
 // The invoice as a document the customer receives. Everything on the
 // letterhead — logo, company name, address, TIN, payment instructions — comes
@@ -327,8 +328,12 @@ function drawTotals(doc, invoice, startY) {
     y += bold ? 20 : 15;
   };
 
-  row("VATable sales", amountIn(vatable, invoice.currency));
-  row(rate > 0 ? `VAT (${rate}%)` : "VAT (zero-rated)", amountIn(vat, invoice.currency));
+  // Labelled by the sale's classification, not by whether the rate happens to
+  // be nought. Zero-rated and exempt are both 0% and are different things, and
+  // on either of them "VATable sales" is the one thing the subtotal is not.
+  const labels = labelsFor(invoice.vat_treatment, rate);
+  row(labels.sales, amountIn(vatable, invoice.currency));
+  row(labels.vat, amountIn(vat, invoice.currency));
 
   doc.moveTo(labelX, y + 2).lineTo(RIGHT_EDGE, y + 2).strokeColor("#cccccc").lineWidth(1).stroke();
   y += 8;

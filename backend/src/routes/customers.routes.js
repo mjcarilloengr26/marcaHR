@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
+const { validateTreatment, DEFAULT_TREATMENT } = require("../services/vatTreatment");
 const asyncHandler = require("../middleware/asyncHandler");
 
 const router = express.Router();
@@ -51,7 +52,12 @@ function validate(body, existing) {
     payment_terms_days: body.payment_terms_days ?? existing?.payment_terms_days ?? 30,
     status: body.status ?? existing?.status ?? "active",
     notes: (body.notes ?? existing?.notes ?? "").trim() || null,
+    // Set once here rather than remembered on every statement raised for them.
+    vat_treatment: body.vat_treatment ?? existing?.vat_treatment ?? DEFAULT_TREATMENT,
   };
+
+  const vat = validateTreatment(v.vat_treatment);
+  if (vat.error) return { error: vat.error };
 
   if (!v.name) return { error: "A customer name is required" };
   // Rejected rather than stored, because an address that only looks like an
@@ -156,8 +162,8 @@ router.post(
     try {
       const info = await db
         .prepare(
-          `INSERT INTO customers (name, email, cc_emails, contact_person, phone, billing_address, tin, payment_terms_days, status, notes, created_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          `INSERT INTO customers (name, email, cc_emails, contact_person, phone, billing_address, tin, payment_terms_days, status, notes, vat_treatment, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           value.name,
@@ -170,6 +176,7 @@ router.post(
           value.payment_terms_days,
           value.status,
           value.notes,
+          value.vat_treatment,
           req.user.employee_id || null
         );
       res.status(201).json(await db.prepare(`${SELECT_BASE} WHERE c.id = ?`).get(info.lastInsertRowid));
@@ -196,7 +203,7 @@ router.put(
     try {
       await db
         .prepare(
-          `UPDATE customers SET name = ?, email = ?, cc_emails = ?, contact_person = ?, phone = ?, billing_address = ?,
+          `UPDATE customers SET name = ?, email = ?, cc_emails = ?, contact_person = ?, phone = ?, billing_address = ?, vat_treatment = ?,
              tin = ?, payment_terms_days = ?, status = ?, notes = ? WHERE id = ?`
         )
         .run(
@@ -206,6 +213,7 @@ router.put(
           value.contact_person,
           value.phone,
           value.billing_address,
+          value.vat_treatment,
           value.tin,
           value.payment_terms_days,
           value.status,
