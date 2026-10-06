@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, downloadFile, fetchFileUrl } from "../api/client";
 import CustomerPicker from "../components/CustomerPicker";
+import InvoiceReceipts from "../components/InvoiceReceipts";
 import SuggestInput from "../components/SuggestInput";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
@@ -26,6 +27,11 @@ export default function Billing() {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [lines, setLines] = useState(null);
+  // Which statement's receipts are open. Its own modal rather than a tab in
+  // the Lines dialog: lines are what the customer was charged and receipts are
+  // what they settled it with, and editing one while reading the other is how
+  // an amount gets "corrected" to match a payment.
+  const [receiptsFor, setReceiptsFor] = useState(null);
   const [linesBusy, setLinesBusy] = useState(false);
   const [linesError, setLinesError] = useState("");
   const [notice, setNotice] = useState("");
@@ -474,6 +480,14 @@ export default function Billing() {
                     <button className="btn btn-sm btn-secondary" onClick={() => openSend(inv)}>Resend</button>
                   )}
                   <button className="btn btn-sm btn-secondary" onClick={() => openLines(inv)}>Lines</button>
+                  {/* Only once it has gone out — there is nothing to settle on
+                      a draft, and a cancelled statement is not owed. */}
+                  {!["draft", "cancelled"].includes(inv.status) && (
+                    <button className="btn btn-sm btn-secondary" onClick={() => setReceiptsFor(inv)}>
+                      Receipts
+                      {inv.outstanding > 0 && inv.settled > 0 ? ` · ${money(inv.outstanding)} left` : ""}
+                    </button>
+                  )}
                   <button className="btn btn-sm btn-secondary" onClick={() => openEdit(inv)}>Edit</button>
                   {isAdmin && (
                     <button className="btn btn-sm btn-danger" onClick={() => handleDelete(inv.id)}>Delete</button>
@@ -549,6 +563,22 @@ export default function Billing() {
               <button type="submit" className="btn" disabled={saving}>{saving ? "Saving…" : editingId ? "Save changes" : "Create statement"}</button>
             </div>
           </form>
+        </div>
+      )}
+
+      {receiptsFor && (
+        <div className="modal-backdrop" onClick={() => setReceiptsFor(null)}>
+          <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+            <h2>Receipts — {receiptsFor.invoice_number}</h2>
+            <p className="subtitle" style={{ marginTop: -8 }}>
+              {receiptsFor.customer_name} · what settled this statement. The statement total is not changed by any of
+              this — reducing it would make the difference billable again on the order.
+            </p>
+            <InvoiceReceipts invoice={receiptsFor} onSettled={load} />
+            <div className="modal-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => setReceiptsFor(null)}>Close</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -816,8 +846,9 @@ export default function Billing() {
             )}
 
             <p className="subtitle" style={{ marginTop: 10 }}>
-              Prices are VAT-inclusive, so VAT is taken out of the total rather than added on top. Set the rate to 0 for
-              a zero-rated or exempt sale. The PDF prints the{" "}
+              Prices are VAT-inclusive, so VAT is taken out of the total rather than added on top. Pick the treatment
+              rather than a rate: zero-rated and exempt are both 0% and BIR counts them separately, so the statement
+              prints which one it was. The PDF prints the{" "}
               {(lines.invoice.currency || "PHP") === "USD" ? "US dollar account and SWIFT code" : "peso account"} to
               match this currency.
             </p>
