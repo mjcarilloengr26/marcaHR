@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import SuggestInput from "../components/SuggestInput";
 import { useAuth } from "../context/AuthContext";
@@ -226,6 +226,26 @@ export default function Expenses() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [openId, setOpenId] = useState(null);
+  // Which line ids are under suspicion, when the report was opened from the
+  // duplicate check. Opening a report to eight lines with no sign of which two
+  // are in question just moves the hunting somewhere else.
+  const [flaggedItems, setFlaggedItems] = useState([]);
+
+  // ?report=257&items=12,13 — the duplicate card links here. The link already
+  // existed and wrote the parameter; nothing read it, so clicking it reloaded
+  // the page and left you to find the report in a list of seventy.
+  const [params] = useSearchParams();
+  useEffect(() => {
+    const id = Number(params.get("report"));
+    if (!Number.isInteger(id) || id <= 0) return;
+    setOpenId(id);
+    setFlaggedItems(
+      String(params.get("items") || "")
+        .split(",")
+        .map(Number)
+        .filter((n) => Number.isInteger(n) && n > 0)
+    );
+  }, [params]);
   const [search, setSearch] = useState("");
 
   const [options, setOptions] = useState({ types: [], titles: [], categories: [] });
@@ -1016,6 +1036,7 @@ export default function Expenses() {
         <ReportDetail
           id={openId}
           isHr={isHr}
+          flaggedItems={flaggedItems}
           // Passed down rather than fetched again: the item form needs the
           // same category list the report form uses, and it lives here.
           options={options}
@@ -1030,7 +1051,7 @@ export default function Expenses() {
 // options defaults rather than being assumed present: this component renders
 // in a modal off a parent's state, and reading a list off undefined took the
 // whole page blank once already.
-function ReportDetail({ id, isHr, options = { types: [], titles: [], categories: [] }, onClose, onChanged }) {
+function ReportDetail({ id, isHr, flaggedItems = [], options = { types: [], titles: [], categories: [] }, onClose, onChanged }) {
   const { user } = useAuth();
   // Its own hook call — this is a separate component from Expenses above, so
   // it can't see that one's formatter.
@@ -1304,6 +1325,20 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
               {report.notes && <div><strong>Notes</strong><div>{report.notes}</div></div>}
             </div>
 
+            {/* Opened from the duplicate check. Says so, because arriving at a
+                report with two of its eight lines shaded and no explanation is
+                worse than not shading them. */}
+            {flaggedItems.length > 0 && (
+              <div className="warning-banner" style={{ marginTop: 4 }}>
+                <strong>
+                  {flaggedItems.length} line{flaggedItems.length === 1 ? "" : "s"} below{" "}
+                  {flaggedItems.length === 1 ? "is" : "are"} flagged as possibly already claimed.
+                </strong>{" "}
+                Marked in the table. Check them against the other report in the pair before approving or paying this
+                one — the duplicate card on the expenses list has a link to it.
+              </div>
+            )}
+
             {report.review_note && report.status === "rejected" && (
               <div className="error-banner" style={{ marginTop: 4 }}>
                 <strong>Sent back:</strong> {report.review_note}
@@ -1330,7 +1365,10 @@ function ReportDetail({ id, isHr, options = { types: [], titles: [], categories:
               </thead>
               <tbody>
                 {report.items.map((it) => (
-                  <tr key={it.id}>
+                  // A line the duplicate check flagged is marked where the
+                  // judgement is actually made, rather than named on one screen
+                  // and hunted for on another.
+                  <tr key={it.id} className={flaggedItems.includes(it.id) ? "row-flagged" : undefined}>
                     <td>{it.expense_date}</td>
                     <td>{it.category || "—"}</td>
                     {/* Address and TIN are on hover rather than in their own

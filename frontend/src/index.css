@@ -1832,3 +1832,10 @@ body.snapshot-tv .content {
   overflow: hidden;
   overflow-wrap: anywhere;
 }
+
+/* A line the duplicate check is asking about, marked inside the report so the
+   judgement happens where the evidence is. A left bar rather than a fill: the
+   row still has to be readable, and a wash over it fights the status badges
+   already in the cells. */
+.row-flagged > td { background: var(--warning-banner-bg); }
+.row-flagged > td:first-child { box-shadow: inset 3px 0 0 var(--warning); }

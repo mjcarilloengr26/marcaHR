@@ -157,7 +157,12 @@ export default function DuplicateExpenses({ onChanged }) {
                       <td className="col-nowrap">{i.receipt_ref || "—"}</td>
                       <td className="col-nowrap">{money(i.amount)}</td>
                       <td className="col-nowrap">
-                        <Link to={`/expenses?report=${i.report_id}`} className="location-link">
+                        {/* Carries the line id too, so the report opens with
+                            the line in question already marked. */}
+                        <Link
+                          to={`/expenses?report=${i.report_id}&items=${i.item_id}`}
+                          className="location-link"
+                        >
                           {i.title || `#${i.report_id}`}
                         </Link>
                         {/* Whether this one has already been paid is the
@@ -174,6 +179,28 @@ export default function DuplicateExpenses({ onChanged }) {
                 </tbody>
               </table>
             </div>
+
+            {/* One button per report rather than one for the cluster. Judging a
+                pair means reading both sides, and they are usually different
+                reports — Laiza's September lunches sit on a reimbursed report
+                and a draft, and you need both open to tell which is which. */}
+            {!done && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+                <span className="subtitle" style={{ margin: 0, fontSize: 12 }}>Open</span>
+                {[...new Map(c.items.map((i) => [i.report_id, i])).values()].map((i) => (
+                  <Link
+                    key={i.report_id}
+                    to={`/expenses?report=${i.report_id}&items=${c.items
+                      .filter((x) => x.report_id === i.report_id)
+                      .map((x) => x.item_id)
+                      .join(",")}`}
+                    className="btn btn-sm btn-secondary"
+                  >
+                    {i.title || `#${i.report_id}`} · {i.status}
+                  </Link>
+                ))}
+              </div>
+            )}
 
             {done ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
