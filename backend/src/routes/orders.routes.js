@@ -4,6 +4,7 @@ const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { onOrderDelivered } = require("../services/billingTriggers");
 const { resolveCustomer, resolveCustomerForUpdate } = require("../services/customerRef");
+const { logRequestEvent } = require("../services/auditLog");
 
 const router = express.Router();
 
@@ -161,7 +162,38 @@ router.delete(
   asyncHandler(async (req, res) => {
     const existing = await db.prepare("SELECT * FROM orders WHERE id = ?").get(req.params.id);
     if (!existing) return res.status(404).json({ error: "Order not found" });
+
+    // Both invoices.order_id and work_orders.order_id are ON DELETE SET NULL,
+    // so deleting an order did not fail — it quietly cut the link and left a
+    // statement belonging to nothing, with no record that it ever had an order.
+    // Whatever was billed against it then stops counting toward what the order
+    // was worth, and the loss is invisible.
+    //
+    // Cancelling is the way out: it keeps the trail, takes the order off the
+    // billing list, and stops anything new being raised against it.
+    const [invoices, workOrders] = await Promise.all([
+      db.prepare("SELECT COUNT(*) AS c FROM invoices WHERE order_id = ?").get(req.params.id),
+      db.prepare("SELECT COUNT(*) AS c FROM work_orders WHERE order_id = ?").get(req.params.id),
+    ]);
+    const held = [
+      Number(invoices.c) > 0 ? `${invoices.c} statement${Number(invoices.c) === 1 ? "" : "s"}` : null,
+      Number(workOrders.c) > 0 ? `${workOrders.c} work order${Number(workOrders.c) === 1 ? "" : "s"}` : null,
+    ].filter(Boolean);
+    if (held.length) {
+      return res.status(400).json({
+        error:
+          `${held.join(" and ")} ${held.length === 1 && !held[0].endsWith("s") ? "is" : "are"} linked to ` +
+          `${existing.order_number}. Deleting it would leave ${held.length > 1 ? "them" : "it"} belonging to nothing. ` +
+          `Cancel the order instead — that takes it off the billing list and keeps the trail.`,
+      });
+    }
+
     await db.prepare("DELETE FROM orders WHERE id = ?").run(req.params.id);
+    await logRequestEvent(req, "delete_order", {
+      entityType: "order",
+      entityId: Number(req.params.id),
+      details: { order_number: existing.order_number, customer_name: existing.customer_name, amount: existing.amount },
+    });
     res.status(204).end();
   })
 );

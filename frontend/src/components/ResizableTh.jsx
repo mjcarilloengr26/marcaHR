@@ -75,7 +75,14 @@ export default function ResizableTh({ label, column, className = "th-plain", chi
   const nudge = (by) => setWidth((w) => Math.min(max, Math.max(min, w + by)));
 
   return (
-    <th className={className} style={{ width, minWidth: width, position: "relative" }}>
+    // Positioning comes from the stylesheet, never inline. The grip is
+    // absolutely placed and so needs a positioned ancestor, and setting
+    // position:relative here looked like the way to get one — but an inline
+    // style beats every rule, including the sticky that docks a table's header.
+    // This column alone then scrolled away while its neighbours stayed put.
+    // A sticky ancestor is a positioned ancestor, so the grip is fine either
+    // way; .col-resizable only has to cover the tables that are not sticky.
+    <th className={`${className} col-resizable`} style={{ width, minWidth: width }}>
       {children ?? label}
       <span
         className="col-resizer"

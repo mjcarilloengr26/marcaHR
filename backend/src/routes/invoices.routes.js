@@ -267,6 +267,12 @@ router.post("/from-order/:orderId", requireAuth, requireRole("admin", "hr"), asy
   const info = await remainingForOrder(req.params.orderId, 0);
   if (!info) return res.status(404).json({ error: "Order not found" });
   const { order, remaining } = info;
+  // A cancelled order is not work that was done, so there is nothing to charge
+  // for. The list this is reached from already hides them; this is what makes
+  // it true rather than merely tidy.
+  if (order.status === "cancelled") {
+    return res.status(400).json({ error: `${order.order_number} is cancelled, so there is nothing to bill against it` });
+  }
   if (remaining === 0) return res.status(400).json({ error: "This order is already fully billed" });
 
   // The default statement number is derived from the order number, so a second

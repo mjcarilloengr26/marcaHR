@@ -1839,3 +1839,11 @@ body.snapshot-tv .content {
    already in the cells. */
 .row-flagged > td { background: var(--warning-banner-bg); }
 .row-flagged > td:first-child { box-shadow: inset 3px 0 0 var(--warning); }
+
+/* A heading that carries a drag grip. The grip is absolutely placed, so the
+   heading has to be a positioned ancestor — but only where it is not already
+   one. .sticky-head thead th is position:sticky and more specific than this,
+   so a docked header goes on docking; this covers the plain tables. Setting it
+   inline instead, as this first did, beat the sticky rule and left that one
+   column's heading scrolling away while every other one stayed put. */
+.col-resizable { position: relative; }

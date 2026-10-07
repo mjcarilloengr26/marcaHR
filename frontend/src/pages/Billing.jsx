@@ -277,7 +277,13 @@ export default function Billing() {
     acc[inv.order_id] = (acc[inv.order_id] || 0) + Number(inv.amount || 0);
     return acc;
   }, {});
+  // A cancelled order is not work waiting to be billed, so it has no place on a
+  // list of things to bill. Without this it sat there with a "Bill this order"
+  // button beside it for good: the only way off the list was to delete the
+  // order, which would have silently unlinked any statement already raised
+  // against it.
   const unbilledOrders = orders
+    .filter((o) => o.status !== "cancelled")
     .map((o) => ({ ...o, billed: billedByOrder[o.id] || 0, remaining: Math.max(o.amount - (billedByOrder[o.id] || 0), 0) }))
     .filter((o) => o.remaining > 0);
 
