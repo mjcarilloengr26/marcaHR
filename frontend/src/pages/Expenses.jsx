@@ -10,6 +10,7 @@ import SortTh from "../components/SortTh";
 import ResizableTh, { useColumnWidth } from "../components/ResizableTh";
 import DuplicateExpenses from "../components/DuplicateExpenses";
 import PastRecords from "../components/PastRecords";
+import { useClaimedLines } from "../hooks/useClaimedLines";
 import DecimalInput from "../components/DecimalInput";
 
 // The vocabularies come from the server (GET /expenses/options), which is also
@@ -72,6 +73,19 @@ const blankLine = () => ({
   supplier_address: "",
   supplier_tin: "",
 });
+
+// One line of warning where a repeat is being typed. Names the report it was
+// already claimed on, because "this looks like a duplicate" with nothing to
+// check it against is a dead end for whoever is filling the form in.
+function ClaimedAlready({ match, money }) {
+  if (!match) return null;
+  return (
+    <p className="subtitle" style={{ margin: "4px 0 0", fontSize: 12, color: "var(--warning)" }}>
+      Already claimed — {money(match.amount)} on {match.expense_date} is on “{match.title}” (#{match.report_id},{" "}
+      {match.status}). File it again only if this really is a second one.
+    </p>
+  );
+}
 
 const EMPTY_FORM = { expense_type: "", cash_advance_amount: "", cost_center: "", notes: "", cash_advance_id: "", project_id: "" };
 const EMPTY_ITEM_FORM = {
@@ -224,6 +238,9 @@ export default function Expenses() {
     }
   };
   const [form, setForm] = useState(EMPTY_FORM);
+  // Lines this person has already claimed, so a repeat is caught as it is
+  // typed rather than by the duplicate check a fortnight later.
+  const claimedMatch = useClaimedLines(user?.employee_id);
   const [saving, setSaving] = useState(false);
   const [openId, setOpenId] = useState(null);
   // Which line ids are under suspicion, when the report was opened from the
@@ -886,6 +903,11 @@ export default function Expenses() {
                       placeholder="0.00"
                       required
                     />
+                    {/* Said here, beside the amount that triggers it, rather
+                        than as a banner at the top of a form with nine lines on
+                        it. A warning, never a block: the same fare on the same
+                        day twice is unusual and not impossible. */}
+                    <ClaimedAlready match={claimedMatch(l.expense_date, l.amount)} money={money} />
                   </div>
                 </div>
 
@@ -1057,6 +1079,9 @@ function ReportDetail({ id, isHr, flaggedItems = [], options = { types: [], titl
   // it can't see that one's formatter.
   const { moneyPrecise: money } = useAppSettings();
   const [report, setReport] = useState(null);
+  // Keyed to whose claim this is, not who is typing: HR files on behalf of
+  // staff, and a repeat is a repeat against the owner's own history.
+  const claimedMatch = useClaimedLines(report?.employee_id);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [itemForm, setItemForm] = useState(EMPTY_ITEM_FORM);
@@ -1485,6 +1510,10 @@ function ReportDetail({ id, isHr, flaggedItems = [], options = { types: [], titl
                 <div className="form-row">
                   <label>Amount</label>
                   <DecimalInput value={itemForm.amount} onChange={(e) => setItemForm({ ...itemForm, amount: e.target.value })} required />
+                  {/* Against the report owner's history, not the person typing:
+                      HR files on behalf of staff, and whose claim it is decides
+                      what counts as a repeat. */}
+                  <ClaimedAlready match={claimedMatch(itemForm.expense_date, itemForm.amount)} money={money} />
                 </div>
                 <div className="form-row">
                   <label>Proof of receipt</label>
