@@ -1,7 +1,7 @@
 const express = require("express");
 const ExcelJS = require("exceljs");
 const db = require("../db");
-const { advancePositions } = require("../services/advancePosition");
+const { advancePositions, outstandingOf } = require("../services/advancePosition");
 const { OTHER, knownCategories } = require("../services/expenseOptions");
 const { COUNTED_SQL } = require("../services/expenseScope");
 const { requireAuth } = require("../middleware/auth");
@@ -1132,7 +1132,7 @@ router.get(
     // worth chasing.
     const advances = await db
       .prepare(
-        `SELECT ca.reference, ca.date_released, ca.amount, ca.returned_amount, ca.status,
+        `SELECT ca.reference, ca.date_released, ca.amount, ca.returned_amount, ca.reimbursed_amount, ca.status,
                 ca.purpose, ca.cost_center,
                 (e.first_name || ' ' || e.last_name) AS employee_name,
                 COALESCE((
@@ -1169,7 +1169,15 @@ router.get(
         { header: "Status", key: "status", width: 12 },
       ],
       advances.map((a) => {
-        const outstanding = Number((a.amount - a.returned_amount - a.liquidated).toFixed(2));
+        // The same sum the two pages show, so an export never contradicts
+        // the screen it was taken from. A reimbursed overspend is paid and
+        // owed to nobody; leaving the term out put it in Due To Employee.
+        const outstanding = outstandingOf({
+          amount: a.amount,
+          returned: a.returned_amount,
+          reimbursed: a.reimbursed_amount,
+          liquidated: a.liquidated,
+        });
         return {
           ...a,
           purpose: a.purpose || "—",

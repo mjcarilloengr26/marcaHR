@@ -1,5 +1,6 @@
 const express = require("express");
 const { COUNTED_SQL } = require("../services/expenseScope");
+const { outstandingOf } = require("../services/advancePosition");
 const { OTHER, knownCategories } = require("../services/expenseOptions");
 const db = require("../db");
 const { requireAuth, requireRole } = require("../middleware/auth");
@@ -215,6 +216,7 @@ router.get(
 const ADVANCE_SQL = `
   SELECT a.amount,
          a.returned_amount,
+         a.reimbursed_amount,
          a.status,
          COALESCE((SELECT SUM(i.amount)
                    FROM expense_reports r
@@ -251,8 +253,11 @@ async function fetchAdvancePosition(start, end) {
   let dueToCompany = 0;
   let dueToEmployees = 0;
 
-  const settle = (amount, returned, spent) => {
-    const left = amount - returned - spent;
+  const settle = (amount, returned, reimbursed, spent) => {
+    // outstandingOf, so the card and the two pages behind it cannot disagree.
+    // Before this the dashboard left out money already paid back to cover an
+    // overspend, and carried that as still owed to the employee.
+    const left = outstandingOf({ amount, returned, reimbursed, liquidated: spent });
     if (left > 0) dueToCompany += left;
     else if (left < 0) dueToEmployees += -left;
   };
@@ -262,13 +267,15 @@ async function fetchAdvancePosition(start, end) {
     liquidated += Number(a.liquidated) || 0;
     // Settled means the reckoning is done, whatever the arithmetic says.
     if (a.status !== "settled") {
-      settle(Number(a.amount) || 0, Number(a.returned_amount) || 0, Number(a.liquidated) || 0);
+      settle(a.amount, a.returned_amount, a.reimbursed_amount, a.liquidated);
     }
   }
   for (const l of legacy) {
     released += Number(l.amount) || 0;
     liquidated += Number(l.liquidated) || 0;
-    if (l.status !== "reimbursed") settle(Number(l.amount) || 0, 0, Number(l.liquidated) || 0);
+    // No reimbursement term: these predate the advance register, which is
+    // where that figure is kept.
+    if (l.status !== "reimbursed") settle(l.amount, 0, 0, l.liquidated);
   }
 
   return {

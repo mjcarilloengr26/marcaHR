@@ -10,6 +10,7 @@ const {
   notifyCashAdvanceDecision,
 } = require("../notifications");
 const { resolveCostCenter } = require("../services/costCenterName");
+const { outstandingOf } = require("../services/advancePosition");
 
 const router = express.Router();
 
@@ -65,9 +66,16 @@ function withBalance(row) {
   // Both directions. Cash handed back reduces what the employee holds; money
   // paid out to cover an overspend settles what the company owes them. An
   // advance is square when the two sides meet at zero.
-  const outstanding = money(
-    Number(row.amount) + Number(row.reimbursed_amount || 0) - Number(row.returned_amount) - Number(row.liquidated)
-  );
+  //
+  // Imported rather than written out again: this page and the Expenses page
+  // were two copies of one sum, and when the reimbursement term was added here
+  // the other copy kept reporting a debt the company had already paid.
+  const outstanding = outstandingOf({
+    amount: row.amount,
+    returned: row.returned_amount,
+    reimbursed: row.reimbursed_amount,
+    liquidated: row.liquidated,
+  });
   return {
     ...row,
     reimbursed_amount: money(row.reimbursed_amount || 0),

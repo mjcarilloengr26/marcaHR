@@ -1,6 +1,31 @@
 const { COUNTED_SQL } = require("./expenseScope");
 const db = require("../db");
 
+// What an advance still owes, in the one direction or the other.
+//
+// This arithmetic was copied into six places and then only one of them was
+// corrected when reimbursements were added, so the same advance reported two
+// different debts depending on which page you were standing on. Laiza's
+// CA-2026-0001 was square on the Cash Advances page and 40 pesos "due to
+// employee" on her own Expenses page, on all four of the reports drawing on
+// it, indefinitely. It lives here now, and the callers that used to do their
+// own sums import it.
+//
+//   released, plus anything paid back out to cover an overspend,
+//   less cash handed back, less everything counted against it.
+//
+// Positive: the employee still holds company cash. Negative: they spent past
+// the advance and are owed the excess. Zero: square.
+//
+// The reimbursement term is the one that was missing. When the company settles
+// an overspend it pays the employee the difference, and that payment cancels
+// the debt — leaving it out means the debt is still on the books after it has
+// been paid, which is the shape of the bug this fixes.
+function outstandingOf({ amount, returned, reimbursed, liquidated }) {
+  const n = (v) => Number(v) || 0;
+  return Number((n(amount) + n(reimbursed) - n(returned) - n(liquidated)).toFixed(2));
+}
+
 // The reckoning on an advance-funded report is not a property of the report.
 //
 // Several reports can draw on one advance — three of Laiza's claims all draw
@@ -17,16 +42,17 @@ const db = require("../db");
 //
 // So the position lives on the advance: what was released, less anything
 // handed back, less everything counted against it. It is the same figure the
-// Cash Advances page shows, and it is deliberately identical across every
-// report drawing on that advance, because there is only one advance.
+// Cash Advances page shows — now literally, through outstandingOf — and it is
+// deliberately identical across every report drawing on that advance, because
+// there is only one advance.
 const ADVANCE_POSITION_SQL = (placeholders) => `
-  SELECT a.id, a.reference, a.amount, a.returned_amount,
+  SELECT a.id, a.reference, a.amount, a.returned_amount, a.reimbursed_amount,
          COALESCE(SUM(i.amount), 0) AS liquidated
   FROM cash_advances a
   LEFT JOIN expense_reports r ON r.cash_advance_id = a.id AND r.status IN ${COUNTED_SQL}
   LEFT JOIN expense_items i ON i.report_id = r.id
   WHERE a.id IN (${placeholders})
-  GROUP BY a.id, a.reference, a.amount, a.returned_amount`;
+  GROUP BY a.id, a.reference, a.amount, a.returned_amount, a.reimbursed_amount`;
 
 async function advancePositions(ids) {
   const unique = [...new Set(ids.filter((v) => v != null))];
@@ -38,6 +64,7 @@ async function advancePositions(ids) {
     rows.map((r) => {
       const amount = Number(r.amount) || 0;
       const returned = Number(r.returned_amount) || 0;
+      const reimbursed = Number(r.reimbursed_amount) || 0;
       const liquidated = Number(r.liquidated) || 0;
       return [
         r.id,
@@ -45,14 +72,15 @@ async function advancePositions(ids) {
           advance_reference: r.reference,
           advance_amount: amount,
           advance_returned: returned,
+          advance_reimbursed: reimbursed,
           advance_liquidated: liquidated,
-          // Negative means the employee spent past the advance and is owed the
-          // excess back — a reimbursement against the same release.
-          advance_outstanding: Number((amount - returned - liquidated).toFixed(2)),
+          // Negative means the employee spent past the advance and has not yet
+          // been paid the excess back.
+          advance_outstanding: outstandingOf({ amount, returned, reimbursed, liquidated }),
         },
       ];
     })
   );
 }
 
-module.exports = { advancePositions };
+module.exports = { advancePositions, outstandingOf };
