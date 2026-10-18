@@ -242,7 +242,7 @@ export default function Attendance() {
                 📎 {faceRecognitionEnabled ? "Attach selfie (required)" : "Attach photo"}
               </button>
             )}
-            <button className="btn" onClick={() => punch("clock-in")} disabled={busy || (todayRecord && todayRecord.clock_in)}>
+            <button className="btn" data-tour="clock-in" onClick={() => punch("clock-in")} disabled={busy || (todayRecord && todayRecord.clock_in)}>
               {busy ? busyLabel : "Clock in"}
             </button>
             <button

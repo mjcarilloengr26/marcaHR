@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Routes, Route } from "react-router-dom";
 import ProtectedRoute from "./components/ProtectedRoute";
 import Layout from "./components/Layout";
+import QuickGuide from "./components/QuickGuide";
 
 // Route-level code splitting: each page (and whatever it imports — notably
 // Attendance's face-api.js/TensorFlow dependency, several hundred KB on its
@@ -60,6 +61,9 @@ function Protected({ children, roles, pageKey }) {
 export default function App() {
   return (
     <Suspense fallback={<div className="page-loading">Loading…</div>}>
+      {/* Outside the routes, and outside Layout, because the first tour runs on
+          the sign-in page — which has no sidebar and no Layout around it. */}
+      <QuickGuide />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/" element={<Protected><Dashboard /></Protected>} />

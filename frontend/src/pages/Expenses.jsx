@@ -674,7 +674,7 @@ export default function Expenses() {
           <h1>Liquidation &amp; Expense Reports</h1>
           <p className="subtitle">{isHr ? "Review cash advance liquidations and expense claims" : "Liquidate cash advances and submit expense claims"}</p>
         </div>
-        <button className="btn" onClick={openForm}>
+        <button className="btn" data-tour="new-report" onClick={openForm}>
           + New report
         </button>
       </div>

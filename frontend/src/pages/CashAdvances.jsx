@@ -407,7 +407,7 @@ ${a.employee_name} will see this.`)
         </div>
         {/* Anyone can ask; only admin/HR release. The label says which is
             happening rather than pretending they are the same act. */}
-        <button className="btn" onClick={openNew}>
+        <button className="btn" data-tour="new-advance" onClick={openNew}>
           {isHr ? "+ New cash advance" : "+ Request cash advance"}
         </button>
       </div>

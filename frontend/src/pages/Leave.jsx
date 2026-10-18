@@ -327,7 +327,7 @@ export default function Leave() {
           <h1>Leave</h1>
           <p className="subtitle">{isHr ? "Review and manage leave requests" : "Request and track your time off"}</p>
         </div>
-        <button className="btn" onClick={openRequestForm}>
+        <button className="btn" data-tour="new-leave" onClick={openRequestForm}>
           + Request leave
         </button>
       </div>

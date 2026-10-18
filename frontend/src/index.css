@@ -1847,3 +1847,123 @@ body.snapshot-tv .content {
    inline instead, as this first did, beat the sticky rule and left that one
    column's heading scrolling away while every other one stayed put. */
 .col-resizable { position: relative; }
+
+/* ---------------------------------------------------------------------------
+   Quick guide: the dimmed page, the ring round the real button, and the card.
+   The dimming is four panels rather than one overlay with a hole cut in it, so
+   whatever is ringed stays clickable and a step can say "press this".
+   --------------------------------------------------------------------------- */
+.guide-fab {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 70;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+}
+.guide-fab:hover { background: var(--hover-bg); }
+
+.guide-layer { position: fixed; inset: 0; z-index: 80; }
+
+.guide-shade { position: absolute; background: rgb(6 14 20 / 0.7); }
+.guide-shade-all { inset: 0; }
+.guide-shade-top { left: 0; right: 0; top: 0; height: max(0px, var(--hole-y)); }
+.guide-shade-bottom { left: 0; right: 0; top: calc(var(--hole-y) + var(--hole-h)); bottom: 0; }
+.guide-shade-left { left: 0; width: max(0px, var(--hole-x)); top: var(--hole-y); height: var(--hole-h); }
+.guide-shade-right { left: calc(var(--hole-x) + var(--hole-w)); right: 0; top: var(--hole-y); height: var(--hole-h); }
+
+.guide-ring {
+  position: absolute;
+  left: var(--hole-x);
+  top: var(--hole-y);
+  width: var(--hole-w);
+  height: var(--hole-h);
+  border: 3px solid var(--primary);
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+.guide-hand {
+  position: absolute;
+  left: calc(var(--hole-x) + var(--hole-w) / 2 - 20px);
+  top: calc(var(--hole-y) + var(--hole-h) + 2px);
+  font-size: 34px;
+  line-height: 1;
+  pointer-events: none;
+  animation: guide-bob 1.1s ease-in-out infinite;
+}
+.guide-hand-above { top: calc(var(--hole-y) - 40px); animation-name: guide-bob-above; }
+@keyframes guide-bob { 0%, 100% { transform: translateY(7px); } 50% { transform: translateY(0); } }
+@keyframes guide-bob-above { 0%, 100% { transform: translateY(-7px); } 50% { transform: translateY(0); } }
+/* A hand that will not stop moving is exactly what motion sensitivity means. */
+@media (prefers-reduced-motion: reduce) { .guide-hand { animation: none; } }
+
+.guide-card {
+  position: absolute;
+  width: min(380px, calc(100vw - 32px));
+  left: clamp(16px, calc(var(--hole-x, 50vw) + var(--hole-w, 0px) / 2 - 190px), calc(100vw - min(380px, 100vw - 32px) - 16px));
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  background: var(--surface);
+  color: var(--text);
+  border: 2px solid var(--primary);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.3);
+}
+.guide-card-below { top: min(calc(var(--hole-y) + var(--hole-h) + 48px), calc(100dvh - 280px)); }
+.guide-card-above { bottom: min(calc(100dvh - var(--hole-y) + 48px), calc(100dvh - 280px)); }
+.guide-card-middle { left: 50%; transform: translateX(-50%); top: max(16px, calc(50dvh - 170px)); }
+
+.guide-card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.guide-card-foot { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.guide-close {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.guide-ask { display: grid; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+.guide-ask input { width: 100%; }
+.guide-answer { display: grid; gap: 8px; justify-items: start; }
+.guide-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.guide-chip {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--hover-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.guide-chip:hover { border-color: var(--primary); }
+
+/* On a phone there is no room beside a button: the card takes the bottom. */
+@media (max-width: 560px) {
+  .guide-card,
+  .guide-card-below,
+  .guide-card-above,
+  .guide-card-middle {
+    left: 16px;
+    right: 16px;
+    top: auto;
+    bottom: 16px;
+    width: auto;
+    transform: none;
+  }
+}

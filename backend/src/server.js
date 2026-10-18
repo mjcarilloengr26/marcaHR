@@ -120,6 +120,8 @@ app.use("/api/page-access", pageAccessRoutes);
 app.use("/api/nav-order", navOrderRoutes);
 app.use("/api/app-settings", appSettingsRoutes);
 app.use("/api/exchange-rate", exchangeRateRoutes);
+// Public on purpose: the first tour runs on the sign-in page. See the route.
+app.use("/api/guide", require("./routes/guide.routes"));
 
 // Reports which build is actually answering. Unauthenticated on purpose: it
 // carries no data, only the commit, and without it there is no way from
