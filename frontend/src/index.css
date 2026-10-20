@@ -1873,7 +1873,10 @@ body.snapshot-tv .content {
 }
 .guide-fab:hover { background: var(--hover-bg); }
 
-.guide-layer { position: fixed; inset: 0; z-index: 80; }
+/* Above the phone's slide-out sidebar (100) and its backdrop (99): the ring
+   and the hand point at links inside that drawer, and underneath it they were
+   simply not on screen. */
+.guide-layer { position: fixed; inset: 0; z-index: 120; }
 
 .guide-shade { position: absolute; background: rgb(6 14 20 / 0.7); }
 .guide-shade-all { inset: 0; }

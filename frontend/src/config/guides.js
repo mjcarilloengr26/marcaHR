@@ -11,9 +11,12 @@
 // roles exist, which page each one lands on — to anybody who opened the URL.
 // A guide is for people who are already in.
 //
-// `target` is a CSS selector for something already on the page. Sidebar links
-// are addressed by href because they are there on every screen and the sidebar
-// already hides what a role may not open. The handful of buttons that had no
+// `target` is a CSS selector for something already on the page. Menu links are
+// addressed by href because they are on every screen and the menu already
+// hides what a role may not open. On a phone that menu is a drawer behind the
+// ☰ button, and the tour opens it before pointing at a link inside it — see
+// openDrawerFor in QuickGuide.jsx. The step text says "menu" rather than
+// "sidebar" for the same reason: on a phone there is no sidebar to see. The handful of buttons that had no
 // stable selector carry a `data-tour` attribute, added at the button itself.
 //
 // `roles` keeps a step out of a tour for somebody who would never find it —
@@ -35,7 +38,7 @@ export const GUIDES = [
     steps: [
       {
         title: "Welcome to the portal",
-        text: "This is where you land when you sign in. Let me point out the parts of the sidebar you will use most.",
+        text: "This is where you land when you sign in. Let me point out the parts of the menu you will use most.",
       },
       { target: 'a[href="/attendance"]', title: "Attendance", text: "Clock in when you start and out when you finish. Your location is recorded with each punch." },
       { target: 'a[href="/leave"]', title: "Leave", text: "File leave and follow whether it was approved. Your remaining balance is shown as you file." },

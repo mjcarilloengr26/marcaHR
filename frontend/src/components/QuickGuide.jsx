@@ -116,6 +116,30 @@ export default function QuickGuide() {
   );
 }
 
+// The phone layout keeps the sidebar off-screen behind the ☰ button. A step
+// pointing at a nav link needs it open; a step pointing at something on the
+// page needs it shut, or the drawer covers the very thing being described.
+//
+// Driven by clicking the real toggle rather than by reaching into the layout's
+// state: the button is already the one source of truth for whether the drawer
+// is open, and a tour that works the controls the way a person would cannot
+// get out of step with them.
+//
+// Returns false when it had to move the drawer, so the caller waits for the
+// slide to finish before measuring instead of ringing a box mid-transition.
+function openDrawerFor(el) {
+  const toggle = document.querySelector(".menu-toggle");
+  // Hidden toggle means the desktop layout, where the sidebar is always there.
+  if (!toggle || getComputedStyle(toggle).display === "none") return true;
+
+  const drawer = document.querySelector(".sidebar");
+  const wantOpen = Boolean(el.closest(".sidebar"));
+  const isOpen = drawer?.classList.contains("open");
+  if (wantOpen === Boolean(isOpen)) return true;
+  toggle.click();
+  return false;
+}
+
 function GuideOverlay({ guide, steps, index, role, onIndex, onStart, onClose }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -138,6 +162,12 @@ function GuideOverlay({ guide, steps, index, role, onIndex, onStart, onClose }) 
     const find = () => {
       const el = document.querySelector(step.target);
       if (!el) return;
+      // On a phone the sidebar is still in the page, just slid out of it, so a
+      // nav link measures as a real box at a negative x. The tour used to ring
+      // that box and point a hand at it off the left edge of the screen, which
+      // is what made the whole thing useless on a phone. The drawer has to be
+      // opened before the link can be pointed at.
+      if (!openDrawerFor(el)) return;
       if (!scrolled) {
         scrolled = true;
         el.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -161,8 +191,25 @@ function GuideOverlay({ guide, steps, index, role, onIndex, onStart, onClose }) 
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  // Leaving the phone's drawer open after the tour ends would hide the page it
+  // just finished describing.
+  useEffect(
+    () => () => {
+      const toggle = document.querySelector(".menu-toggle");
+      if (!toggle || getComputedStyle(toggle).display === "none") return;
+      if (document.querySelector(".sidebar.open")) toggle.click();
+    },
+    []
+  );
+
   const pad = 6;
-  const visible = rect && rect.y + rect.h > 0 && rect.y < window.innerHeight;
+  // Both axes. Checking only the vertical one called a box at x = -260 visible.
+  const visible =
+    rect &&
+    rect.y + rect.h > 0 &&
+    rect.y < window.innerHeight &&
+    rect.x + rect.w > 0 &&
+    rect.x < window.innerWidth;
   const hole = visible ? { x: rect.x - pad, y: rect.y - pad, w: rect.w + pad * 2, h: rect.h + pad * 2 } : null;
   // The hand sits below what it points at, unless that is low on the screen.
   const handBelow = hole ? hole.y + hole.h / 2 < window.innerHeight * 0.6 : true;
