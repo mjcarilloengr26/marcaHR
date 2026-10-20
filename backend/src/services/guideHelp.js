@@ -132,7 +132,10 @@ async function askClaude(question) {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({
-        model: process.env.GUIDE_MODEL || "claude-haiku-4-5-20251001",
+        // Haiku is right for this: it picks one id out of ten and writes a
+        // line, which is a routing job, not a writing one. The current Haiku
+        // is also about a tenth the price of the one this first named.
+        model: process.env.GUIDE_MODEL || "claude-haiku-5-5",
         max_tokens: 300,
         system: SYSTEM,
         messages: [{ role: "user", content: String(question).slice(0, 300) }],

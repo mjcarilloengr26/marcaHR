@@ -6,7 +6,9 @@ const Client = Anthropic.default || Anthropic;
 // The narrative half of the business review. It reads only the fact sheet the
 // app computed — never a raw row — so it can interpret figures the app already
 // stands behind, and cannot invent a customer or misread a total.
-const MODEL = "claude-opus-5";
+// The current Opus, which is both newer and cheaper than the 5 this first
+// named — $4/$20 per MTok against $5/$25.
+const MODEL = "claude-opus-5-5";
 
 const SYSTEM = `You are writing the business review for a small engineering and electrical
 contracting firm in the Philippines. You are given a fact sheet of figures the
@@ -73,9 +75,14 @@ async function writeNarrative(factSheet) {
     model: MODEL,
     max_tokens: 8000,
     system: SYSTEM,
-    // Adaptive thinking is the default on Opus 5; naming it is explicit about
-    // the intent, and this is analysis rather than transcription.
+    // Adaptive thinking is the default here; naming it is explicit about the
+    // intent, and this is analysis rather than transcription.
     thinking: { type: "adaptive" },
+    // Opus 5.5 thinks at "medium" unless told otherwise, where Opus 5 defaulted
+    // to "high". Said out loud so moving between models does not quietly make
+    // the review shallower — this is a monthly read for the owner, and the few
+    // cents the deeper setting costs is not the thing to economise on.
+    output_config: { effort: "high" },
     messages: [
       {
         role: "user",
