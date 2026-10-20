@@ -127,6 +127,13 @@ export default function QuickGuide() {
 //
 // Returns false when it had to move the drawer, so the caller waits for the
 // slide to finish before measuring instead of ringing a box mid-transition.
+//
+// One press per 400 ms at most. The caller checks every animation frame, and a
+// click only shows up as the "open" class a render later — so without a pause
+// it would press the button again before React caught up, and shut the drawer
+// it had just opened.
+let drawerPressedAt = 0;
+
 function openDrawerFor(el) {
   const toggle = document.querySelector(".menu-toggle");
   // Hidden toggle means the desktop layout, where the sidebar is always there.
@@ -136,7 +143,10 @@ function openDrawerFor(el) {
   const wantOpen = Boolean(el.closest(".sidebar"));
   const isOpen = drawer?.classList.contains("open");
   if (wantOpen === Boolean(isOpen)) return true;
-  toggle.click();
+  if (performance.now() - drawerPressedAt > 400) {
+    drawerPressedAt = performance.now();
+    toggle.click();
+  }
   return false;
 }
 
@@ -152,37 +162,94 @@ function GuideOverlay({ guide, steps, index, role, onIndex, onStart, onClose }) 
     if (step.route && location.pathname !== step.route) navigate(step.route);
   }, [step.route, location.pathname, navigate]);
 
-  // Follow the target. It moves when the page scrolls or reflows, and on a
-  // step that has just navigated it does not exist yet — so this polls rather
-  // than listening for scroll and resize, which would miss the arrival.
+  // Follow the target, and ring it only once it has stopped moving.
+  //
+  // Bringing a link into view scrolls the menu, and on a phone the admin menu
+  // is three screens tall, so that scroll is long. The first version measured
+  // once, before the scroll began, and re-measured every 300 ms — so for the
+  // first third of a second the ring sat where the link USED to be, which by
+  // then was a different link scrolled into that spot. Measured on the phone
+  // layout: the ring was on the wrong item for ~280 ms on every step, and on
+  // Expenses it was five links away. A slower phone stretches that window to
+  // something nobody would read as a lag — just as "pointing at the wrong one".
+  //
+  // So the ring is withheld while the target moves and drawn once it has held
+  // still for a few frames. Nothing wrong is ever on screen; the right thing
+  // appears a moment later. It checks every frame rather than on a timer, both
+  // to see the moment it settles and because the target may not exist yet on
+  // a step that has just navigated.
   useEffect(() => {
     setRect(null);
     if (!step.target) return;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     let scrolled = false;
-    const find = () => {
+    let frame = 0;
+    let last = null; // where it was last frame
+    let still = 0; // frames in a row it has not moved
+    let shown = null; // where the ring is drawn now
+    let seenFor = 0; // frames since it first appeared
+    const same = (a, b) =>
+      a && b && Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1 && Math.abs(a.w - b.w) < 1 && Math.abs(a.h - b.h) < 1;
+    const hide = () => {
+      if (shown) {
+        shown = null;
+        setRect(null);
+      }
+    };
+
+    const tick = () => {
+      frame = requestAnimationFrame(tick);
       const el = document.querySelector(step.target);
       if (!el) return;
       // On a phone the sidebar is still in the page, just slid out of it, so a
-      // nav link measures as a real box at a negative x. The tour used to ring
-      // that box and point a hand at it off the left edge of the screen, which
-      // is what made the whole thing useless on a phone. The drawer has to be
-      // opened before the link can be pointed at.
-      if (!openDrawerFor(el)) return;
+      // nav link measures as a real box at a negative x. The drawer has to be
+      // open before the link can be pointed at — and the ring stays down while
+      // it slides, since a sliding link is exactly a moving target.
+      if (!openDrawerFor(el)) {
+        last = null;
+        still = 0;
+        hide();
+        return;
+      }
       if (!scrolled) {
         scrolled = true;
-        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
       }
       const r = el.getBoundingClientRect();
       if (!r.width && !r.height) return;
-      setRect((prev) =>
-        prev && prev.x === r.x && prev.y === r.y && prev.w === r.width && prev.h === r.height
-          ? prev
-          : { x: r.x, y: r.y, w: r.width, h: r.height }
-      );
+      const now = { x: r.x, y: r.y, w: r.width, h: r.height };
+      seenFor += 1;
+      if (same(now, last)) {
+        still += 1;
+      } else {
+        still = 0;
+        // Past the backstop the ring follows instead of blinking out on every
+        // pixel of drift.
+        if (seenFor <= 60) hide();
+      }
+      last = now;
+      // Four frames still is about 65 ms. The second clause is a backstop for
+      // a target that never quite stops — an animated badge, say — so the ring
+      // still turns up after a second rather than never.
+      if ((still >= 4 || seenFor > 60) && !same(now, shown)) {
+        shown = now;
+        setRect(now);
+      }
     };
-    find();
-    const timer = setInterval(find, 300);
-    return () => clearInterval(timer);
+    frame = requestAnimationFrame(tick);
+    // A slow second heartbeat, for wherever animation frames are paused or
+    // starved: a backgrounded tab, or an in-app browser like Messenger's that
+    // throttles them — a likely way for staff to open a link somebody sent.
+    // Frames alone would leave the ring never appearing there; this keeps the
+    // measuring going at a walk instead of stopping.
+    const backup = setInterval(() => {
+      cancelAnimationFrame(frame);
+      tick();
+    }, 250);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearInterval(backup);
+    };
   }, [step.target, location.pathname]);
 
   useEffect(() => {
