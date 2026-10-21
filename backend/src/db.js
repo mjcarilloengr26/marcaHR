@@ -1886,12 +1886,71 @@ You are responsible for keeping your login credentials confidential and must not
 Misuse of this system, including unauthorized data access, sharing of credentials, or circumvention of security controls, may result in disciplinary action up to and including termination, and may carry legal liability under applicable data privacy law. Use of this application is further subject to MARCA Group's Terms and Conditions.`;
 const DEFAULT_TERMS_VERSION = "2026-08-11";
 
+// What the schema code looks like right now. Any edit to this file, or to the
+// expense vocabulary the categories are seeded from, changes it — and a
+// changed fingerprint is what makes the next boot run the migrations.
+const SCHEMA_FINGERPRINT = (() => {
+  const { createHash } = require("crypto");
+  const { readFileSync } = require("fs");
+  const path = require("path");
+  const h = createHash("sha256");
+  // Line endings normalised first: a Windows checkout and Render's Linux one
+  // hold the same code in different bytes, and two machines disagreeing on the
+  // fingerprint would keep forcing each other into a full run.
+  for (const f of [__filename, path.join(__dirname, "services", "expenseOptions.js")]) {
+    h.update(readFileSync(f, "utf8").split("\r\n").join("\n"));
+  }
+  return h.digest("hex").slice(0, 16);
+})();
+
 let migrated = null;
-// Idempotent: safe to call on every boot. Runs the full schema once per
-// process (CREATE TABLE IF NOT EXISTS makes re-running harmless besides).
+// Idempotent: safe to call on every boot, and on almost every boot it now does
+// nothing.
+//
+// The full run is 223 queries sent one after another, ~255 ms each to the
+// database, which came to 68.7 seconds measured — and the server does not open
+// its port until it finishes. That minute was paid on every deploy and, worse,
+// on every wake from sleep, since the hosting plan idles the API when nobody
+// is using it. It read as "the app is slow to load" because for that minute
+// nothing loads at all.
+//
+// So the fingerprint of the schema code is stored after a successful run, and
+// a boot that finds the same fingerprint skips the lot: one small query
+// instead of 223. A deploy that changes this file still migrates in full, once.
+// FORCE_MIGRATE=1 runs it regardless, for the day somebody changes the
+// database by hand and wants the app to put things back.
 db.migrate = function () {
   if (!migrated) {
-    migrated = pool
+    migrated = (async () => {
+      const started = Date.now();
+      await pool.query(
+        `CREATE TABLE IF NOT EXISTS schema_meta (
+           id INTEGER PRIMARY KEY CHECK (id = 1),
+           fingerprint TEXT NOT NULL,
+           migrated_at TEXT NOT NULL
+         )`
+      );
+      const { rows } = await pool.query("SELECT fingerprint FROM schema_meta WHERE id = 1");
+      if (rows[0]?.fingerprint === SCHEMA_FINGERPRINT && process.env.FORCE_MIGRATE !== "1") {
+        console.log(`Schema unchanged (${SCHEMA_FINGERPRINT}) — migrations skipped in ${Date.now() - started} ms`);
+        return;
+      }
+      await runMigrations();
+      // Written only after every step succeeded. A run that fails part-way
+      // leaves the old fingerprint, so the next boot tries again in full.
+      await pool.query(
+        `INSERT INTO schema_meta (id, fingerprint, migrated_at) VALUES (1, $1, $2)
+         ON CONFLICT (id) DO UPDATE SET fingerprint = EXCLUDED.fingerprint, migrated_at = EXCLUDED.migrated_at`,
+        [SCHEMA_FINGERPRINT, new Date().toISOString()]
+      );
+      console.log(`Migrated to ${SCHEMA_FINGERPRINT} in ${((Date.now() - started) / 1000).toFixed(1)} s`);
+    })();
+  }
+  return migrated;
+};
+
+function runMigrations() {
+  return pool
       .query(SCHEMA_SQL)
       .then(() =>
         pool.query(
@@ -1947,8 +2006,6 @@ db.migrate = function () {
       .then(() => ensureUserTermsAcceptance())
       .then(() => ensureCustomerLinks())
       .then(() => ensureLoginNotice());
-  }
-  return migrated;
-};
+}
 
 module.exports = db;
