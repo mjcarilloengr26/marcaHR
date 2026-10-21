@@ -329,9 +329,21 @@ router.get(
     const includeClosed = String(req.query.include_closed || "") === "1";
 
     const all = await withRollup(today);
-    const projects = includeClosed
-      ? all
-      : all.filter((p) => p.status !== "completed" && p.status !== "cancelled");
+    // One project, when the chart was narrowed to one. The Gantt page has
+    // always had a project picker, but the export ignored it and wrote every
+    // project regardless — so sending a client their own schedule meant
+    // deleting everybody else's out of the file first.
+    //
+    // Filtered out of the same list the rest of this builds from, so naming a
+    // project id can only ever narrow what would have been exported anyway.
+    const onlyId = Number(req.query.project_id);
+    const one = Number.isInteger(onlyId) && onlyId > 0 ? all.find((p) => p.id === onlyId) : null;
+    if (req.query.project_id && !one) return res.status(404).json({ error: "No such project" });
+    const projects = one
+      ? [one]
+      : includeClosed
+        ? all
+        : all.filter((p) => p.status !== "completed" && p.status !== "cancelled");
     const ids = projects.map((p) => p.id);
     const tasks = ids.length
       ? await db
@@ -555,10 +567,13 @@ router.get(
 
     await logRequestEvent(req, "export_excel", {
       entityType: "report",
-      details: { report: "projects-gantt", projects: projects.length, tasks: tasks.length },
+      details: { report: "projects-gantt", projects: projects.length, tasks: tasks.length, project: one ? one.code : "all" },
     });
 
-    const filename = `marca-group-projects-gantt-${today}.xlsx`;
+    // Named for the project when it is one, so a file sent to a client says
+    // whose schedule it is without being opened.
+    const slug = one ? String(one.code).replace(/[^A-Za-z0-9._-]+/g, "-") : "projects";
+    const filename = `marca-group-gantt-${slug}-${today}.xlsx`;
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     await workbook.xlsx.write(res);

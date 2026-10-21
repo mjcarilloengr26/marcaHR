@@ -279,15 +279,20 @@ export default function Gantt() {
 
   // The chart as a spreadsheet: the register and its P&L, a week-by-week grid
   // of coloured cells, and the same tasks as flat rows to sort and filter. What
-  // is exported follows the "include completed" switch above, so the file
-  // matches the chart the person was looking at when they asked for it.
+  // is exported follows the Project picker and the "include completed" switch
+  // above, so the file matches the chart the person was looking at when they
+  // asked for it. It used to ignore the picker and write every project, which
+  // made it useless for sending one client their own schedule.
+  const exportProject = projectId !== "all" ? data?.projects.find((p) => String(p.id) === String(projectId)) : null;
   const exportExcel = async () => {
     setExporting(true);
     setError("");
     try {
       await downloadFile(
-        `/reports/projects-export?include_closed=${showClosed ? 1 : 0}`,
-        "marca-group-projects-gantt.xlsx"
+        exportProject
+          ? `/reports/projects-export?project_id=${exportProject.id}`
+          : `/reports/projects-export?include_closed=${showClosed ? 1 : 0}`,
+        exportProject ? `marca-group-gantt-${exportProject.code}.xlsx` : "marca-group-projects-gantt.xlsx"
       );
     } catch (err) {
       setError(err.message);
@@ -342,8 +347,15 @@ export default function Gantt() {
           </p>
         </div>
         <div className="col-actions">
-          <button className="btn btn-secondary" onClick={exportExcel} disabled={exporting}>
-            {exporting ? "Building…" : "Export to Excel"}
+          {/* Says what it will export, so nobody sends a client the whole
+              register thinking it was just theirs. */}
+          <button
+            className="btn btn-secondary"
+            onClick={exportExcel}
+            disabled={exporting}
+            title={exportProject ? `Only ${exportProject.code} — change the Project picker for others` : "Every project on the chart — pick one in Project to export just that"}
+          >
+            {exporting ? "Building…" : exportProject ? `Export ${exportProject.code} to Excel` : "Export all to Excel"}
           </button>
           {isHr && visible.projects.length > 0 && (
             <button className="btn" onClick={() => openNewTask(visible.projects[0].id)}>+ New task</button>
