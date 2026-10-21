@@ -10,7 +10,12 @@ import SortTh from "../components/SortTh";
 import DecimalInput from "../components/DecimalInput";
 
 const emptyForm = { invoice_number: "", order_id: "", customer_name: "", customer_id: "", amount: "", status: "draft", issue_date: "", due_date: "", notes: "", project_id: "" };
-const STATUSES = ["draft", "approved", "sent", "paid", "overdue", "cancelled"];
+// What can be picked by hand. "paid" is not here on purpose: a statement is
+// paid when the payments recorded against it cover it, and the server refuses
+// it from anywhere else. Picking it from this list is how five statements came
+// to claim their full face value as cash, with any tax the customer withheld
+// counted as money that reached the bank.
+const STATUSES = ["draft", "approved", "sent", "overdue", "cancelled"];
 
 export default function Billing() {
   const { money, currency_code: appCurrency } = useAppSettings();
@@ -450,11 +455,17 @@ export default function Billing() {
                 <td>{inv.issue_date}</td>
                 <td>{inv.due_date || "—"}</td>
                 <td>
-                  <select value={inv.status} onChange={(e) => quickSetStatus(inv.id, e.target.value)} style={{ width: "auto" }}>
-                    {STATUSES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
+                  {/* Paid is shown, not chosen — it follows the payments. To
+                      reopen one, remove a payment from Record payment. */}
+                  {inv.status === "paid" ? (
+                    <span className="badge badge-approved" title="Settled by the payments recorded against it">paid</span>
+                  ) : (
+                    <select value={inv.status} onChange={(e) => quickSetStatus(inv.id, e.target.value)} style={{ width: "auto" }}>
+                      {STATUSES.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  )}
                 </td>
                 <td>{inv.created_by_name || "—"}</td>
                 <td>
@@ -486,11 +497,18 @@ export default function Billing() {
                     <button className="btn btn-sm btn-secondary" onClick={() => openSend(inv)}>Resend</button>
                   )}
                   <button className="btn btn-sm btn-secondary" onClick={() => openLines(inv)}>Lines</button>
-                  {/* Only once it has gone out — there is nothing to settle on
-                      a draft, and a cancelled statement is not owed. */}
-                  {!["draft", "cancelled"].includes(inv.status) && (
-                    <button className="btn btn-sm btn-secondary" onClick={() => setReceiptsFor(inv)}>
-                      Receipts
+                  {/* On everything but a cancelled statement, drafts included:
+                      money arriving is proof it was billed, so a payment on a
+                      draft also moves it to sent. It used to be a secondary
+                      button called "Receipts", shown only after sending — and
+                      in practice nobody ever pressed it. Statements were marked
+                      paid from the dropdown instead. */}
+                  {inv.status !== "cancelled" && (
+                    <button
+                      className={`btn btn-sm ${inv.status === "paid" ? "btn-secondary" : ""}`}
+                      onClick={() => setReceiptsFor(inv)}
+                    >
+                      {inv.status === "paid" ? "Payments" : "Record payment"}
                       {inv.outstanding > 0 && inv.settled > 0 ? ` · ${money(inv.outstanding)} left` : ""}
                     </button>
                   )}
@@ -575,7 +593,7 @@ export default function Billing() {
       {receiptsFor && (
         <div className="modal-backdrop" onClick={() => setReceiptsFor(null)}>
           <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
-            <h2>Receipts — {receiptsFor.invoice_number}</h2>
+            <h2>Payments — {receiptsFor.invoice_number}</h2>
             <p className="subtitle" style={{ marginTop: -8 }}>
               {receiptsFor.customer_name} · what settled this statement. The statement total is not changed by any of
               this — reducing it would make the difference billable again on the order.

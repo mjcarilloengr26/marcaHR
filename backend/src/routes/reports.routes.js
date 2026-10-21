@@ -2,6 +2,7 @@ const express = require("express");
 const ExcelJS = require("exceljs");
 const db = require("../db");
 const { advancePositions, outstandingOf } = require("../services/advancePosition");
+const { SUMMARY_SQL } = require("../services/invoiceSettlement");
 const { OTHER, knownCategories } = require("../services/expenseOptions");
 const { COUNTED_SQL } = require("../services/expenseScope");
 const { requireAuth } = require("../middleware/auth");
@@ -662,7 +663,11 @@ router.get(
       { header: "Margin", key: "margin", width: 15 },
       { header: "Margin %", key: "margin_percent", width: 10 },
       { header: "Invoiced", key: "invoiced", width: 15 },
-      { header: "Collected", key: "collected", width: 15 },
+      // Cash, 2307 and what is still owed side by side, so the three visibly
+      // add back up to what was invoiced (less any agreed adjustment).
+      { header: "Collected (cash)", key: "collected", width: 16 },
+      { header: "2307 Withheld", key: "withheld", width: 14 },
+      { header: "Outstanding", key: "outstanding", width: 15 },
       { header: "Uninvoiced", key: "uninvoiced", width: 15 },
       { header: "Reports", key: "reports", width: 9 },
       { header: "POs", key: "pos", width: 8 },
@@ -694,6 +699,8 @@ router.get(
         margin_percent: p.marginPercent === null ? "—" : p.marginPercent,
         invoiced: p.billing.invoiced,
         collected: p.billing.collected,
+        withheld: p.billing.withheld,
+        outstanding: p.billing.outstanding,
         uninvoiced: p.contract_value > 0 ? p.billing.uninvoiced : "—",
         reports: p.reports,
         pos: p.purchaseOrders,
@@ -714,6 +721,8 @@ router.get(
       margin: projects.reduce((n, p) => n + p.margin, 0),
       invoiced: projects.reduce((n, p) => n + p.billing.invoiced, 0),
       collected: projects.reduce((n, p) => n + p.billing.collected, 0),
+      withheld: projects.reduce((n, p) => n + p.billing.withheld, 0),
+      outstanding: projects.reduce((n, p) => n + p.billing.outstanding, 0),
     });
     totalRow.font = { bold: true };
     /* ------------------------------------------------ Project Expenses --- */
@@ -1226,9 +1235,22 @@ router.get(
       .prepare(
         `SELECT c.*,
                 (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.status <> 'cancelled')::int AS invoice_count,
-                (SELECT COALESCE(SUM(i.amount), 0) FROM invoices i WHERE i.customer_id = c.id AND i.status <> 'cancelled') AS total_billed,
-                (SELECT COALESCE(SUM(i.amount), 0) FROM invoices i WHERE i.customer_id = c.id AND i.status IN ('sent','overdue')) AS outstanding,
-                (SELECT COALESCE(SUM(i.amount), 0) FROM invoices i WHERE i.customer_id = c.id AND i.status = 'paid') AS total_paid,
+                -- Same definitions as the dashboard and the Customers page:
+                -- billed leaves out unsent drafts; collected is cash actually
+                -- recorded, with 2307 tax kept apart; outstanding is billed
+                -- less everything that settled it. "Paid" used to be the full
+                -- face value of each statement marked paid.
+                (SELECT COALESCE(SUM(i.amount), 0) FROM invoices i
+                  WHERE i.customer_id = c.id AND i.status NOT IN ('draft', 'cancelled')) AS total_billed,
+                (SELECT COALESCE(SUM(GREATEST(i.amount - COALESCE(s.settled, 0), 0)), 0)
+                   FROM invoices i LEFT JOIN (${SUMMARY_SQL}) s ON s.invoice_id = i.id
+                  WHERE i.customer_id = c.id AND i.status NOT IN ('draft', 'cancelled')) AS outstanding,
+                (SELECT COALESCE(SUM(s.paid_cash), 0)
+                   FROM invoices i JOIN (${SUMMARY_SQL}) s ON s.invoice_id = i.id
+                  WHERE i.customer_id = c.id AND i.status <> 'cancelled') AS total_paid,
+                (SELECT COALESCE(SUM(s.withheld), 0)
+                   FROM invoices i JOIN (${SUMMARY_SQL}) s ON s.invoice_id = i.id
+                  WHERE i.customer_id = c.id AND i.status <> 'cancelled') AS total_withheld,
                 (SELECT MAX(i.issue_date) FROM invoices i WHERE i.customer_id = c.id) AS last_billed,
                 (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id)::int AS order_count,
                 (SELECT COUNT(*) FROM projects p WHERE p.customer_id = c.id)::int AS project_count,
@@ -1245,11 +1267,15 @@ router.get(
       .prepare(
         `SELECT c.name AS customer_name, i.invoice_number, i.issue_date, i.due_date, i.currency,
                 i.amount, i.vat_rate, i.status, i.paid_date, i.sent_to, i.sent_at,
-                o.order_number, pr.code AS project_code
+                o.order_number, pr.code AS project_code,
+                COALESCE(s.paid_cash, 0) AS cash_received, COALESCE(s.withheld, 0) AS withheld,
+                COALESCE(s.adjusted, 0) AS adjusted, COALESCE(s.settled, 0) AS settled,
+                s.last_received_on
          FROM invoices i
          JOIN customers c ON c.id = i.customer_id
          LEFT JOIN orders o ON o.id = i.order_id
          LEFT JOIN projects pr ON pr.id = i.project_id
+         LEFT JOIN (${SUMMARY_SQL}) s ON s.invoice_id = i.id
          ORDER BY c.name, i.issue_date DESC, i.id DESC`
       )
       .all();
@@ -1282,7 +1308,8 @@ router.get(
       { header: "Payment Terms (days)", key: "payment_terms_days", width: 20 },
       { header: "Statements", key: "invoice_count", width: 12 },
       { header: "Total Billed", key: "total_billed", width: 16 },
-      { header: "Paid", key: "total_paid", width: 16 },
+      { header: "Collected (cash)", key: "total_paid", width: 16 },
+      { header: "2307 Withheld", key: "total_withheld", width: 15 },
       { header: "Outstanding", key: "outstanding", width: 16 },
       { header: "Last Billed", key: "last_billed", width: 14 },
       { header: "Orders", key: "order_count", width: 10 },
@@ -1330,6 +1357,14 @@ router.get(
       { header: "VATable Sales", key: "vatable", width: 16 },
       { header: "VAT", key: "vat", width: 14 },
       { header: "Status", key: "status", width: 12 },
+      // What actually settled it, next to what it asked for. Before, a report
+      // reader could see that a statement was "paid" but not how much arrived,
+      // or that part of it was a 2307.
+      { header: "Cash Received", key: "cash_received", width: 15 },
+      { header: "2307 Withheld", key: "withheld", width: 14 },
+      { header: "Adjusted", key: "adjusted", width: 12 },
+      { header: "Balance", key: "balance", width: 15 },
+      { header: "Last Payment", key: "last_received_on", width: 13 },
       { header: "Paid On", key: "paid_date", width: 13 },
       { header: "Sent To", key: "sent_to", width: 34 },
       { header: "Sent On", key: "sent_at", width: 20 },
@@ -1343,10 +1378,18 @@ router.get(
         const gross = Math.round((Number(i.amount) || 0) * 100) / 100;
         const rate = Number(i.vat_rate) || 0;
         const vatable = rate > 0 ? Math.round((gross / (1 + rate / 100)) * 100) / 100 : gross;
+        // A draft or cancelled statement is owed by nobody, so its balance is
+        // shown as a dash rather than as its full amount.
+        const owed = !["draft", "cancelled"].includes(i.status);
         return {
           ...i,
           vatable,
           vat: Math.round((gross - vatable) * 100) / 100,
+          cash_received: Number(i.cash_received) || 0,
+          withheld: Number(i.withheld) || 0,
+          adjusted: Number(i.adjusted) || 0,
+          balance: owed ? Math.round((gross - (Number(i.settled) || 0)) * 100) / 100 : "—",
+          last_received_on: i.last_received_on || "—",
           due_date: i.due_date || "—",
           paid_date: i.paid_date || "—",
           sent_to: i.sent_to || "—",

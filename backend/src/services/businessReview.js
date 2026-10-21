@@ -66,7 +66,7 @@ async function metricsFor({ start, end, year, months }) {
   const [startMonth, endMonth] = months;
 
   const [
-    opportunities, pipeline, orders, invoices, purchases, expenses,
+    opportunities, pipeline, orders, invoices, received, purchases, expenses,
     payrollRow, leave, attendance, assets, workOrders, pnl,
   ] = await Promise.all([
     db.prepare(
@@ -98,14 +98,31 @@ async function metricsFor({ start, end, year, months }) {
     // asked for. They are reported separately instead, because unsent invoices
     // are worth seeing — that is revenue sitting still.
     db.prepare(
+      // What has been settled is read from the payments, not the status. It
+      // used to be "the full amount of every statement marked paid", which
+      // counted 2307 tax as cash and a part-payment as nothing at all.
       `SELECT COUNT(*) FILTER (WHERE status <> 'draft')::int AS issued,
               COALESCE(SUM(amount) FILTER (WHERE status <> 'draft'), 0) AS issued_value,
               COUNT(*) FILTER (WHERE status = 'draft')::int AS draft_count,
               COALESCE(SUM(amount) FILTER (WHERE status = 'draft'), 0) AS draft_value,
-              COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) AS paid_value,
-              COALESCE(SUM(amount) FILTER (WHERE status IN ('sent', 'overdue')), 0) AS outstanding_value,
+              COALESCE(SUM(settled) FILTER (WHERE status <> 'draft'), 0) AS settled_value,
+              COALESCE(SUM(GREATEST(amount - settled, 0)) FILTER (WHERE status <> 'draft'), 0) AS outstanding_value,
               COUNT(*) FILTER (WHERE status = 'overdue')::int AS overdue_count
-       FROM invoices WHERE status <> 'cancelled' AND issue_date BETWEEN ? AND ?`
+       FROM (SELECT i.*, COALESCE((SELECT SUM(r.amount) FROM invoice_receipts r WHERE r.invoice_id = i.id), 0) AS settled
+             FROM invoices i) i
+       WHERE status <> 'cancelled' AND issue_date BETWEEN ? AND ?`
+    ).get(start, end),
+
+    // Money that arrived in the period, dated by when it arrived — whichever
+    // statement it settled. That is what "collected this month" means to the
+    // person reading it; dating it by when the statement was issued said how
+    // much of an earlier month's billing is paid by now, which is a different
+    // question. Cash and 2307 tax are kept apart: only one reaches the bank.
+    db.prepare(
+      `SELECT COALESCE(SUM(r.amount) FILTER (WHERE r.kind = 'payment'), 0) AS cash,
+              COALESCE(SUM(r.amount) FILTER (WHERE r.kind = 'withholding'), 0) AS withheld
+       FROM invoice_receipts r JOIN invoices i ON i.id = r.invoice_id
+       WHERE i.status <> 'cancelled' AND r.received_on BETWEEN ? AND ?`
     ).get(start, end),
 
     db.prepare(
@@ -169,7 +186,7 @@ async function metricsFor({ start, end, year, months }) {
       : null;
 
   const collectionRate =
-    num(invoices.issued_value) > 0 ? (num(invoices.paid_value) / num(invoices.issued_value)) * 100 : null;
+    num(invoices.issued_value) > 0 ? (num(invoices.settled_value) / num(invoices.issued_value)) * 100 : null;
 
   const liquidationRate =
     num(expenses.advances) > 0 ? (num(expenses.spent) / num(expenses.advances)) * 100 : null;
@@ -193,7 +210,8 @@ async function metricsFor({ start, end, year, months }) {
       invoicedValue: num(invoices.issued_value),
       draftInvoices: invoices.draft_count,
       draftInvoiceValue: num(invoices.draft_value),
-      collectedValue: num(invoices.paid_value),
+      collectedValue: num(received.cash),
+      withheldValue: num(received.withheld),
       outstandingValue: num(invoices.outstanding_value),
       overdueInvoices: invoices.overdue_count,
       collectionRatePercent: collectionRate,
@@ -253,11 +271,15 @@ async function standingPosition() {
       // receivable — nobody has been asked to pay — but a pile of invoices that
       // were written and never sent is money the company has earned and is not
       // chasing, which is worth surfacing next to the money it is.
-      `SELECT COALESCE(SUM(amount) FILTER (WHERE status IN ('sent', 'overdue')), 0) AS outstanding,
-              COALESCE(SUM(amount) FILTER (WHERE status = 'overdue'), 0) AS overdue,
+      // Less whatever has been paid against each, so a statement half paid
+      // counts as half owed.
+      `SELECT COALESCE(SUM(GREATEST(amount - settled, 0)) FILTER (WHERE status IN ('approved', 'sent', 'overdue')), 0) AS outstanding,
+              COALESCE(SUM(GREATEST(amount - settled, 0)) FILTER (WHERE status = 'overdue'), 0) AS overdue,
               COUNT(*) FILTER (WHERE status = 'draft')::int AS draft_count,
               COALESCE(SUM(amount) FILTER (WHERE status = 'draft'), 0) AS draft_value
-       FROM invoices WHERE status <> 'cancelled'`
+       FROM (SELECT i.*, COALESCE((SELECT SUM(r.amount) FROM invoice_receipts r WHERE r.invoice_id = i.id), 0) AS settled
+             FROM invoices i) i
+       WHERE status <> 'cancelled'`
     ).get(),
   ]);
 

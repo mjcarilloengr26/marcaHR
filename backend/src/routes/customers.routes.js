@@ -1,5 +1,6 @@
 const express = require("express");
 const db = require("../db");
+const { SUMMARY_SQL } = require("../services/invoiceSettlement");
 const { requireAuth, requireRole } = require("../middleware/auth");
 const { validateTreatment, DEFAULT_TREATMENT } = require("../services/vatTreatment");
 const asyncHandler = require("../middleware/asyncHandler");
@@ -9,11 +10,21 @@ const router = express.Router();
 // A customer is worth more than its own row: what matters day to day is what
 // they have been billed and what is still outstanding. Cancelled invoices are
 // excluded from both — they were withdrawn, not owed.
+//
+// Billed and outstanding mean exactly what they mean on the dashboard. Billed
+// leaves out drafts, because a draft has not been sent and nobody has been
+// asked to pay it; it used to include them, which put this page ₱29.7M apart
+// from the dashboard. Outstanding is billed less what has been settled — cash,
+// 2307 and agreed adjustments — so a customer who paid half owes half. It used
+// to be the full face value of anything not yet marked paid.
 const SELECT_BASE = `
   SELECT c.*,
     (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id AND i.status <> 'cancelled')::int AS invoice_count,
-    (SELECT COALESCE(SUM(i.amount), 0) FROM invoices i WHERE i.customer_id = c.id AND i.status <> 'cancelled') AS total_billed,
-    (SELECT COALESCE(SUM(i.amount), 0) FROM invoices i WHERE i.customer_id = c.id AND i.status IN ('sent','overdue')) AS outstanding,
+    (SELECT COALESCE(SUM(i.amount), 0) FROM invoices i
+      WHERE i.customer_id = c.id AND i.status NOT IN ('draft', 'cancelled')) AS total_billed,
+    (SELECT COALESCE(SUM(GREATEST(i.amount - COALESCE(s.settled, 0), 0)), 0)
+       FROM invoices i LEFT JOIN (${SUMMARY_SQL}) s ON s.invoice_id = i.id
+      WHERE i.customer_id = c.id AND i.status NOT IN ('draft', 'cancelled')) AS outstanding,
     (SELECT COUNT(*) FROM orders o WHERE o.customer_id = c.id)::int AS order_count,
     (SELECT COUNT(*) FROM projects p WHERE p.customer_id = c.id)::int AS project_count
   FROM customers c

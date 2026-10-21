@@ -1,5 +1,6 @@
 const db = require("../db");
 const { COUNTED_SQL } = require("./expenseScope");
+const { SUMMARY_SQL } = require("./invoiceSettlement");
 
 const money = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -47,14 +48,24 @@ const MATERIALS_SQL = `
   WHERE project_id IS NOT NULL AND project_value IS NOT NULL
   GROUP BY project_id`;
 
+// Collected is the cash actually recorded against the project's statements,
+// from the same per-statement settlement the Billing page shows. It used to be
+// "the full face value of every statement marked paid", which counted 2307
+// tax as cash that reached the bank and a part-payment as nothing at all — so
+// the Projects page, the project report and Billing disagreed the first time a
+// customer withheld tax. Withheld and outstanding come from the same join.
 const BILLING_SQL = `
-  SELECT project_id,
-         COALESCE(SUM(amount) FILTER (WHERE status NOT IN ('draft', 'cancelled')), 0) AS invoiced,
-         COALESCE(SUM(amount) FILTER (WHERE status = 'paid'), 0) AS collected,
-         COUNT(*) FILTER (WHERE status = 'draft')::int AS draft_invoices
-  FROM invoices
-  WHERE project_id IS NOT NULL
-  GROUP BY project_id`;
+  SELECT i.project_id,
+         COALESCE(SUM(i.amount) FILTER (WHERE i.status NOT IN ('draft', 'cancelled')), 0) AS invoiced,
+         COALESCE(SUM(s.paid_cash) FILTER (WHERE i.status <> 'cancelled'), 0) AS collected,
+         COALESCE(SUM(s.withheld) FILTER (WHERE i.status <> 'cancelled'), 0) AS withheld,
+         COALESCE(SUM(GREATEST(i.amount - COALESCE(s.settled, 0), 0))
+                  FILTER (WHERE i.status NOT IN ('draft', 'cancelled')), 0) AS outstanding,
+         COUNT(*) FILTER (WHERE i.status = 'draft')::int AS draft_invoices
+  FROM invoices i
+  LEFT JOIN (${SUMMARY_SQL}) s ON s.invoice_id = i.id
+  WHERE i.project_id IS NOT NULL
+  GROUP BY i.project_id`;
 
 const ORDERS_SQL = `
   SELECT project_id,
@@ -175,6 +186,8 @@ async function withRollup(today = new Date().toISOString().slice(0, 10)) {
     const contract = money(p.contract_value);
     const invoiced = money(b ? b.invoiced : 0);
     const collected = money(b ? b.collected : 0);
+    const withheld = money(b ? b.withheld : 0);
+    const outstanding = money(b ? b.outstanding : 0);
 
     const weight = t ? Number(t.weight) : 0;
     const progressPercent = weight > 0 ? Math.round(Number(t.weighted) / weight) : null;
@@ -195,6 +208,8 @@ async function withRollup(today = new Date().toISOString().slice(0, 10)) {
       billing: {
         invoiced,
         collected,
+        withheld,
+        outstanding,
         uninvoiced: money(contract - invoiced),
         draftInvoices: b ? b.draft_invoices : 0,
       },

@@ -1,5 +1,6 @@
 const PDFDocument = require("pdfkit");
 const db = require("../db");
+const { settlementOf, settlementFor } = require("./invoiceSettlement");
 const { labelsFor } = require("./vatTreatment");
 
 // The invoice as a document the customer receives. Everything on the
@@ -312,6 +313,20 @@ function drawTotals(doc, invoice, startY) {
   const vat = money2(gross - vatable);
 
   let y = startY + 12;
+
+  // Measured before anything is drawn, and moved whole to a new page if it
+  // will not fit — same rule as the payment block below it. With payments
+  // shown the block runs to seven rows, and a long bill of materials could
+  // otherwise leave "BALANCE DUE" on a page of its own, away from the total
+  // it is the balance of.
+  const st = invoice.settlement;
+  const lessRows = st && st.settled > 0 ? [st.paidCash, st.withheld, st.adjusted].filter((v) => v > 0).length : 0;
+  const needed = 15 * 2 + 8 + (lessRows ? 15 + 15 * lessRows + 8 : 0) + 20;
+  const floorY = doc.page.height - PAGE_MARGIN - 56;
+  if (y + needed > floorY) {
+    doc.addPage();
+    y = PAGE_MARGIN;
+  }
   // The figures sit in the same column as the line items' AMOUNT, so the money
   // on the page reads down one edge instead of stepping in and out. The label
   // column is wide enough for "TOTAL AMOUNT DUE" on one line — at 95pt it
@@ -337,8 +352,27 @@ function drawTotals(doc, invoice, startY) {
 
   doc.moveTo(labelX, y + 2).lineTo(RIGHT_EDGE, y + 2).strokeColor("#cccccc").lineWidth(1).stroke();
   y += 8;
-  row("TOTAL AMOUNT DUE", amountIn(gross, invoice.currency), true);
 
+  // A statement that has been partly paid must say so. This used to print the
+  // full statement as "TOTAL AMOUNT DUE" whatever had come in, so a reminder
+  // sent after a part-payment asked the customer for money they had already
+  // paid — and a customer who withheld tax was asked for the 2307 amount too.
+  // Nothing paid yet: exactly as before. Anything paid: the total, each kind
+  // of settlement taken off it, and the balance, in that order.
+  if (!st || st.settled <= 0) {
+    row("TOTAL AMOUNT DUE", amountIn(gross, invoice.currency), true);
+    return y;
+  }
+  row("TOTAL AMOUNT", amountIn(gross, invoice.currency));
+  const less = (label, value) => {
+    if (value > 0) row(label, `(${amountIn(value, invoice.currency)})`);
+  };
+  less("Less: payments received", st.paidCash);
+  less("Less: tax withheld (2307)", st.withheld);
+  less("Less: adjustments", st.adjusted);
+  doc.moveTo(labelX, y + 2).lineTo(RIGHT_EDGE, y + 2).strokeColor("#cccccc").lineWidth(1).stroke();
+  y += 8;
+  row("BALANCE DUE", amountIn(Math.max(st.outstanding, 0), invoice.currency), true);
   return y;
 }
 
@@ -449,6 +483,9 @@ async function invoiceForPdf(invoiceId) {
     )
     .get(invoiceId);
   if (!invoice) return null;
+  // What has been paid against it, so the totals can show the balance rather
+  // than the face value.
+  invoice.settlement = settlementOf(invoice, await settlementFor(invoiceId));
 
   const items = await db
     .prepare("SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY sort_order, id")
@@ -492,8 +529,11 @@ function renderInvoicePdf({ invoice, items, customer, branding }, stream) {
   // References run down the left, totals down the right, from the same line —
   // so a long list of PO numbers never pushes the amount due off the page.
   const refsBottom = drawOrderReferences(doc, invoice, itemsBottom);
+  const pageBefore = doc.page;
   const totalsBottom = drawTotals(doc, invoice, itemsBottom);
-  drawFooter(doc, invoice, branding, Math.max(refsBottom, totalsBottom));
+  // If the totals moved to a fresh page, the references' bottom is a position
+  // on the previous one and means nothing here.
+  drawFooter(doc, invoice, branding, doc.page === pageBefore ? Math.max(refsBottom, totalsBottom) : totalsBottom);
 
   doc.end();
 }

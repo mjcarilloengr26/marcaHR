@@ -566,6 +566,97 @@ router.post("/:id/receipts", requireAuth, requireRole("admin", "hr"), asyncHandl
   res.status(201).json(settlementOf(fresh, await settlementFor(invoice.id)));
 }));
 
+// Record a payment the way it actually arrives: some cash, and often a 2307
+// for the tax the customer withheld from it.
+//
+// The one-row-at-a-time receipt form above was never used — not once — and
+// statements were marked paid from the status dropdown instead, which always
+// meant "the full amount arrived". A customer who withheld 2% left the books
+// claiming cash that never reached the bank. This takes both halves in one go.
+//
+// The withheld amount is worked out in the browser from the rate and the
+// statement's VAT-exclusive base, but arrives here as a figure, because a 2307
+// is a document the customer issued and its number is what it says — often a
+// centavo off any formula. The server checks the two halves together against
+// what is outstanding and writes them in one statement, so a payment can never
+// be half recorded.
+router.post("/:id/payments", requireAuth, requireRole("admin", "hr"), asyncHandler(async (req, res) => {
+  const invoice = await db.prepare("SELECT * FROM invoices WHERE id = ?").get(req.params.id);
+  if (!invoice) return res.status(404).json({ error: "Invoice not found" });
+  if (invoice.status === "cancelled") {
+    return res.status(400).json({ error: "A cancelled statement is not owed" });
+  }
+
+  const cash = money(req.body?.cash || 0);
+  const withheld = money(req.body?.withheld || 0);
+  const rate = Number(req.body?.withholding_rate || 0);
+  if (!Number.isFinite(cash) || cash < 0 || !Number.isFinite(withheld) || withheld < 0) {
+    return res.status(400).json({ error: "Amounts cannot be negative" });
+  }
+  if (cash + withheld <= 0) return res.status(400).json({ error: "Enter the amount received" });
+  if (withheld > 0 && !(rate > 0 && rate < 100)) {
+    return res.status(400).json({ error: "Say what rate was withheld" });
+  }
+
+  const receivedOn = String(req.body?.received_on || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedOn)) return res.status(400).json({ error: "Give the date as YYYY-MM-DD" });
+
+  const current = settlementOf(invoice, await settlementFor(invoice.id));
+  if (money(cash + withheld) > current.outstanding) {
+    return res.status(400).json({
+      error:
+        current.outstanding <= 0
+          ? `${invoice.invoice_number} is already settled in full`
+          : `That settles ${money(cash + withheld).toLocaleString()}, but only ${current.outstanding.toLocaleString()} is outstanding on ${invoice.invoice_number}`,
+    });
+  }
+
+  const reference = String(req.body?.reference || "").trim() || null;
+  const ref2307 = String(req.body?.form2307_ref || "").trim() || null;
+  const note = String(req.body?.note || "").trim() || null;
+  const by = req.user.employee_id || null;
+
+  // Both halves in a single INSERT, which the database applies whole or not at
+  // all — no transaction to manage, and no way to bank the cash and lose the
+  // 2307 that explains why it is short.
+  const rows = [];
+  if (cash > 0) rows.push(["payment", cash, reference, note]);
+  if (withheld > 0) rows.push(["withholding", withheld, ref2307, `${rate}% withheld (BIR 2307)`]);
+  await db
+    .prepare(
+      `INSERT INTO invoice_receipts (invoice_id, kind, amount, received_on, reference, note, recorded_by) VALUES ` +
+        rows.map(() => "(?, ?, ?, ?, ?, ?, ?)").join(", ")
+    )
+    .run(...rows.flatMap(([kind, amount, ref, n]) => [invoice.id, kind, amount, receivedOn, ref, n, by]));
+
+  // Money arriving is proof the statement went out, so a draft or an approved
+  // one that is paid against moves to sent — or straight to paid if this
+  // covers it. The status follows the payments; nobody sets it by hand.
+  const after = settlementOf(invoice, await settlementFor(invoice.id));
+  const nextStatus = after.outstanding <= 0 ? "paid" : ["draft", "approved"].includes(invoice.status) ? "sent" : invoice.status;
+  if (nextStatus !== invoice.status) {
+    await db
+      .prepare("UPDATE invoices SET status = ?, paid_date = ?, status_changed_by = ?, status_changed_at = ? WHERE id = ?")
+      .run(nextStatus, nextStatus === "paid" ? receivedOn : invoice.paid_date, by, nowStamp(), invoice.id);
+  }
+
+  await logRequestEvent(req, "record_invoice_payment", {
+    entityType: "invoice",
+    entityId: invoice.id,
+    details: {
+      invoice_number: invoice.invoice_number,
+      cash,
+      withheld,
+      withholding_rate: withheld > 0 ? rate : 0,
+      received_on: receivedOn,
+      status: nextStatus,
+    },
+  });
+
+  const fresh = await db.prepare("SELECT id, amount FROM invoices WHERE id = ?").get(invoice.id);
+  res.status(201).json({ ...settlementOf(fresh, await settlementFor(invoice.id)), status: nextStatus });
+}));
+
 router.delete("/:id/receipts/:receiptId", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
   const row = await db
     .prepare("SELECT * FROM invoice_receipts WHERE id = ? AND invoice_id = ?")
@@ -588,6 +679,68 @@ router.delete("/:id/receipts/:receiptId", requireAuth, requireRole("admin"), asy
     entityType: "invoice",
     entityId: invoice.id,
     details: { invoice_number: invoice.invoice_number, kind: row.kind, amount: money(row.amount) },
+  });
+  res.json(settlementOf(invoice, await settlementFor(invoice.id)));
+}));
+
+// Correct the date a payment arrived — the one thing about a payment that is
+// most often entered wrong and least often wrong in amount.
+//
+// Statements marked paid before payments existed were backfilled with their
+// "paid" date, and several of those turned out to be the day somebody caught
+// up on the data entry rather than the day the money landed. Removing and
+// re-recording would fix the figure but leave the log saying a payment was
+// deleted and a new one made, which reads to an auditor like money moving.
+// This records it for what it is: one payment, same amount, date corrected,
+// with both dates kept in the log.
+//
+// Admin only, like removing one: it moves money between months on every
+// report that reads collections by date.
+router.patch("/:id/receipts/:receiptId", requireAuth, requireRole("admin"), asyncHandler(async (req, res) => {
+  const row = await db
+    .prepare("SELECT * FROM invoice_receipts WHERE id = ? AND invoice_id = ?")
+    .get(req.params.receiptId, req.params.id);
+  if (!row) return res.status(404).json({ error: "No such payment on this statement" });
+
+  const receivedOn = String(req.body?.received_on || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(receivedOn) || Number.isNaN(Date.parse(receivedOn))) {
+    return res.status(400).json({ error: "Give the date as YYYY-MM-DD" });
+  }
+  // Money cannot arrive before the statement asking for it existed, nor on a
+  // day that has not happened yet. Both are typing slips, and both would put
+  // the payment in the wrong month on every report.
+  const invoice = await db.prepare("SELECT * FROM invoices WHERE id = ?").get(req.params.id);
+  if (invoice.issue_date && receivedOn < invoice.issue_date) {
+    return res.status(400).json({ error: `That is before ${invoice.invoice_number} was issued (${invoice.issue_date})` });
+  }
+  if (receivedOn > new Date().toISOString().slice(0, 10)) {
+    return res.status(400).json({ error: "That date has not happened yet" });
+  }
+  if (receivedOn === row.received_on) return res.json(settlementOf(invoice, await settlementFor(invoice.id)));
+
+  await db.prepare("UPDATE invoice_receipts SET received_on = ? WHERE id = ?").run(receivedOn, row.id);
+
+  // A paid statement's paid date is the day it was finally settled, which is
+  // the latest of its payments — so correcting one of them can move it.
+  if (invoice.status === "paid") {
+    const latest = await db
+      .prepare("SELECT MAX(received_on) AS d FROM invoice_receipts WHERE invoice_id = ?")
+      .get(invoice.id);
+    if (latest?.d && latest.d !== invoice.paid_date) {
+      await db.prepare("UPDATE invoices SET paid_date = ? WHERE id = ?").run(latest.d, invoice.id);
+    }
+  }
+
+  await logRequestEvent(req, "correct_payment_date", {
+    entityType: "invoice",
+    entityId: invoice.id,
+    details: {
+      invoice_number: invoice.invoice_number,
+      kind: row.kind,
+      amount: money(row.amount),
+      from: row.received_on,
+      to: receivedOn,
+    },
   });
   res.json(settlementOf(invoice, await settlementFor(invoice.id)));
 }));
@@ -675,6 +828,17 @@ router.put("/:id", requireAuth, requireRole("admin", "hr"), asyncHandler(async (
   if (custError) return res.status(400).json({ error: custError });
   if (status && !["draft", "approved", "sent", "paid", "overdue", "cancelled"].includes(status)) {
     return res.status(400).json({ error: "Invalid status" });
+  }
+  // "Paid" is a fact about the payments recorded, not a choice. Picking it
+  // from a dropdown is how five statements came to claim their full amount as
+  // collected with nothing recorded behind them — including any tax the
+  // customer withheld. Leaving the status where it is stays allowed, so an
+  // edit to the notes on a paid statement still saves.
+  if (status === "paid" && existing.status !== "paid") {
+    return res.status(400).json({ error: "Record the payment instead — the statement becomes paid once payments cover it" });
+  }
+  if (existing.status === "paid" && status && status !== "paid") {
+    return res.status(400).json({ error: "This statement is paid. Remove a payment to reopen it" });
   }
 
   const { error: rateError, rate } = validateVatRate(vat_rate);

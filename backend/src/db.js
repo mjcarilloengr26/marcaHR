@@ -2005,7 +2005,31 @@ function runMigrations() {
       .then(() => ensureEmployeeStandingDeductions())
       .then(() => ensureUserTermsAcceptance())
       .then(() => ensureCustomerLinks())
-      .then(() => ensureLoginNotice());
+      .then(() => ensureLoginNotice())
+      .then(() => backfillPaidInvoiceReceipts());
+}
+
+// Statements marked paid before payments were recorded have no payments
+// behind them, so once the dashboards read collections from payments they
+// would drop to nothing. Each gets one payment for its full amount on the day
+// it was marked paid — which is exactly what "paid" asserted at the time — and
+// a note saying so, so anybody who knows tax was withheld can see why the
+// figure is round and correct it.
+//
+// Only touches paid statements with no payments at all, so it runs to nothing
+// after the first time and never doubles anything up.
+async function backfillPaidInvoiceReceipts() {
+  const { rowCount } = await pool.query(
+    `INSERT INTO invoice_receipts (invoice_id, kind, amount, received_on, reference, note)
+     SELECT i.id, 'payment', i.amount,
+            COALESCE(NULLIF(i.paid_date, ''), SUBSTRING(i.status_changed_at FROM 1 FOR 10), i.issue_date),
+            NULL,
+            'Recorded from the old "paid" status — the full amount was assumed. If tax was withheld, remove this and record the payment again with the 2307.'
+     FROM invoices i
+     WHERE i.status = 'paid' AND i.amount > 0
+       AND NOT EXISTS (SELECT 1 FROM invoice_receipts r WHERE r.invoice_id = i.id)`
+  );
+  if (rowCount > 0) console.log(`Recorded ${rowCount} payment(s) for statements marked paid before payments were tracked`);
 }
 
 module.exports = db;
