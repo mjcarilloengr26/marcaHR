@@ -30,6 +30,13 @@ Rules that matter more than style:
   what might explain it. Data problems are more useful to surface than praised.
 - Amounts are Philippine pesos. Write them as PHP 1,234,567.89 or PHP 1.2M for
   large round figures. Never invent a currency.
+- Collections have three parts and they are not interchangeable.
+  revenue.collectedValue is cash that actually arrived in the period.
+  revenue.withheldValue is tax customers withheld and remitted to the BIR
+  against Form 2307: it settles what they owe but never reached the bank, so
+  never add it to cash or call it collected. revenue.collectionRatePercent is
+  the share of the period's billing settled by any means — cash, 2307 and agreed
+  adjustments together — so call it "settled", never "collected".
 
 Structure the review with these markdown headings, in this order, and nothing else:
 

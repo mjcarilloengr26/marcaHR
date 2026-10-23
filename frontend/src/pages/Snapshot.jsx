@@ -275,9 +275,13 @@ export default function Snapshot() {
         <MatrixCol
           title="Billing"
           note={
+            // "Settled", not "collected": the share counts tax the customer
+            // withheld against a 2307 and any agreed adjustment, neither of
+            // which is cash. "Collected" would claim money that never reached
+            // the bank — the Collected row below is the cash alone.
             data.moneyIn.collectionRatePercent === null
               ? "No invoices issued, so no collection rate"
-              : `${data.moneyIn.collectionRatePercent}% of what was invoiced has been collected`
+              : `${data.moneyIn.collectionRatePercent}% of what was invoiced has been settled`
           }
           rows={[
             { label: "Invoiced", value: money(data.moneyIn.invoiced) },
