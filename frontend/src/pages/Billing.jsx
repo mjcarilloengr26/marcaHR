@@ -37,6 +37,10 @@ export default function Billing() {
   // what they settled it with, and editing one while reading the other is how
   // an amount gets "corrected" to match a payment.
   const [receiptsFor, setReceiptsFor] = useState(null);
+  // Which order's "billed so far" is being looked into. The total is never
+  // edited directly — it is the statements against the order added up, so a
+  // wrong total means a wrong statement, and that is what this opens.
+  const [breakdownFor, setBreakdownFor] = useState(null);
   const [linesBusy, setLinesBusy] = useState(false);
   const [linesError, setLinesError] = useState("");
   const [notice, setNotice] = useState("");
@@ -277,9 +281,16 @@ export default function Billing() {
   // exists — otherwise a partially-billed order (billed for less than its full
   // amount) would vanish from this list entirely, leaving its remaining balance
   // untracked and unbillable.
+  //
+  // Drafts count toward the total, because they reserve the amount: without
+  // that, two drafts could each be raised for the whole order. But a draft has
+  // not been sent to anybody, so the total is split in what it shows — on
+  // ORD-OPP-66, ₱16.8M of a ₱16.9M "billed so far" was drafts nobody had sent.
   const billedByOrder = invoices.reduce((acc, inv) => {
     if (inv.status === "cancelled" || !inv.order_id) return acc;
-    acc[inv.order_id] = (acc[inv.order_id] || 0) + Number(inv.amount || 0);
+    const o = acc[inv.order_id] || (acc[inv.order_id] = { total: 0, drafts: 0 });
+    o.total += Number(inv.amount || 0);
+    if (inv.status === "draft") o.drafts += Number(inv.amount || 0);
     return acc;
   }, {});
   // A cancelled order is not work waiting to be billed, so it has no place on a
@@ -289,7 +300,10 @@ export default function Billing() {
   // against it.
   const unbilledOrders = orders
     .filter((o) => o.status !== "cancelled")
-    .map((o) => ({ ...o, billed: billedByOrder[o.id] || 0, remaining: Math.max(o.amount - (billedByOrder[o.id] || 0), 0) }))
+    .map((o) => {
+      const b = billedByOrder[o.id] || { total: 0, drafts: 0 };
+      return { ...o, billed: b.total, drafts: b.drafts, remaining: Math.max(o.amount - b.total, 0) };
+    })
     .filter((o) => o.remaining > 0);
 
   // The cap for whatever order is currently selected in the form — mirrors the
@@ -352,7 +366,31 @@ export default function Billing() {
                   <td>{o.order_number}</td>
                   <td>{o.customer_name}</td>
                   <td>{money(o.amount)}</td>
-                  <td>{o.billed > 0 ? money(o.billed) : "—"}</td>
+                  <td>
+                    {o.billed > 0 ? (
+                      <>
+                        {money(o.billed)}
+                        <button
+                          type="button"
+                          className="link-button"
+                          style={{ marginLeft: 8, fontSize: 12 }}
+                          onClick={() => setBreakdownFor(o)}
+                          title="See and correct the statements that make up this figure"
+                        >
+                          Edit
+                        </button>
+                        {o.drafts > 0 && (
+                          <div className="subtitle" style={{ fontSize: 11, margin: 0 }}>
+                            {o.drafts >= o.billed
+                              ? "all in drafts — none sent yet"
+                              : `${money(o.billed - o.drafts)} sent · ${money(o.drafts)} in drafts`}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td>{money(o.remaining)}</td>
                   <td>
                     <button className="btn btn-sm" onClick={() => openBillOrder(o)}>
@@ -589,6 +627,99 @@ export default function Billing() {
           </form>
         </div>
       )}
+
+      {breakdownFor && (() => {
+        const order = breakdownFor;
+        const rows = invoices
+          .filter((inv) => inv.order_id === order.id)
+          .sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
+        const live = rows.filter((r) => r.status !== "cancelled");
+        const total = live.reduce((n, r) => n + Number(r.amount || 0), 0);
+        // Two live statements for the same amount on one order is the shape a
+        // double-raised bill takes — ORD-OPP-66 had two drafts of ₱4,791,534.88
+        // made two minutes apart. Flagged, never removed on its own: an
+        // instalment plan can legitimately bill equal amounts.
+        const sameAmount = (r) =>
+          r.status !== "cancelled" && live.filter((x) => Number(x.amount) === Number(r.amount)).length > 1;
+        const cancelDraft = async (r) => {
+          const ok = confirm(
+            `Cancel draft ${r.invoice_number} (${money(r.amount)})?\n\n` +
+              `It was never sent, so nobody is affected. Its amount goes back to "remaining" on ${order.order_number}.`
+          );
+          if (ok) await quickSetStatus(r.id, "cancelled");
+        };
+        return (
+          <div className="modal-backdrop" onClick={() => setBreakdownFor(null)}>
+            <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+              <h2>Billed so far — {order.order_number}</h2>
+              <p className="subtitle" style={{ marginTop: -8 }}>
+                {order.customer_name} · This figure is not stored anywhere — it is the statements below added up. To
+                correct it, correct the statement that is wrong: cancel a draft that should not exist, or edit its
+                amount or lines. Statements already sent are changed from the main list, not from here.
+              </p>
+              <div className="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Statement #</th>
+                      <th>Status</th>
+                      <th>Amount</th>
+                      <th>Raised</th>
+                      <th>Created</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.id} style={r.status === "cancelled" ? { opacity: 0.5 } : undefined}>
+                        <td className="col-nowrap">
+                          {r.invoice_number}
+                          {sameAmount(r) && (
+                            <div className="subtitle" style={{ fontSize: 11, margin: 0, color: "var(--warning)" }}>
+                              same amount as another — possible duplicate
+                            </div>
+                          )}
+                        </td>
+                        <td className="col-nowrap">{r.status === "cancelled" ? "cancelled — not counted" : r.status}</td>
+                        <td className="col-nowrap">{money(r.amount)}</td>
+                        <td className="col-nowrap">{r.auto_source || "by hand"}</td>
+                        <td className="col-nowrap">{String(r.created_at || "").slice(0, 10)}</td>
+                        <td className="col-nowrap">
+                          {r.status === "draft" && (
+                            <>
+                              <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setBreakdownFor(null); openEdit(r); }}>
+                                Edit
+                              </button>{" "}
+                              <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setBreakdownFor(null); openLines(r); }}>
+                                Lines
+                              </button>{" "}
+                              <button type="button" className="btn btn-sm btn-danger" onClick={() => cancelDraft(r)}>
+                                Cancel draft
+                              </button>
+                            </>
+                          )}
+                          {!["draft", "cancelled"].includes(r.status) && (
+                            <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setBreakdownFor(null); setReceiptsFor(r); }}>
+                              Payments
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p style={{ margin: "12px 0 0" }}>
+                Order {money(order.amount)} · billed so far <strong>{money(total)}</strong> · remaining{" "}
+                <strong>{money(Math.max(order.amount - total, 0))}</strong>
+              </p>
+              <div className="modal-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setBreakdownFor(null)}>Close</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {receiptsFor && (
         <div className="modal-backdrop" onClick={() => setReceiptsFor(null)}>
