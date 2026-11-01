@@ -31,6 +31,7 @@ function encodeAttachments(attachments) {
 }
 
 async function sendOne(recipient, subject, text, html, attachments, replyTo) {
+  let sent = false;
   const { RESEND_API_KEY, RESEND_FROM } = process.env;
   try {
     const res = await fetch(RESEND_API_URL, {
@@ -61,6 +62,7 @@ async function sendOne(recipient, subject, text, html, attachments, replyTo) {
     }
 
     console.log(`[mailer] Sent "${subject}" to ${recipient}`);
+    sent = true;
     await logEvent({
       action: "email_sent",
       entityType: "email",
@@ -74,16 +76,22 @@ async function sendOne(recipient, subject, text, html, attachments, replyTo) {
     console.error(`[mailer] Failed to send "${subject}" to ${recipient}:`, err.message);
     await logEvent({ action: "email_failed", entityType: "email", details: { to: recipient, subject, error: err.message } });
   }
+  return sent;
 }
 
-// Fire-and-forget: never throws, so a broken/missing email config can't break the request that
+// Never throws, so a broken/missing email config can't break the request that
 // triggered it. Sends to each recipient in its own API call — a broadcast (e.g. every HR/admin
 // user) must not let one bad/blocklisted address (Resend rejects reserved domains like
 // example.com) sink delivery to everyone else, and it keeps recipients from seeing each other's
 // addresses in a shared To: header.
+//
+// Returns what actually happened — { sent, failed, skipped } — for the callers
+// that report it. Before, a button could only assume success: the business
+// review's "send a test email" said "sent" even when Resend had refused it.
 async function sendMail({ to, subject, text, html, attachments, replyTo }) {
   const recipients = Array.isArray(to) ? to.filter(Boolean) : [to].filter(Boolean);
-  if (recipients.length === 0) return;
+  const none = { sent: [], failed: [], skipped: false };
+  if (recipients.length === 0) return none;
 
   let encoded = null;
   try {
@@ -94,7 +102,7 @@ async function sendMail({ to, subject, text, html, attachments, replyTo }) {
     // than not sending at all.
     console.error(`[mailer] Not sending "${subject}": ${err.message}`);
     await logEvent({ action: "email_failed", entityType: "email", details: { to: recipients.join(", "), subject, error: err.message } });
-    return;
+    return { ...none, failed: recipients };
   }
 
   const { RESEND_API_KEY } = process.env;
@@ -114,10 +122,15 @@ async function sendMail({ to, subject, text, html, attachments, replyTo }) {
         ...(encoded ? { attachments: encoded.map((a) => a.filename).join(", ") } : {}),
       },
     });
-    return;
+    return { ...none, skipped: true };
   }
 
-  await Promise.all(recipients.map((r) => sendOne(r, subject, text, html, encoded, replyTo)));
+  const ok = await Promise.all(recipients.map((r) => sendOne(r, subject, text, html, encoded, replyTo)));
+  return {
+    sent: recipients.filter((_, i) => ok[i]),
+    failed: recipients.filter((_, i) => !ok[i]),
+    skipped: false,
+  };
 }
 
 module.exports = { sendMail };

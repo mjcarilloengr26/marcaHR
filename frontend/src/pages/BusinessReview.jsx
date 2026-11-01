@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 
@@ -106,15 +106,29 @@ export default function BusinessReview() {
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [printing, setPrinting] = useState(false);
+  const [emailing, setEmailing] = useState(false);
+  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
 
+  // Only the answer for the period still selected is shown. Changing the
+  // month quickly sends one request per choice, and whichever came back last
+  // used to win — so the page could show September's figures under "October",
+  // and the e-mail button would have named one month while sending another.
+  const latest = useRef(0);
   const load = () => {
+    const ticket = ++latest.current;
     setLoading(true);
     return api
       .get(`/business-review?period_type=${periodType}&year=${year}&index=${index}`)
-      .then(setReview)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .then((r) => {
+        if (ticket === latest.current) setReview(r);
+      })
+      .catch((err) => {
+        if (ticket === latest.current) setError(err.message);
+      })
+      .finally(() => {
+        if (ticket === latest.current) setLoading(false);
+      });
   };
 
   const loadHistory = () =>
@@ -136,9 +150,33 @@ export default function BusinessReview() {
     else setIndex(0);
   };
 
+  // Sends the review on screen, as stored, to the admins. For a month whose
+  // scheduled e-mail never went — or simply to send it again.
+  const emailThis = async () => {
+    const label = review?.period?.label || "this review";
+    if (!confirm(`E-mail the ${label} review to the admins now?`)) return;
+    setEmailing(true);
+    setError("");
+    setNotice("");
+    try {
+      // The period of the review on screen, not of the dropdowns: if the two
+      // ever disagree, what gets sent must be what the person is looking at.
+      const p = review.period;
+      const r = await api.post("/business-review/email", { period_type: p.type, year: p.year, index: p.index });
+      setNotice(
+        `${r.period} review sent to ${r.sent.join(", ")}` + (r.failed?.length ? ` — failed for ${r.failed.join(", ")}` : ".")
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setEmailing(false);
+    }
+  };
+
   const generate = async () => {
     setGenerating(true);
     setError("");
+    setNotice("");
     try {
       const written = await api.post("/business-review/generate", {
         period_type: periodType,
@@ -209,6 +247,11 @@ export default function BusinessReview() {
           <button className="btn btn-secondary" onClick={openPrintable} disabled={loading || printing}>
             {printing ? "Preparing…" : "Print report"}
           </button>
+          {review?.id && (
+            <button className="btn btn-secondary" onClick={emailThis} disabled={emailing || generating || loading}>
+              {emailing ? "Sending…" : "E-mail this review"}
+            </button>
+          )}
           <button className="btn" onClick={generate} disabled={generating || loading}>
             {generating ? "Writing… (about a minute)" : review?.narrative ? "Regenerate" : "Generate review"}
           </button>
@@ -216,6 +259,7 @@ export default function BusinessReview() {
       </div>
 
       {error && <div className="error-banner">{error}</div>}
+      {notice && <div className="success-banner">{notice}</div>}
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="form-inline">

@@ -151,7 +151,7 @@ router.post(
       return res.status(400).json({ error: "No admin user has an email address on record." });
     }
 
-    await emailReview({
+    const mail = await emailReview({
       factSheet: JSON.parse(row.fact_sheet),
       narrative: row.narrative,
       narrativeError: row.narrative_error,
@@ -159,10 +159,53 @@ router.post(
 
     await logRequestEvent(req, "review_schedule_test_email", {
       entityType: "app_settings",
-      details: { period: row.period_label, recipients: recipients.length },
+      details: { period: row.period_label, recipients: recipients.length, sent: mail.sent.length, failed: mail.failed.length },
     });
 
-    res.json({ sent: recipients.map((r) => r.email), period: row.period_label });
+    // It used to answer "sent" to every admin whatever happened, because the
+    // mailer reported nothing back.
+    if (mail.skipped) return res.status(400).json({ error: "E-mail is not configured on the server (RESEND_API_KEY)." });
+    if (mail.sent.length === 0) return res.status(502).json({ error: `Sending failed for ${mail.failed.join(", ")}.` });
+    res.json({ sent: mail.sent, failed: mail.failed, period: row.period_label });
+  })
+);
+
+// E-mail one particular review — the one on screen — to the admins.
+//
+// The test e-mail above always sends whichever review was stored last, so a
+// month that missed its e-mail could not be re-sent once a later one existed.
+// September 2026 was exactly that. This sends the period asked for, as stored;
+// it does not regenerate it, so what arrives is what the page is showing.
+router.post(
+  "/email",
+  ...adminOnly,
+  asyncHandler(async (req, res) => {
+    const { periodType, year, index } = parse(req.body || {});
+    const row = await db
+      .prepare(
+        `SELECT period_label, fact_sheet, narrative, narrative_error FROM business_reviews
+         WHERE period_type = ? AND period_year = ? AND period_index = ?`
+      )
+      .get(periodType, year, index);
+    if (!row) {
+      return res.status(400).json({ error: "This period has no review yet. Generate it first, then e-mail it." });
+    }
+
+    const mail = await emailReview({
+      factSheet: JSON.parse(row.fact_sheet),
+      narrative: row.narrative,
+      narrativeError: row.narrative_error,
+    });
+
+    await logRequestEvent(req, "business_review_emailed", {
+      entityType: "business_review",
+      details: { period: row.period_label, sent: mail.sent.length, failed: mail.failed.length, skipped: Boolean(mail.skipped) },
+    });
+
+    if (mail.noRecipients) return res.status(400).json({ error: "No admin user has an e-mail address on record." });
+    if (mail.skipped) return res.status(400).json({ error: "E-mail is not configured on the server (RESEND_API_KEY)." });
+    if (mail.sent.length === 0) return res.status(502).json({ error: `Sending failed for ${mail.failed.join(", ")}.` });
+    res.json({ period: row.period_label, sent: mail.sent, failed: mail.failed });
   })
 );
 
