@@ -2029,3 +2029,20 @@ body.snapshot-tv .content {
 .trend-table td.num, .trend-table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .trend-up { color: var(--danger); }
 .trend-down { color: var(--success); }
+/* On a phone the growth table keeps what the comparison needs — category,
+   latest complete period, change — and drops the rest; the chart and its
+   tooltips still carry every figure. */
+@media (max-width: 600px) {
+  .trend-table .hide-sm { display: none; }
+  /* Every other card table keeps a 560px floor and scrolls sideways; this
+     one has been cut down to fit, so it should not. */
+  .card table.trend-table { min-width: 0; }
+  .trend-table td, .trend-table th { padding-left: 6px; padding-right: 6px; }
+  .trend-table td, .trend-table th,
+  .trend-table td.num, .trend-table th.num { white-space: normal; }
+}
+/* A tablet, or a laptop with the sidebar open, fits everything but the
+   window total, which the chart already shows. */
+@media (max-width: 1100px) {
+  .trend-table .hide-md { display: none; }
+}

@@ -271,7 +271,9 @@ export default function ExpenseTrendChart() {
                         height={innerH + PAD.bottom}
                         fill="transparent"
                         onMouseEnter={() => setHover(b)}
-                        onClick={() => setHover(hover === b ? null : b)}
+                        // A tap on a phone arrives as hover then click; toggling here
+                        // would open and close it in the same touch.
+                        onClick={() => setHover(b)}
                       />
                     </g>
                   );
@@ -290,11 +292,11 @@ export default function ExpenseTrendChart() {
               <thead>
                 <tr>
                   <th>Category</th>
-                  <th className="num">{buckets[prev].label}</th>
+                  <th className="num hide-sm">{buckets[prev].label}</th>
                   <th className="num">{buckets[last].label}</th>
                   <th className="num">Change</th>
-                  <th className="num">{buckets[current].label} so far</th>
-                  <th className="num">{buckets.length} {{ month: "months", quarter: "quarters", year: "years" }[data.period]} total</th>
+                  <th className="num hide-sm">{buckets[current].label} so far</th>
+                  <th className="num hide-sm hide-md">{buckets.length} {{ month: "months", quarter: "quarters", year: "years" }[data.period]} total</th>
                 </tr>
               </thead>
               <tbody>
@@ -313,20 +315,20 @@ export default function ExpenseTrendChart() {
                         </span>
                       </span>
                     </td>
-                    <td className="num">{money(s.values[prev])}</td>
+                    <td className="num hide-sm">{money(s.values[prev])}</td>
                     <td className="num">{money(s.values[last])}</td>
                     <td className="num">{changeCell(change(s))}</td>
-                    <td className="num">{money(s.values[current])}</td>
-                    <td className="num">{money(s.total)}</td>
+                    <td className="num hide-sm">{money(s.values[current])}</td>
+                    <td className="num hide-sm hide-md">{money(s.total)}</td>
                   </tr>
                 ))}
                 <tr style={{ fontWeight: 600 }}>
                   <td>Total</td>
-                  <td className="num">{money(totalRow.values[prev])}</td>
+                  <td className="num hide-sm">{money(totalRow.values[prev])}</td>
                   <td className="num">{money(totalRow.values[last])}</td>
                   <td className="num">{changeCell(change(totalRow))}</td>
-                  <td className="num">{money(totalRow.values[current])}</td>
-                  <td className="num">{money(totalRow.values.reduce((a, v) => a + v, 0))}</td>
+                  <td className="num hide-sm">{money(totalRow.values[current])}</td>
+                  <td className="num hide-sm hide-md">{money(totalRow.values.reduce((a, v) => a + v, 0))}</td>
                 </tr>
               </tbody>
             </table>
