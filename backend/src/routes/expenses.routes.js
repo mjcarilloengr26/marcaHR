@@ -911,6 +911,65 @@ router.put(
   })
 );
 
+// Link a filed report to the cash advance it was spent from, change which
+// advance it draws on, or unlink it. A report can only name its advance when
+// it is created, so one filed with "None" while its owner held an open advance
+// had no way back: the spending counted as a reimbursement and the advance sat
+// open with nothing against it. That is an administrator's correction, so it
+// is refused to everyone else and written to the audit log with both sides.
+//
+// Only open advances take part, on either end. A settled advance's balance
+// was signed off by somebody; moving a report onto or off it would quietly
+// rewrite a closed account.
+router.put(
+  "/:id/cash-advance",
+  requireAuth,
+  requireRole("admin"),
+  asyncHandler(async (req, res) => {
+    const report = await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(req.params.id);
+    if (!report) return res.status(404).json({ error: "Expense report not found" });
+    if (report.status === "rejected") {
+      return res.status(400).json({ error: "A rejected report does not count against any advance. Reopen it first." });
+    }
+
+    const raw = (req.body || {}).cash_advance_id;
+    const nextId = raw === null || raw === "" || raw === undefined ? null : Number(raw);
+    if (nextId !== null && !Number.isInteger(nextId)) return res.status(400).json({ error: "cash_advance_id must be an advance id or null" });
+    if ((report.cash_advance_id ?? null) === nextId) {
+      return res.json(await withTotals(report));
+    }
+
+    let from = null;
+    if (report.cash_advance_id) {
+      from = await db.prepare("SELECT id, reference, status FROM cash_advances WHERE id = ?").get(report.cash_advance_id);
+      if (from && from.status !== "open") {
+        return res.status(400).json({
+          error: `This report is part of ${from.reference}, which is ${from.status}. A closed advance's balance cannot be changed.`,
+        });
+      }
+    }
+    let to = null;
+    if (nextId !== null) {
+      to = await db.prepare("SELECT id, reference, status, employee_id FROM cash_advances WHERE id = ?").get(nextId);
+      if (!to) return res.status(400).json({ error: "That cash advance does not exist" });
+      if (to.employee_id !== report.employee_id) {
+        return res.status(400).json({ error: "That advance was released to somebody else" });
+      }
+      if (to.status !== "open") {
+        return res.status(400).json({ error: `${to.reference} is ${to.status} and cannot take liquidation` });
+      }
+    }
+
+    await db.prepare("UPDATE expense_reports SET cash_advance_id = ? WHERE id = ?").run(nextId, report.id);
+    logRequestEvent(req, "link_cash_advance", {
+      entityType: "expense_report",
+      entityId: report.id,
+      details: { from: from?.reference ?? null, to: to?.reference ?? null },
+    });
+    res.json(await withTotals(await db.prepare("SELECT * FROM expense_reports WHERE id = ?").get(report.id)));
+  })
+);
+
 // Deleting destroys the trail, so a whole report can only be removed by an
 // administrator. Staff still edit and remove lines on their own drafts —
 // that is composing a claim, not erasing one that was filed.

@@ -1143,6 +1143,42 @@ function ReportDetail({ id, isHr, flaggedItems = [], options = { types: [], titl
   }, [id]);
 
   const isOwnerEditable = report && report.status === "draft";
+
+  // Admin correction: link a filed report to the advance it was spent from.
+  // Reports name their advance only when they are created, so one filed with
+  // "None" while its owner held an open advance otherwise stays wrong for good.
+  const isAdmin = user?.role === "admin";
+  const [linking, setLinking] = useState(false);
+  const [linkChoice, setLinkChoice] = useState("");
+  const [linkAdvances, setLinkAdvances] = useState(null);
+  const startLinking = () => {
+    setLinkChoice(report.cash_advance_id ? String(report.cash_advance_id) : "");
+    setLinking(true);
+    setLinkAdvances(null);
+    api
+      .get(`/cash-advances?status=open&employee_id=${report.employee_id}`)
+      .then(setLinkAdvances)
+      .catch((err) => {
+        setError(err.message);
+        setLinkAdvances([]);
+      });
+  };
+  const saveLink = async () => {
+    setSaving(true);
+    try {
+      await api.put(`/expenses/${id}/cash-advance`, { cash_advance_id: linkChoice ? Number(linkChoice) : null });
+      // Refreshed before the editor closes, so the dialog never shows the
+      // old advance for a moment after saving.
+      await load();
+      setLinking(false);
+      setError("");
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
   const canEdit = report && (isHr || isOwnerEditable);
 
   const handleReceiptPick = async (e) => {
@@ -1337,7 +1373,27 @@ function ReportDetail({ id, isHr, flaggedItems = [], options = { types: [], titl
             {error && <div className="error-banner">{error}</div>}
 
             <div className="grid grid-2" style={{ marginBottom: 16 }}>
-              <div><strong>Cash advance</strong><div>{money(report.cash_advance_amount)}</div></div>
+              <div>
+                <strong>Cash advance</strong>
+                <div>
+                  {report.advance_reference ? (
+                    <>
+                      {money(report.advance_amount)}
+                      <span className="subtitle" style={{ margin: 0, fontSize: 12 }}> · {report.advance_reference}</span>
+                    </>
+                  ) : (
+                    <>
+                      {money(report.cash_advance_amount)}
+                      <span className="subtitle" style={{ margin: 0, fontSize: 12 }}> · not linked to an advance</span>
+                    </>
+                  )}
+                </div>
+                {isAdmin && report.status !== "rejected" && !linking && (
+                  <button type="button" className="link-button" style={{ fontSize: 13 }} onClick={startLinking}>
+                    {report.advance_reference ? "Change cash advance" : "Link to cash advance"}
+                  </button>
+                )}
+              </div>
               <div><strong>Total expenses</strong><div>{money(report.total_expenses)}</div></div>
               <div><strong>Expenses type</strong><div>{report.expense_type || "—"}</div></div>
               <div><strong>Cost center</strong><div>{report.cost_center || "—"}</div></div>
@@ -1349,6 +1405,45 @@ function ReportDetail({ id, isHr, flaggedItems = [], options = { types: [], titl
               </div>
               {report.notes && <div><strong>Notes</strong><div>{report.notes}</div></div>}
             </div>
+
+            {linking && (
+              <div className="card" style={{ marginBottom: 16, padding: 12 }}>
+                <div className="form-row" style={{ marginBottom: 8 }}>
+                  <label>Cash advance this report liquidates</label>
+                  {linkAdvances === null ? (
+                    <div className="subtitle" style={{ margin: 0 }}>Loading open advances…</div>
+                  ) : (
+                    <select value={linkChoice} onChange={(e) => setLinkChoice(e.target.value)} autoFocus>
+                      <option value="">None — a reimbursement, paid out of pocket</option>
+                      {linkAdvances.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.reference} · released {a.date_released}
+                          {a.purpose ? ` · ${a.purpose}` : ""} · {money(a.dueToCompany)} left
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <div className="subtitle" style={{ fontSize: 12, marginTop: 4 }}>
+                    {linkAdvances && linkAdvances.length === 0
+                      ? `${report.employee?.first_name || "This employee"} has no open advance to link to.`
+                      : `Only ${report.employee?.first_name || "this employee"}'s open advances are listed. The change is recorded in the audit log.`}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLinking(false)} disabled={saving}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={saveLink}
+                    disabled={saving || linkAdvances === null || linkChoice === (report.cash_advance_id ? String(report.cash_advance_id) : "")}
+                  >
+                    {saving ? "Saving…" : "Save"}
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Opened from the duplicate check. Says so, because arriving at a
                 report with two of its eight lines shaded and no explanation is
