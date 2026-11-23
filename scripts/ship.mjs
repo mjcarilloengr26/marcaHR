@@ -18,7 +18,7 @@
 // so "deployed" means the new commit is actually answering requests, not that a
 // build was accepted.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -125,10 +125,22 @@ if (doFrontend) {
   // the frontend calls routes the backend has to already be serving. Shipping
   // them the other way round breaks production for the length of the build.
   const frontend = join(ROOT, "frontend");
-  run("npx", ["vercel", "build", "--prod", "--yes"], {
-    cwd: frontend,
-    env: { ...process.env, VITE_API_URL: API },
-  });
+  // Built with Vite here and handed to Vercel as finished files, rather than
+  // through `vercel build`. Newer Vercel CLIs install their builders with
+  // symlinks, which Windows refuses without Developer Mode (EPERM), and this
+  // is a static site: the builder only ever ran `vite build` and copied dist.
+  run("npm", ["run", "build"], { cwd: frontend, env: { ...process.env, VITE_API_URL: API } });
+  const output = join(frontend, ".vercel", "output");
+  rmSync(output, { recursive: true, force: true });
+  mkdirSync(output, { recursive: true });
+  cpSync(join(frontend, "dist"), join(output, "static"), { recursive: true });
+  // Vercel's Build Output API. The routes are vercel.json's rewrite in this
+  // format: real files first, then every other path to the app, so a refresh
+  // on /billing loads the page instead of a 404.
+  writeFileSync(
+    join(output, "config.json"),
+    JSON.stringify({ version: 3, routes: [{ handle: "filesystem" }, { src: "/(.*)", dest: "/index.html" }] }, null, 2)
+  );
   run("npx", ["vercel", "deploy", "--prebuilt", "--prod", "--yes"], { cwd: frontend });
   say(`✓ frontend deployed — https://marca-group.online`);
 }
