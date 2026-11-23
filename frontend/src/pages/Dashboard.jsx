@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { useAppSettings } from "../context/AppSettingsContext";
 import { useAuth } from "../context/AuthContext";
 import Funnel from "../components/Funnel";
+import ExpenseTrendChart from "../components/ExpenseTrendChart";
 
 
 export default function Dashboard() {
@@ -94,6 +95,8 @@ export default function Dashboard() {
             branchCount={stats.expenseFunnel?.rejected}
             branchUnit="report"
           />
+
+          <ExpenseTrendChart />
 
           <div className="card" style={{ marginTop: 16 }}>
             <h2>Expense Summary</h2>

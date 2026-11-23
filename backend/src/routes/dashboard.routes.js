@@ -1,8 +1,9 @@
 const express = require("express");
 const db = require("../db");
-const { requireAuth } = require("../middleware/auth");
+const { requireAuth, requireRole } = require("../middleware/auth");
 const asyncHandler = require("../middleware/asyncHandler");
 const { getExpenseSummary } = require("../services/expenseSummary");
+const { getExpenseTrend } = require("../services/expenseTrend");
 
 const router = express.Router();
 
@@ -100,6 +101,19 @@ router.get(
       expenseFunnel,
       expenseSummary,
     });
+  })
+);
+
+// Spend by category per month, quarter or year, for the trend chart. Loaded
+// on its own rather than inside /stats so switching the period redraws one
+// chart without refetching the whole dashboard, and so the stats the page
+// opens with do not wait on it.
+router.get(
+  "/expense-trend",
+  requireAuth,
+  requireRole("admin", "hr"),
+  asyncHandler(async (req, res) => {
+    res.json(await getExpenseTrend(String(req.query.period || "month")));
   })
 );
 

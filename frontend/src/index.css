@@ -31,11 +31,31 @@
   --error-banner-text: #8a2323;
   --warning-banner-bg: #fdf1d8;
   --warning-banner-text: #7a5405;
+  /* Categorical chart hues, in fixed order (slot 1 is always the biggest
+     category). Checked for colour-blind separation against these surfaces;
+     a few sit under 3:1 on white, which is why every chart using them also
+     has a table. --series-rest is the neutral for "everything else". */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #6250d6;
+  --series-rest: #a3a39e;
   color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 :root[data-theme="dark"] {
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #0ca30c;
+  --series-7: #9085e9;
+  --series-rest: #6b6b66;
   --bg: #0c0e13;
   --surface: #14171f;
   --border: #262b38;
@@ -1984,3 +2004,28 @@ body.snapshot-tv .content {
   text-underline-offset: 2px;
 }
 .link-button:hover { color: var(--primary-dark); }
+
+/* Expense trend chart (Dashboard). */
+.trend-periods { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.trend-periods button {
+  background: transparent; border: 0; padding: 6px 14px; font-size: 13px; cursor: pointer;
+  color: var(--text-muted); border-right: 1px solid var(--border);
+}
+.trend-periods button:last-child { border-right: 0; }
+.trend-periods button[aria-pressed="true"] { background: var(--primary); color: #fff; font-weight: 600; }
+.trend-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 0 6px; font-size: 13px; }
+.trend-legend button {
+  display: inline-flex; align-items: center; gap: 6px; background: none; border: 0; padding: 2px 0;
+  cursor: pointer; color: var(--text); font-size: 13px;
+}
+.trend-legend button[data-dim="true"] { opacity: 0.4; }
+.trend-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+.trend-tip {
+  position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: var(--shadow-md); padding: 8px 10px; font-size: 12px; min-width: 180px; z-index: 5;
+}
+.trend-tip-row { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+.trend-tip-row span:last-child { font-variant-numeric: tabular-nums; }
+.trend-table td.num, .trend-table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.trend-up { color: var(--danger); }
+.trend-down { color: var(--success); }
